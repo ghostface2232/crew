@@ -8,9 +8,28 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { attached, untrackedPaths, changesSince, cloneDirectory, cloneRefused, cloneTree, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, NO_HOOKS, NO_SUBMODULES, projectRoot, removeDirectory, repoRoot, removeEmptyLeftover, removeWorktree, reviewDiff, worktreeSlot } from '../plugin/bridge/git.ts';
+import { attached, untrackedPaths, changesSince, cloneDirectory, cloneRefused, cloneTree, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, NO_HOOKS, NO_SUBMODULES, projectRoot, removeDirectory, repoRoot, removeEmptyLeftover, removeWorktree, reviewDiff, worktreeIncludeHint, worktreeSlot } from '../plugin/bridge/git.ts';
 import type { Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { buildPrompt } from '../plugin/bridge/prompts.ts';
+
+test('preflight names only existing ignored root paths and remembers the hint for each project', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-preflight-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const repo = path.join(home, 'repo');
+  fs.mkdirSync(repo);
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  fs.writeFileSync(path.join(repo, '.gitignore'), '.env\nnode_modules/\nvenv/\n');
+  fs.mkdirSync(path.join(repo, '.venv'));
+  fs.mkdirSync(path.join(repo, 'node_modules'));
+  fs.writeFileSync(path.join(repo, '.env'), '');
+  fs.writeFileSync(path.join(repo, '.worktreeinclude'), '');
+  assert.equal(await worktreeIncludeHint(repo, repo, home), null);
+  fs.unlinkSync(path.join(repo, '.worktreeinclude'));
+  const hints = (await Promise.all([1, 2].map(() => worktreeIncludeHint(repo, repo, home)))).filter(Boolean);
+  assert.deepEqual(hints, ['Git ignores node_modules, .env. You can list them in .worktreeinclude if this job needs them.']);
+  assert.equal(await worktreeIncludeHint(repo, path.join(repo, '.'), home), null);
+  assert.deepEqual(await worktreeIncludeHint(repo, path.join(repo, 'another-project'), home), hints[0]);
+});
 
 for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL']) {
   test(`included directories are shared read-only when cloning returns ${code}`, async (t) => {

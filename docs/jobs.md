@@ -29,6 +29,8 @@ Lead tools start and manage work in worker sessions. Writable jobs use isolated 
 
 ## Worktree includes and shared links
 
+When a writable worktree has no `.worktreeinclude` in its source checkout, Crew checks which of `node_modules`, `.venv`, `venv`, and `.env` exist at the root and are ignored by Git. The first matching job gets one note naming the paths the user can list if the job needs them. Crew remembers the project under `~/.crew/worktree-preflight/` across restarts.
+
 Gitignored paths listed in `.worktreeinclude` at the repository root (`.gitignore` syntax, shared with Claude Code's native worktrees) are attached to worktrees (such as `node_modules` and `.env`) so workers can run tests without reinstalling. Crew copies files and uses forced copy-on-write for directories. Whatever Git then reports as untracked in the new worktree is recorded on it (`worktree.copied`; a directory holding nothing tracked is one entry) and excluded from the worker's commits, status, and syncs, just like a shared link: the job's base may not ignore everything the main tree ignores (because of an older base or an uncommitted `.gitignore` edit), and otherwise a copied `.env` would be committed with the worker's changes. A recorded path stops being excluded once it is tracked, as when a sync brings in a commit that adds it, since a change to it is then the worker's.
 
 On macOS, `cloneTree` in `git.ts` clones the entire directory inside the kernel with one `clonefile(2)` call (invoked through `osascript` because Node has no binding for it), taking about 0.5 s for a 56,000-file `node_modules` compared with 5 s file by file. The clone is made beside its destination and moved into place so nothing already there is ever replaced or removed. It also preserves every mode from the source, whereas `cp` applies the umask to the directories it creates. If that fails for any reason, `/bin/cp -cR -P` clones file by file (libuv's `COPYFILE_FICLONE_FORCE` returns `ENOSYS` on APFS) and determines what the failure means. Other systems use Node's `COPYFILE_FICLONE_FORCE`.
@@ -59,6 +61,8 @@ If Codex does not acknowledge a turn start, Crew returns the still-active job an
 
 ## Follow-ups and sync
 
+With the project's `autoResume` switch on, a usage-limit failure can resume in the same worker session when a newer usage reading for that agent shows room (`ok` or `tight`). The job must still have its worktree and belong to an active mission. Crew sends one follow-up for that failure. Closing the mission or disabling the switch before the turn starts leaves the job stopped.
+
 A worker's worktree starts from `HEAD` (or `base`) and does not follow later commits. `reply` with `sync: true` merges the lead's current `HEAD` into the worker's branch before the follow-up turn and advances `worktree.base` so results still show only the worker's changes. Syncing an ancestor of the current base leaves the base and receipts as they were. On conflict, the merge aborts (leaving worktree, base, and result unchanged) and the follow-up still runs, naming the lead commit and conflicting files in the prompt and adding a job note. Other sync failures reject the reply. Syncing blocks discard and round changes. Rounds still replay from `roundsBase` so pre-sync undos survive.
 
 A message sent while a turn runs joins that turn. Codex takes it through `turn/steer`. Antigravity takes it as another `session/prompt`: agy 1.5.14 answers the running request at once with `end_turn` and carries the turn on under the new one, whose answer ends the turn. Crew sends overlapping messages in order, waiting for each handover or refusal before sending the next message. Crew refuses such a message while a permission request or question waits (as agy does), while the turn is still starting or already ending, and after Crew stopped it. If agy refuses a message after Crew has acknowledged it, Crew records the refusal on that turn as soon as it arrives. Once agy accepts the message, an error from its request fails the turn. Each prompt counts toward its own turn unless its usage arrives after a forced end.
@@ -74,6 +78,10 @@ A job whose worktree was discarded takes no further turn. See [cleanup and garba
 Question jobs (`ask: true`) are read-only. Codex runs without approval prompts and declines writes. Antigravity refuses edits and commands.
 
 ## Outcome reporting
+
+When a delegate's bridge check exits nonzero, Crew runs the command on the job's base commit in a temporary detached worktree, with the same includes, sandbox, network setting and time limit. The receipt records the base exit status and duration, or the reason the comparison was unavailable. Jobs checking the same repository, base, and command with the same sandbox settings share the comparison for the life of the daemon.
+
+If the check passes on the base and the worker had no refused or declined actions that turn, Crew sends one automatic follow-up with the command and the tail of its output. The worker is asked to fix the cause without weakening the check. Both turns keep their receipts. The lead receives completion or failure news after the fix turn, and the news identifies it. Further failures on the same job go straight to the lead.
 
 Work roles open their report with `## Outcome` (`done`, `partial`, or `blocked`; an engineer's report also has `## Decisions`, the choices the task did not settle, which the lead passes to the jobs they affect), stored in `Job.outcome` for the latest turn (omitted on reviews, debates, and questions). Results flag mismatches with bridge observations—such as `outcome: done as declared, but the bridge check failed`, no files changed after a refusal/decline, or `outcome: not declared`. Acceptance lines list kept round commits for cherry-picking when known.
 
@@ -94,6 +102,14 @@ To avoid injecting the user's entire Codex skill/app catalog into every thread, 
 For plugin-enabled threads and eligibility, see [Codex plugins](sandbox.md#codex-plugins).
 
 ## Token use
+
+Crew interrupts a turn that reaches either budget below. Wall time starts over on each follow-up and includes time spent waiting on a decision. The bridge's own result collection and checks run after the worker's turn. A budget stop sends ordinary failure news, with `error.budget: true`, the cap, and the observed value. The session and worktree remain available for `reply`.
+
+| Job difficulty | Tokens added this turn (including cached input) | Wall time |
+| --- | ---: | ---: |
+| Routine | 60,000,000 | 2 hours |
+| Standard or unspecified | 80,000,000 | 3 hours |
+| Hard | 120,000,000 | 4 hours |
 
 A job records `tokenUse` with total input, cached input, output, and what the latest turn added. Codex reports cumulative thread usage, including final totals delivered after a turn ends. Crew ignores totals that go backwards. Other notifications that name a turn must match the confirmed turn. Before confirmation, Crew accepts new turn IDs and ignores IDs that have already ended. For Antigravity, Crew counts each prompt's usage once toward the turn that sent it. Usage that arrives after Crew force-ends that turn is omitted. `status`, the board, and the desktop apps display it so follow-up turns show how much input was cached. A job also records `context`, how full the worker's context window is, from Codex's latest request (`last.totalTokens` of `modelContextWindow`) or agy's `usage_update`. `status`, the board, and the desktop apps show it.
 

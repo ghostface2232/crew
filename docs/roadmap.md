@@ -114,23 +114,23 @@ From a game project retrospective (58 jobs, ~110 hours, 1.5B tokens). Project-sp
 
 ### F. Less of the user's attention
 
-Decided 2026-11-25 from proposals gathered from Claude, Codex (Astra) and Antigravity (Neon), answering the same question independently: what would let Crew carry a user's workflow with fewer interventions. All three ruled out merging or deploying on green checks, a general workflow engine, and a model approving actions on the user's behalf.
+Decided 2026-11-25 from independent proposals by Claude, Codex (Astra), and Antigravity (Neon) answering the same question: how Crew could carry a user's workflow with fewer interventions. All three ruled out merging or deploying on green checks, building a general workflow engine, and letting a model approve actions on the user's behalf.
 
 **Done** (2026-11-25):
 
-- **F1. Wrap-up and autonomy.** A finished mission keeps the lead's `summary`, shown on its card. A per-project switch lets the lead push and open a pull request without asking, only once every outgoing commit is reviewed and the final checks pass; it never merges ([missions.md](missions.md#stages)).
-- **F2. Pull requests watched while away**, per project ([missions.md](missions.md#pull-requests)). Settles the open item on polling while the session is closed (section 6).
-- **F3. Resume.** Resume on a stopped job, and a per-project switch that resumes a mission's job stopped by a usage limit once usage resets, never for a finished or dismissed mission ([jobs.md](jobs.md#follow-ups-and-sync)).
-- **F4. Start from an issue.** Up to three of a project's open issues assigned to the user or to no one, as small cards that copy the run command; a dismissed one is not suggested again ([board.md](board.md#navigation-and-workspace)).
-- **F5. Guards for unattended work.** A per-turn token and running-time budget, a base-commit run of a failing check, and one automatic fix turn when only the change broke it ([jobs.md](jobs.md#token-use)).
-- **F6. Decisions kept in a mission**, given to its later jobs and never counted as approvals ([missions.md](missions.md#decisions)).
-- **F7. Worktree preflight.** One hint per project when ignored dependencies exist and `.worktreeinclude` does not ([jobs.md](jobs.md#worktree-includes-and-shared-links)).
-- **F8. Reset-aware routing.** Time to reset counts alongside remaining quota, without burn-rate projection ([usage-and-presets.md](usage-and-presets.md#routing)).
+- **F1. Wrap-up and autonomy.** Finished missions keep the lead's `summary`, shown on the card. A per-project switch lets the lead push and open a pull request without asking once every outgoing commit has been reviewed and final checks pass; it never merges ([missions.md](missions.md#stages)).
+- **F2. Pull requests watched while away.** Polls per project while the lead session is closed ([missions.md](missions.md#pull-requests)), settling the open item in section 6.
+- **F3. Resume.** Adds a Resume action on stopped jobs, plus a per-project switch that resumes a mission's job after a usage-limit stop once usage resets—never for a finished or dismissed mission ([jobs.md](jobs.md#follow-ups-and-sync)).
+- **F4. Start from an issue.** Shows up to three open project issues assigned to the user or unassigned, each with a button to copy its run command; dismissed issues are not suggested again ([board.md](board.md#navigation-and-workspace)).
+- **F5. Guards for unattended work.** Enforces per-turn token and wall-time budgets, runs failing checks against the base commit, and sends one automatic fix turn when only the job's change broke the check ([jobs.md](jobs.md#token-use)).
+- **F6. Decisions kept in a mission.** Records mission decisions and passes them to later jobs, never counting them as approvals ([missions.md](missions.md#decisions)).
+- **F7. Worktree preflight.** Shows one hint per project when ignored dependency paths exist without a `.worktreeinclude` file ([jobs.md](jobs.md#worktree-includes-and-shared-links)).
+- **F8. Reset-aware routing.** Factors time to reset alongside remaining quota without burn-rate projections ([usage-and-presets.md](usage-and-presets.md#routing)).
 
 **Open:**
 
-- **F9. Command grants for Antigravity on Windows.** Still excluded: no capture yet shows which shell agy uses there or how it gives the working directory ([approvals.md](approvals.md#allow-for-this-job)).
-- **Not taken now:** recipes and scheduled routines (the user expects how they use Crew to change first); a mission charter of standing grants, project-wide command allow rules, and batching approvals for answering away from the desk (each widens what runs without asking, so each needs its own decision); a plan check before large work and line-by-line diff review on the board; resuming a lead session itself after its own limit.
+- **F9. Command grants for Antigravity on Windows.** Remains excluded: no capture yet shows which shell agy uses on Windows or how it passes the working directory ([approvals.md](approvals.md#allow-for-this-job)).
+- **Not taken now:** recipes and scheduled routines (the user expects their use of Crew to change first); a mission charter of standing grants, project-wide command allow rules, and batched approvals for answering away from the desk (each widens what runs without asking and needs its own decision); a plan check before large work and line-by-line diff review on the board; and resuming a lead session itself after its own limit.
 
 ## 5. Long-term plan
 
@@ -162,7 +162,7 @@ Item 5 is done (`adapters/claude.ts`, 2026-11-24): under a Codex lead, a job in 
 
 **L4. More entry points. *(Open)*** Start missions from GitHub or Linear issues; a read-only mobile view. (Linked PR tracking in `pulls.ts` watches existing PRs rather than starting missions from issues.)
 
-**L6. Work on another machine. *(Open)*** Platform work the lead's machine cannot build or check, such as the macOS app from Windows, goes to a session on a machine that can. A Codex lead can list the user's connected devices and open a session on one; a Claude lead cannot open one, but can message an idle Remote Control session of the user's. Both hand the work over as a pushed branch, which falls under the autonomy switch. First done by hand on 2026-11-25: the macOS side of section F was built and tested by a Claude session on a Mac.
+**L6. Work on another machine. *(Open)*** Platform work the lead's machine cannot build or verify—such as the macOS app from Windows—goes to a session on a machine that can. A Codex lead can list the user's connected devices and open a session on one; a Claude lead cannot open a session, but can message an idle Remote Control session of the user's. Both hand work over as a pushed branch, governed by the autonomy switch. First done by hand on 2026-11-25, when a Claude session on a Mac built and tested the macOS side of section F.
 
 **L5. Board UI foundation and design system. *(Done)*** Implemented in `plugin/board/src/` with React 19, TypeScript, Vite, shared CSS tokens, `Settings.module.css`, Fluent icons, and Playwright e2e tests; Radix, Motion, and Storybook were deferred because native HTML elements and CSS transitions cover the scope ([board.md](board.md)).
 
@@ -176,7 +176,7 @@ Requirements R4 and R6 (computer use, side chat, visibility in the desktop app) 
 - Conductor's status *(settled)*: it joined Meta and announced a cloud shutdown on 2026-11-04, withdrew the shutdown on 2026-11-12–13 (0.94.2 changelog), and continues development, cloud included. [related-work.md](../research/related-work.md) is corrected to match.
 - Antigravity's native `AGENTS.md` support is unverified; A2 does not depend on it.
 - Direct dispatch shape *(settled in `Dispatch.tsx` / `DispatchView.swift`)*: the board’s New Job creates a job without a mission or lead. The lead’s tools use the same `POST /api/jobs` endpoint and pass lead and mission information.
-- PR watches while the owning session is closed *(settled 2026-11-25)*: polled every 10 minutes for a project whose user turns it on, and not otherwise (F2).
+- PR watches while the owning session is closed *(settled 2026-11-25)*: polled every 10 minutes when turned on for the project, and not otherwise (F2).
 
 ## 7. Sources
 
@@ -193,7 +193,7 @@ Requirements R4 and R6 (computer use, side chat, visibility in the desktop app) 
 
 Summary of design turns recorded across the roadmap:
 
-- 2026-11-25: **Less of the user's attention (F)**: Per-project switches for autonomy, watching pull requests while away, and resuming after a usage limit, kept in the user's config rather than the repository; mission wrap-ups and remembered decisions; issue suggestions; per-turn budgets with base-commit checks and one automatic fix; reset-aware routing. Watching while away reverses the 2026-11-20 rule of no polling while the session is closed, where the user turns it on.
+- 2026-11-25: **Less of the user's attention (F)**: Added per-project switches (stored in the user's config rather than the repository) for autonomy, watching pull requests while away, and resuming after a usage limit; mission wrap-ups and remembered decisions; issue suggestions; per-turn budgets with base-commit checks and one automatic fix turn; and reset-aware routing. Away watching reverses the 2026-11-20 rule against polling while a session is closed, when turned on for a project.
 - 2026-11-12–13: **Board and desktop shells**: Built the React + Vite board (L5) and direct dispatch (`POST /api/jobs`) while keeping the independent daemon; replaced Electron with a native SwiftUI/AppKit macOS app (`native/`, Swift 6, macOS 26+) and kept Electron for Windows (`desktop/`) ([board.md](board.md), [macos-app.md](macos-app.md)).
 - 2026-11-13 and 2026-11-15: **Roles, presets, and AgentGauge G1**: Expanded roles into an 8-role registry with inheritance (keeping `release` scoped to preparation because push, publish, and deploy need their own permission, network, and approval design), added global/mission presets, and built AgentGauge G1 inside the daemon ([roles.md](roles.md), [usage-and-presets.md](usage-and-presets.md)).
 - 2026-11-15, 2026-11-16, and 2026-11-18: **Model notes, fix role, and peer ratings (D1–D3)**: Replaced calibrated/clamped scoring (which rewarded tier and let fixes lift build scores) with uncalibrated finding load over change size (`xlarge` exposure 4 for large integrations), a separate `fix` score, `adoption` tracking, and fact-backed `peerRatings` weighted at 50% alongside evidence ([roles.md](roles.md)).

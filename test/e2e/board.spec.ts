@@ -1083,9 +1083,16 @@ test('New Job and Welcome settle out when they close, as Settings does', async (
     const sheet = page.getByRole('dialog', { name });
     await expect(sheet).toBeVisible();
     await settle(page);
+    // Caught as the sheet turns inert, when its exit starts, so a busy machine cannot miss it between two looks.
+    await sheet.evaluate((dialog) => {
+      (window as any).leaving = new Promise<boolean>((resolve) => {
+        new MutationObserver(() => resolve((dialog as HTMLElement).inert && dialog.getAnimations().length > 0))
+          .observe(dialog, { attributes: true, attributeFilter: ['inert'] });
+        new MutationObserver(() => { if (!dialog.isConnected) resolve(false); }).observe(document.body, { childList: true, subtree: true });
+      });
+    });
     await page.keyboard.press('Escape');
-    // Still there, leaving, before it is gone.
-    await expect.poll(() => sheet.evaluate((dialog) => (dialog as HTMLElement).inert && dialog.getAnimations().some((animation) => animation.playState === 'running'))).toBe(true);
+    expect(await page.evaluate(() => (window as any).leaving)).toBe(true);
     await expect(sheet).toHaveCount(0);
   };
   await leaves(() => page.getByRole('button', { name: 'New Job', exact: true }).click(), 'New Job');

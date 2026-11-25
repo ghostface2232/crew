@@ -295,7 +295,6 @@ enum Welcome {
     static let statusDot: CGFloat = 14
     static let dotRing: CGFloat = 2
     /// The command column on the second page.
-    static let commandGap = Space.l
     /// The picture's accent tint, fading toward the sheet.
     static let tintTop = Palette.accent.opacity(0.13)
     static let tintBottom = Palette.accent.opacity(0.03)

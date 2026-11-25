@@ -101,32 +101,15 @@ private enum WelcomePage: CaseIterable {
     @ViewBuilder var body: some View {
         switch self {
         case .welcome:
-            paragraph(String(localized: "Crew runs several coding agents together. The session you start in leads: it splits the work and hands pieces to the other agents to run in parallel. This app shows every agent live and lets you answer them."))
+            paragraph(String(localized: "Your session leads while other agents work in parallel.\nFollow their progress here."))
         case .commands:
-            VStack(spacing: Space.l) {
-                paragraph(String(localized: "Open a new Claude Code or Codex session and type a command. In Codex, commands start with $ instead of /."))
-                Grid(alignment: .leading, horizontalSpacing: Welcome.commandGap, verticalSpacing: Space.s) {
-                    ForEach(Self.commandList, id: \.0) { command, what in
-                        GridRow {
-                            Text(command).font(Typeface.code)
-                            Text(what).font(Typeface.callout).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .multilineTextAlignment(.leading)
-            }
+            paragraph(String(localized: "In a new session, type `/crew:run` in Claude Code\nor `$crew:run` in Codex, then add your task."))
         case .needs:
-            paragraph(String(localized: "Approvals and questions from agents appear in Needs You. Answer them here, or open a waiting lead session in its app. Close the window and Crew stays in the menu bar, still running jobs."))
+            paragraph(String(localized: "Review approvals and answer questions in Needs You.\nJobs keep running when you close the window."))
         case .setup:
-            paragraph(String(localized: "Overview lists what is still missing, such as `codex login` for Codex or running `agy` once for Antigravity. Choose which agent does what in Settings."))
+            paragraph(String(localized: "Check Overview to see what’s left to set up."))
         }
     }
-    private static let commandList = [
-        ("/crew:run", String(localized: "Plan, build, review, and fix with the crew")),
-        ("/crew:review", String(localized: "Review a change")),
-        ("/crew:debate", String(localized: "Talk through a hard decision")),
-        ("/crew:board", String(localized: "Open the board")),
-    ]
     private func paragraph(_ text: String) -> some View {
         Text(withCode(text)).font(Typeface.body).foregroundStyle(.secondary).lineSpacing(Welcome.lineSpacing).fixedSize(horizontal: false, vertical: true)
     }
@@ -250,10 +233,9 @@ private struct NeedsArt: View {
 private struct SetupArt: View {
     @Environment(\.colorScheme) private var scheme
     private static let items = [
-        ("Crew plugin and `crew` command", "Installed", true),
-        ("Claude Code", "2.1.326", true),
-        ("Codex CLI and sign-in", "Run `codex login`", false),
-        ("Antigravity CLI", "1.4.0", true),
+        ("Claude Code", "Installed", true),
+        ("Crew plugin", "Installed", true),
+        ("Codex sign-in", "Run `codex login` to sign in.", false),
     ]
     var body: some View {
         VStack(alignment: .leading, spacing: Space.l) {
@@ -263,8 +245,8 @@ private struct SetupArt: View {
                     HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                         Image(systemName: ok ? "checkmark.circle" : "exclamationmark.circle")
                             .foregroundStyle(ok ? Color.secondary : Palette.warning.ink(scheme)).frame(width: Symbol.controlFrame)
-                        Text(withCode(label))
-                        Text(withCode(detail)).font(Typeface.caption).foregroundStyle(.secondary)
+                        Text(localizedCrewLabel(label))
+                        Text(withCode(localizedCrewLabel(detail))).font(Typeface.caption).foregroundStyle(.secondary)
                     }.font(Typeface.callout)
                 }
             }

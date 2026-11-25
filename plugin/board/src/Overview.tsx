@@ -551,8 +551,10 @@ function Setup() {
         {setup.items.map((item) => (
           <li key={item.id} data-ok={item.ok || undefined}>
             <Icon icon={item.ok ? CheckmarkCircleRegular : ErrorCircleRegular} size={14} />
-            <span>{withCode(item.label)}</span>
-            <span className="secondary caption selectable">{withCode(item.detail)}</span>
+            <span>{withCode(t(item.label))}</span>
+            <span className="secondary caption selectable" title={item.summary && item.detail ? item.detail : undefined}>
+              {withCode(t(item.summary ?? item.detail))}
+            </span>
           </li>
         ))}
       </ul>

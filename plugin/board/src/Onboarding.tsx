@@ -149,10 +149,9 @@ function NeedsArt() {
 
 function SetupArt() {
   const items: [string, string, boolean][] = [
-    ['Crew plugin and `crew` command', 'Installed', true],
-    ['Claude Code', '2.1.326', true],
-    ['Codex CLI and sign-in', 'Run `codex login`', false],
-    ['Antigravity CLI', '1.4.0', true],
+    ['Claude Code', 'Installed', true],
+    ['Crew plugin', 'Installed', true],
+    ['Codex sign-in', 'Run `codex login` to sign in.', false],
   ];
   return (
     <div className={`card ${styles.setup}`}>
@@ -161,8 +160,8 @@ function SetupArt() {
         {items.map(([label, detail, ok]) => (
           <li key={label} data-ok={ok || undefined}>
             <Icon icon={ok ? CheckmarkCircleRegular : ErrorCircleRegular} size={14} />
-            <span>{withCode(label)}</span>
-            <span className="secondary caption">{withCode(detail)}</span>
+            <span>{t(label)}</span>
+            <span className="secondary caption">{withCode(t(detail))}</span>
           </li>
         ))}
       </ul>
@@ -173,20 +172,13 @@ function SetupArt() {
 
 const withCode = (text: string) => text.split('`').map((part, index) => (index % 2 ? <code key={index}>{part}</code> : part));
 
-const COMMANDS = translated((): [string, string][] => [
-  ['/crew:run', t('Plan, build, review, and fix with the crew')],
-  ['/crew:review', t('Review a change')],
-  ['/crew:debate', t('Talk through a hard decision')],
-  ['/crew:board', t('Open this board')],
-]);
-
 const PAGES = translated((): Page[] => [
   {
     title: t('Welcome to Crew'),
     art: <WelcomeArt />,
     body: (
       <p className="secondary">
-        {t('Crew runs several coding agents together. The session you start in leads: it splits the work and hands pieces to the other agents to run in parallel. This app shows every agent live and lets you answer them.')}
+        {t('Your session leads while other agents work in parallel.\nFollow their progress here.')}
       </p>
     ),
   },
@@ -194,17 +186,9 @@ const PAGES = translated((): Page[] => [
     title: t('Start in Claude Code or Codex'),
     art: <CommandArt />,
     body: (
-      <>
-        <p className="secondary">{t('Open a new Claude Code or Codex session and type a command. In Codex, commands start with $ instead of /.')}</p>
-        <dl className={styles.commands}>
-          {COMMANDS().map(([command, what]) => (
-            <div key={command}>
-              <dt><code>{command}</code></dt>
-              <dd className="secondary">{what}</dd>
-            </div>
-          ))}
-        </dl>
-      </>
+      <p className="secondary">
+        {withCode(t('In a new session, type `/crew:run` in Claude Code\nor `$crew:run` in Codex, then add your task.'))}
+      </p>
     ),
   },
   {
@@ -212,10 +196,7 @@ const PAGES = translated((): Page[] => [
     art: <NeedsArt />,
     body: (
       <p className="secondary">
-        {t('Approvals and questions from agents appear in Needs You. Answer them here, or open a waiting lead session in its app.')}{' '}
-        {desktop
-          ? t('Close the window and Crew stays in the tray, still running jobs.')
-          : t('Jobs keep running after you close the board.')}
+        {t('Review approvals and answer questions in Needs You.\nJobs keep running when you close the window.')}
       </p>
     ),
   },
@@ -224,10 +205,7 @@ const PAGES = translated((): Page[] => [
     art: <SetupArt />,
     body: (
       <p className="secondary">
-        {tNodes(
-          'Overview lists what is still missing, such as {login} for Codex or running {agy} once for Antigravity. Choose which agent does what in Settings.',
-          { login: <code>codex login</code>, agy: <code>agy</code> },
-        )}
+        {t('Check Overview to see what’s left to set up.')}
       </p>
     ),
   },

@@ -45,10 +45,10 @@
       }
     ],
     "Interrupt": [
-      { "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/bridge/report.ts\" codex", "timeout": 5 }] }
+      { "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/bridge/report.ts\" codex", "timeout": 3 }] }
     ],
     "SessionEnd": [
-      { "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/bridge/report.ts\" codex", "timeout": 5 }] }
+      { "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/bridge/report.ts\" codex", "timeout": 3 }] }
     ]
   }
 }

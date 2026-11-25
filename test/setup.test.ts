@@ -234,13 +234,23 @@ test('a built copy registers with Codex, records it as complete only when both h
   const failClaude = path.join(profile, 'fail-claude');
   const malformedClaude = path.join(profile, 'malformed-claude');
   const failVersion = path.join(profile, 'fail-version');
+  const codexVersion = JSON.parse(fs.readFileSync('plugin/.codex-plugin/plugin.json', 'utf8')).version;
   const log = `require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(1)) + '\\n');`;
-  writeFakeBin(path.join(profile, 'claude'), `${log} if (require('node:fs').existsSync(${JSON.stringify(failClaude)})) { console.error('temporary lookup failure'); process.exit(1); } console.log(require('node:fs').existsSync(${JSON.stringify(malformedClaude)}) ? '[{}]' : '[]');`);
+  writeFakeBin(path.join(profile, 'claude'), `${log}
+    if (require('node:fs').existsSync(${JSON.stringify(failClaude)})) { console.error('temporary lookup failure'); process.exit(1); }
+    console.log(process.argv[2] === '--version' ? '2.1.326 (Claude Code)' : require('node:fs').existsSync(${JSON.stringify(malformedClaude)}) ? '[{}]' : '[]');`);
   writeFakeBin(path.join(profile, 'codex'), `${log}
     const fs = require('node:fs'); const args = process.argv.slice(2).join(' ');
     if (args === '--version' && fs.existsSync(${JSON.stringify(failVersion)})) { console.error('temporary version failure'); process.exit(1); }
     if (args === 'plugin marketplace list') console.log('MARKETPLACE  ROOT\\n' + (fs.existsSync(${JSON.stringify(marketplaces)}) ? fs.readFileSync(${JSON.stringify(marketplaces)}, 'utf8') : ''));
-    if (args === 'plugin add crew@crew' && fs.existsSync(${JSON.stringify(failAdd)})) { console.error('no space left'); process.exit(1); }`);
+    if (args === 'plugin add crew@crew' && fs.existsSync(${JSON.stringify(failAdd)})) { console.error('no space left'); process.exit(1); }
+    if (args === 'plugin list --marketplace crew') console.log('crew@crew  installed, enabled  ${codexVersion}  local');
+    if (args === 'app-server') require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { id, method } = JSON.parse(line);
+      if (id === undefined) return;
+      const result = method === 'hooks/list' ? { data: [{ hooks: [] }] } : {};
+      console.log(JSON.stringify({ id, result }));
+    });`);
   const originalPath = process.env.PATH;
   process.env.PATH = profile + path.delimiter + originalPath;
   t.after(() => { process.env.PATH = originalPath; });
@@ -261,7 +271,7 @@ test('a built copy registers with Codex, records it as complete only when both h
   fs.writeFileSync(path.join(runtime, process.platform === 'win32' ? 'node.exe' : 'node'), '');
   const record = path.join(home, 'setup.json');
   t.after(() => fs.rmSync(record, { force: true }));
-  const { register } = await import(pathToFileURL(path.join(root, 'plugin/bridge/setup.ts')).href);
+  const { checks, register } = await import(pathToFileURL(path.join(root, 'plugin/bridge/setup.ts')).href);
   const codexCalls = () => fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)).filter(([bin]) => /codex(\.cjs)?$/.test(bin)).map(([, ...args]) => args.join(' ')) : [];
   const ours = path.join(profile, '.crew', 'codex', 'marketplace');
 
@@ -294,8 +304,20 @@ test('a built copy registers with Codex, records it as complete only when both h
 
   // Once both hosts run this copy it is recorded; the marketplace carries the agents the skills read.
   fs.rmSync(failAdd);
-  assert.equal((await register(true)).ok, true);
+  const installed = await register(true);
+  assert.equal(installed.ok, true);
+  assert.match(installed.detail, /Settings → Hooks → Crew.*Trust all/);
   assert.equal(complete(), true);
+  // The setup checklist can guide the user as soon as the plugin is installed.
+  assert.equal(fs.existsSync(path.join(home, 'jobs.json')), false);
+  const setupItems: SetupItem[] = await checks();
+  const firstRun = setupItems.find((item) => item.id === 'codex-hooks');
+  assert.equal(firstRun?.ok, false);
+  assert.equal(firstRun?.detail, "In Settings → Hooks → Crew, select 'Trust all'.");
+  const claudeCheck = setupItems.find((item) => item.id === 'claude');
+  assert.equal(claudeCheck?.summary, 'Installed');
+  assert.equal(claudeCheck?.detail, '2.1.326 (Claude Code)');
+  assert.equal(setupItems.find((item) => item.id === 'plugin')?.summary, 'Select Install to add the Crew plugin.');
   // On Windows the registered root is the copy in the Crew home, which open sessions keep running through an update.
   const registeredRoot = JSON.parse(fs.readFileSync(record, 'utf8')).root;
   if (process.platform === 'win32') assert.match(registeredRoot, /[\\/]plugins[\\/][^\\/]+-built$/);
@@ -392,17 +414,23 @@ test('the Codex hooks item asks app-server hooks/list and is trusted only when C
 
   const trusted = await codexHooksItem(fake('trusted', hooks('trusted')));
   assert.deepEqual([trusted.ok, trusted.detail], [true, 'Trusted.']);
+  assert.equal(trusted.summary, 'Complete');
   const modified = await codexHooksItem(fake('modified', hooks('modified')));
   assert.equal(modified.ok, false);
-  assert.match(modified.detail, /^Changed by an update since you trusted them, so Codex skips them until you trust them again\. .*`\/hooks`/);
+  assert.match(modified.detail, /^To trust Crew's updated hooks, .*Trust all.*`\/hooks`/);
+  assert.equal(modified.summary, "Crew hooks were updated. In Settings → Hooks → Crew, select 'Trust all' again.");
   const untrusted = await codexHooksItem(fake('untrusted', hooks('untrusted')));
   assert.equal(untrusted.ok, false);
-  assert.match(untrusted.detail, /^Codex runs its hooks only once trusted/);
+  assert.equal(untrusted.detail, "In Settings → Hooks → Crew, select 'Trust all'.");
+  const disabled = await codexHooksItem(fake('disabled', `${hooks('trusted')}.map((hook, i) => ({ ...hook, enabled: i !== 0 }))`));
+  assert.equal(disabled.ok, false);
+  assert.equal(disabled.detail, 'In Settings → Hooks → Crew, turn on the disabled Crew hooks.');
   for (const [name, mode, reason] of [['refused', 'error', /method not found/], ['gone', 'exit', /exited/]] as const) {
     const unknown = await codexHooksItem(fake(name, '[]', mode));
     assert.equal(unknown.ok, false, name);
     assert.match(unknown.detail, /^Could not ask Codex whether they are trusted/, name);
     assert.match(unknown.detail, reason, name);
+    assert.match(unknown.summary ?? '', /Select Check Again/, name);
   }
   // A Codex that never answers fails the item once the request times out, and is not left running.
   const silent = await codexHooksItem(fake('silent', '[]', 'silent'), undefined, 300);

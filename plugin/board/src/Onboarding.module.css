@@ -18,11 +18,8 @@
 .copy { grid-area: 1 / 1; display: grid; gap: 10px; align-content: center; text-align: center; }
 .copy:not([data-current]) { visibility: hidden; }
 .title { font-size: 20px; letter-spacing: -0.01em; }
-.copy p { margin: 0; line-height: 1.55; text-wrap: pretty; }
+.copy p { margin: 0; line-height: 1.55; white-space: pre-line; text-wrap: pretty; }
 .copy code { font-size: 0.92em; padding: 1px 5px; border-radius: 6px; background: var(--fill); color: var(--label); }
-.commands { display: grid; grid-template-columns: max-content minmax(0, max-content); justify-content: center; gap: 6px 14px; margin: 4px 0 0; text-align: start; }
-.commands > div { display: contents; }
-.commands dt, .commands dd { margin: 0; font-size: 13px; }
 .dots { display: flex; justify-content: center; gap: 2px; padding: 20px 0 16px; }
 .dots button { min-height: 0; width: 18px; height: 18px; padding: 0; background: none; box-shadow: none; display: grid; place-items: center; }
 .dots button::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--quaternary); transition: background-color 200ms ease-out, scale 200ms var(--ease-out); }
@@ -63,6 +60,7 @@
 .setup:global(.card) { display: grid; gap: 12px; width: 340px; padding: 16px 18px; border-radius: 20px; text-align: start; }
 .setup h3 { margin: 0; }
 .setup :global(.setup-list) li { font-size: 12.5px; }
+.setup :global(.setup-list .caption) { text-wrap: balance; }
 
 @media (prefers-reduced-motion: no-preference) {
   .stage > * { animation: art-in 480ms var(--ease-out); }
@@ -73,6 +71,4 @@
 
 @media (max-width: 480px) {
   .copies { padding-inline: 20px; }
-  .commands { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .commands dd { margin-bottom: 6px; }
 }

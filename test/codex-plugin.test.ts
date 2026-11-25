@@ -48,6 +48,10 @@ test("writeCodexPlugin points the MCP server and hooks at the app's runtime and 
   })));
   assert.deepEqual(commands, expected);
   assert.ok(commands.length > 0);
+  for (const event of ['Interrupt', 'SessionEnd']) {
+    // Codex warns about and clamps larger values when it loads the hook.
+    assert.equal(hooks.hooks[event][0].hooks[0].timeout, 3, event);
+  }
 });
 
 test('a marketplace folder Crew did not write is never replaced', () => {
@@ -113,6 +117,8 @@ test("hookTrust reads Codex's hooks/list for every Crew hook", () => {
   assert.equal(hookTrust(listed(() => 'someNewState'), keys), 'untrusted');
   const disabled = listed(() => 'trusted');
   Object.assign(disabled.data[0].hooks[0], { enabled: false });
+  assert.equal(hookTrust(disabled, keys), 'disabled');
+  Object.assign(disabled.data[0].hooks[1], { trustStatus: 'untrusted' });
   assert.equal(hookTrust(disabled, keys), 'untrusted');
   assert.throws(() => hookTrust({}, keys), /without a list/);
 });

@@ -176,6 +176,25 @@ test('ratings of routine work together weigh at most two ratings, as its lines d
   assert.deepEqual([polisher.ratings, polisher.score], [0, polisher.build]);
 });
 
+test('a reviewer\'s ratings of the lead\'s own routine work are capped through the review jobs its lines name', () => {
+  // The lead's work has no job, so its line names the review jobs that read it, and their ratings are traced back.
+  const reviewed = (n: number, difficulty: Evidence['difficulty']) => {
+    const file = notes({
+      lead: Array.from({ length: n }, (_, i) => ({ reviewer: 'codex' as const, difficulty, size: 'small' as const, reviewedBy: ['cross'], reviewJobs: [`cx-rv${i}`] })),
+      cross: Array.from({ length: n }, (_, i) => ({ role: 'review' as const, job: `cx-rv${i}`, of: { model: 'lead' } })),
+      other: [{ findings: { high: 0, medium: 1, low: 0 } }],
+    });
+    file.models.lead.agent = 'claude';
+    file.models.lead.evidence.forEach((e) => { e.agent = 'claude'; });
+    file.ratings = Array.from({ length: n }, (_, i) => ({ id: `rt-${i}`, at: i, by: 'codex' as const, byModel: 'cross', byJob: `cx-rv${i}`, items: { correctness: 5 }, fact: 'x' }));
+    return scoreAll(file).find((s) => s.model === 'lead')!;
+  };
+  assert.equal(reviewed(20, 'routine').score, reviewed(2, 'routine').score);
+  assert.equal(reviewed(20, 'routine').ratings, 0);
+  // Standard work is not capped, so its ratings count.
+  assert.ok(reviewed(20, 'standard').ratings >= 3);
+});
+
 test('a review kind is the first reviewer from another agent, with extra reviews as their own term', () => {
   const agents: Record<string, 'codex' | 'claude'> = { 'model-a': 'codex', 'claude-x': 'claude' };
   const kind = (e: Partial<Evidence>) => reviewKind({ ...input, id: 'ev', at: 0, ...e } as Evidence, (m) => agents[m]);

@@ -1055,6 +1055,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
         }
         // A review job names its own model; anything else is a model id the lead gives for a review of its own.
         let reviewedBy = body.reviewed_by;
+        let reviewJobs: string[] | undefined;
         if (Array.isArray(reviewedBy)) {
           const refused: string[] = [];
           const jobId = new RegExp(`^${JOB_ID}$`);
@@ -1068,6 +1069,9 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
             return reviewModel ?? entry;
           });
           if (refused.length) throw new HttpError(400, `reviewed_by takes review job ids or model ids: ${refused.join('; ')}.`);
+          // Kept beside the models, so a reviewer's rating can be traced to the line of the work it read.
+          const named = body.reviewed_by.filter((entry: unknown) => typeof entry === 'string' && jobId.test(entry.trim())).map((entry: string) => entry.trim());
+          if (named.length) reviewJobs = named;
         }
         score = addEvidence(HOME, {
           model,
@@ -1091,6 +1095,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
           ...(body.adoption !== undefined ? { adoption: body.adoption, ...(job ? { rounds: followUps(job) } : {}) } : {}),
           ...(difficulty !== undefined ? { difficulty } : {}),
           ...(reviewedBy !== undefined ? { reviewedBy } : {}),
+          ...(reviewJobs ? { reviewJobs } : {}),
           text: body.text,
         }, { ratings: peerRatings }).score;
         if (body.rating !== undefined && !peerRatings) score = { ...score, ratingDropped: true };

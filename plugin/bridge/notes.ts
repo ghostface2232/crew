@@ -107,6 +107,8 @@ export interface Evidence {
   difficulty?: Difficulty;
   /** For a build line: the model of each review its accepted findings came from, the lead reading a worker's diff included. */
   reviewedBy?: string[];
+  /** For a build line: the review jobs among those reviews, so a review's rating can be traced to the work it read. */
+  reviewJobs?: string[];
   /** For a review line: the work it reviewed, by its job when a worker built it; `fix` when that job was a fix. */
   of?: { job?: string; model: string; fix?: true };
   /** The lead's rating of this line's work, resting on `text`. Only a job's work is rated, never the lead's own. */
@@ -184,7 +186,8 @@ function wellFormed(models: Record<string, any>): Record<string, ModelNote> {
       && (e.adoption === undefined || (e.role === 'build' && typeof e.job === 'string' && e.job && ADOPTIONS.includes(e.adoption)))
       && (e.rounds === undefined || (e.adoption !== undefined && Number.isInteger(e.rounds) && e.rounds >= 0))
       && (e.difficulty === undefined || (e.role === 'build' && DIFFICULTIES.includes(e.difficulty)))
-      && (e.reviewedBy === undefined || (e.role === 'build' && reviewModels(e.reviewedBy))));
+      && (e.reviewedBy === undefined || (e.role === 'build' && reviewModels(e.reviewedBy)))
+      && (e.reviewJobs === undefined || (e.role === 'build' && reviewModels(e.reviewJobs))));
     Object.defineProperty(kept, model, {
       value: { model, agent: note.agent, summary: typeof note.summary === 'string' ? note.summary : '', summaryAt: Number.isFinite(note.summaryAt) ? note.summaryAt : null, evidence },
       enumerable: true, configurable: true, writable: true,
@@ -258,6 +261,7 @@ export function addEvidence(home: string, input: Omit<Evidence, 'id' | 'at'> & {
   check(input.rounds === undefined || (input.adoption !== undefined && Number.isInteger(input.rounds) && input.rounds >= 0), 'rounds (a non-negative integer, given with adoption)');
   check(input.difficulty === undefined || (input.role === 'build' && DIFFICULTIES.includes(input.difficulty)), `difficulty (only for a build line: ${oneOf(DIFFICULTIES)})`);
   check(input.reviewedBy === undefined || (input.role === 'build' && reviewModels(input.reviewedBy)), `reviewed_by (only for a build line: 1 to ${MAX_REVIEWS} model ids, one per review)`);
+  check(input.reviewJobs === undefined || (input.reviewedBy !== undefined && reviewModels(input.reviewJobs) && input.reviewJobs.length <= input.reviewedBy.length), 'reviewJobs (the review jobs among reviewed_by)');
   const counted = (given: Partial<Findings> | undefined, name: string): Findings => {
     const result = {} as Findings;
     for (const key of ['high', 'medium', 'low'] as const) {
@@ -453,8 +457,11 @@ function votes(file: NotesFile): Vote[] {
   // A job's work belongs to the model its build line is under now, which a later note may have moved.
   const builders = new Map(all.filter((e) => e.role === 'build' && e.job).map((e) => [e.job!, e.model]));
   // Flawed work: an accepted high finding on its build line, or on a review of it.
-  // Routine work, by its build line, so a rating of it is capped as the line is.
-  const routine = new Set(all.filter((e) => e.role === 'build' && e.job && e.difficulty === 'routine').map((e) => e.job!));
+  // Routine work, by its build line, so a rating of it is capped as the line is: a worker's by its job, and the lead's
+  // own, which has no job, by the review jobs its line names.
+  const easyLines = all.filter((e) => e.role === 'build' && e.difficulty === 'routine');
+  const routine = new Set(easyLines.filter((e) => e.job).map((e) => e.job!));
+  const routineReviews = new Set(easyLines.filter((e) => !e.job).flatMap((e) => e.reviewJobs ?? []));
   const flawed = new Set([...all.filter((e) => e.role === 'build' && e.job && e.findings.high > 0).map((e) => e.job!),
     ...reviews.filter((e) => e.of?.job && e.findings.high > 0).map((e) => e.of!.job!)]);
   const out: Vote[] = [];
@@ -479,7 +486,8 @@ function votes(file: NotesFile): Vote[] {
       if (line.job === r.byJob && line.of) {
         // Correctness is the build score's item: a review of a fix says nothing about how its model builds.
         const work = correctness === undefined || line.of.fix ? rest : { ...rest, correctness };
-        cast((job && builders.get(job)) ?? line.of.model, work, r.by, rater, r.id, 1, line.findings.high > 0 || Boolean(job && flawed.has(job)), Boolean(job && routine.has(job)));
+        cast((job && builders.get(job)) ?? line.of.model, work, r.by, rater, r.id, 1, line.findings.high > 0 || Boolean(job && flawed.has(job)),
+          job ? routine.has(job) : Boolean(line.job && routineReviews.has(line.job)));
       }
       if (findings !== undefined && job === r.byJob) cast(line.model, { findings }, r.by, rater, r.id, BUILDER_RATING, false);
     }

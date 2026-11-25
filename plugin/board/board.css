@@ -1251,11 +1251,10 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .mission-controls { display: flex; align-items: center; gap: 6px; margin-inline-start: auto; }
 .mission-hint { margin-top: 8px; }
 .mission-body { display: grid; gap: 16px; padding-block-start: 14px; }
-/* Only where the title would be left too little room beside them do a row's status and time move under it. */
+/* Only where the title would be left too little room beside them do a row's time and status move under it, to the end. */
 @container page (max-width: 340px) {
   .job-row { flex-wrap: wrap; row-gap: 6px; }
   .job-row > .job-row-text { flex-basis: calc(100% - 40px); }
-  .job-row > .status-icon { margin-inline-start: 38px; }
   .job-row-time { margin-inline-start: auto; }
 }
 .disclosure { transition: rotate 320ms var(--ease-out), translate 320ms var(--ease-out); translate: 0 0.5px; }

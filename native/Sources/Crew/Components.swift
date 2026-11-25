@@ -462,9 +462,9 @@ struct JobRow: View {
                     }
                 }
                 Spacer(minLength: WorkspaceStyle.rowSpacer)
-                StatusIcon(state: job.stalled ? "stalled" : job.state, title: job.status)
                 ElapsedText(store: store, start: job.createdAt, end: job.endedAt).monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary)
                     .frame(minWidth: WorkspaceStyle.elapsedColumn, alignment: .trailing)
+                StatusIcon(state: job.stalled ? "stalled" : job.state, title: job.status)
                 Image(systemName: "chevron.right").font(Typeface.micro).foregroundStyle(.tertiary)
             }
             .padding(WorkspaceStyle.rowInsets).contentShape(Rectangle())
@@ -501,10 +501,10 @@ struct SessionRow: View {
                     }
                 }
                 Spacer(minLength: WorkspaceStyle.rowSpacer)
-                StatusIcon(state: session.stalled ? "stalled" : session.state, title: session.stalled ? String(localized: "May be stuck") : localizedCrewLabel(session.state.capitalized))
                 // An idle session stops its clock at its last activity.
                 ElapsedText(store: store, start: session.startedAt, end: session.state == "idle" ? session.activeAt : nil)
                     .monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary).frame(minWidth: WorkspaceStyle.elapsedColumn, alignment: .trailing)
+                StatusIcon(state: session.stalled ? "stalled" : session.state, title: session.stalled ? String(localized: "May be stuck") : localizedCrewLabel(session.state.capitalized))
                 Image(systemName: "chevron.right").font(Typeface.micro).foregroundStyle(.tertiary)
             }
             .padding(WorkspaceStyle.rowInsets).contentShape(Rectangle())

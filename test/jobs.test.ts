@@ -112,6 +112,49 @@ test('a turn budget interrupts once, reports a resumable failure, and starts fre
   assert.equal(job.turns, 2);
 });
 
+test('the turn budget pauses for user decisions and resumes with the remaining running time', async (t) => {
+  let worker!: JobCtl;
+  const h = harness((ctl) => { worker = ctl; });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'edit' });
+  let now = job.createdAt;
+  t.mock.method(Date, 'now', () => now);
+  const minute = 60_000;
+  now += 30 * minute;
+  worker.waiting('approval', 'Run the check?');
+  const approval = job.waiting!.id;
+  now += 12 * 60 * minute;
+  (h.jobs as any).checkStalls();
+  assert.deepEqual(h.calls, []);
+  assert.equal(job.waiting?.id, approval);
+
+  // Adapters can present the next queued request without resuming in between.
+  h.adapter.answer = async (ctl) => ctl.waiting('question', 'Which file?');
+  await h.jobs.reply(job.id, { request_id: approval, decision: 'approve' });
+  now += 10 * minute;
+  h.adapter.answer = async (ctl) => ctl.resumed();
+  await h.jobs.reply(job.id, { request_id: job.waiting!.id, message: 'app.js' });
+  now += 150 * minute - 1;
+  worker.activity();
+  (h.jobs as any).checkStalls();
+  assert.deepEqual(h.calls, []);
+  assert.equal(job.state, 'running');
+
+  now += 1;
+  (h.jobs as any).checkStalls();
+  assert.deepEqual(h.calls, ['cancel']);
+  await settled(h.jobs, job);
+  assert.equal(job.error?.budget, true);
+  assert.match(job.error!.message, /wall-clock cap of 180 minutes reached \(10800 seconds observed\)/);
+
+  h.adapter.reply = async (ctl) => { worker = ctl; };
+  await h.jobs.reply(job.id, { message: 'continue' });
+  now += 180 * minute;
+  worker.done('finished');
+  await settled(h.jobs, job);
+  assert.equal(job.error?.budget, true);
+});
+
 test('bridge compares checks on detached bases and sends at most one automatic fix before publishing', async (t) => {
   const repo = tempRepo();
   fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n');

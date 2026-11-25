@@ -293,6 +293,8 @@ export interface Job {
   sessionId: string | null;
   createdAt: number;
   turnStartedAt?: number;
+  /** Time spent on user requests already answered in this turn. */
+  turnWaitMs?: number;
   /** Last sign of life from the worker. */
   activeAt: number;
   endedAt: number | null;
@@ -1049,6 +1051,7 @@ export class Jobs {
       : `Round ${job.turns} of ${job.debate.rounds}.`}`;
     this.turnStartTokens.set(id, job.tokens ?? 0);
     if (job.tokenUse) job.tokenUse.turn = 0;
+    delete job.turnWaitMs;
     job.turnStartedAt = job.activeAt = Date.now();
     const what = !retry ? clip(input.message.split('\n')[0], 80) : job.asksUser ? 'refused action retried; the user is asked about each request' : 'refused action retried with the user\'s approval';
     this.event(job, 'started', `follow-up: ${what}`);
@@ -1612,19 +1615,24 @@ export class Jobs {
       },
       waiting: (type, reason, grant) => {
         if (!live()) return;
+        const now = Date.now();
+        // Answering a request can expose another queued request without returning to running.
+        this.recordWait(job, now);
         job.state = 'waiting';
         job.stalled = false;
-        job.waiting = { type, reason, id: randomUUID(), since: Date.now(), ...(grant ? { grant } : {}) };
+        job.waiting = { type, reason, id: randomUUID(), since: now, ...(grant ? { grant } : {}) };
         job.phase = type === 'approval' ? 'needs approval' : 'has a question';
         this.event(job, 'waiting', reason);
         this.hooks.onAttention(job, 'waiting', reason);
       },
       resumed: () => {
         if (job.state !== 'waiting') return;
+        const now = Date.now();
+        this.recordWait(job, now);
         job.state = 'running';
         job.waiting = null;
         job.phase = 'working';
-        job.activeAt = Date.now();
+        job.activeAt = now;
         this.event(job, 'progress', 'resumed');
       },
       done: (report) => {
@@ -1815,10 +1823,14 @@ export class Jobs {
     return true;
   }
 
+  private recordWait(job: Job, now: number): void {
+    if (job.waiting) job.turnWaitMs = (job.turnWaitMs ?? 0) + Math.max(0, now - job.waiting.since);
+  }
+
   private checkBudget(job: Job): void {
-    if (isTerminal(job) || this.finalizing.has(job.id) || this.cancelling.has(job.id)) return;
+    if (job.state !== 'running' || this.finalizing.has(job.id) || this.cancelling.has(job.id)) return;
     const budget = TURN_BUDGET[job.difficulty ?? 'standard'];
-    const elapsed = Date.now() - (job.turnStartedAt ?? job.createdAt);
+    const elapsed = Date.now() - (job.turnStartedAt ?? job.createdAt) - (job.turnWaitMs ?? 0);
     const tokens = job.tokenUse?.turn ?? 0;
     let stop = this.budgetStops.get(job.id);
     if (!stop) {

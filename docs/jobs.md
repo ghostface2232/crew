@@ -103,7 +103,7 @@ For plugin-enabled threads and eligibility, see [Codex plugins](sandbox.md#codex
 
 ## Token use
 
-Crew interrupts a turn that reaches either budget below. Wall time starts over on each follow-up and includes time spent waiting on a decision. The bridge's own result collection and checks run after the worker's turn. A budget stop sends ordinary failure news, with `error.budget: true`, the cap, and the observed value. The session and worktree remain available for `reply`.
+Crew interrupts a turn that reaches either budget below. The wall-clock budget starts fresh on each follow-up and counts only time the turn is running. It pauses while an approval or question awaits the user's answer. The bridge's own result collection and checks run after the worker's turn. A budget stop sends ordinary failure news, with `error.budget: true`, the cap, and the observed value. The session and worktree remain available for `reply`.
 
 | Job difficulty | Tokens added this turn (including cached input) | Wall time |
 | --- | ---: | ---: |

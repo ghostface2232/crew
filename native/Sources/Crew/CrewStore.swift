@@ -66,6 +66,9 @@ final class CrewStore {
     var selection: String? = "overview" {
         didSet { if selection != oldValue { closeDetail() } }
     }
+    var project: String = "" {
+        didSet { if project != oldValue { closeDetail() } }
+    }
     var selectedJob: String?
     /// A Claude session shown in the detail panel instead of a job; at most one of the two is set.
     var selectedSession: String?
@@ -128,23 +131,46 @@ final class CrewStore {
 
     init(api: CrewAPI = CrewAPI(), defaults: UserDefaults = .standard) {
         self.api = api; self.defaults = defaults
-        selection = defaults.string(forKey: "selection") ?? "overview"
+        let page = defaults.string(forKey: "selection") ?? "overview"
+        let legacyPrefix = "project:"
+        if page.hasPrefix(legacyPrefix) {
+            project = String(page.dropFirst(legacyPrefix.count))
+            persistSelection()
+        } else {
+            selection = ["overview", "needs", "activity", "history"].contains(page) ? page : "overview"
+            project = defaults.string(forKey: "project") ?? ""
+        }
         let saved = defaults.double(forKey: "panelWidth")
         panelWidth = saved > 0 ? saved : WorkspaceStyle.panelWidth
         api.onSignInFailure = { [weak self] error in self?.connectionFailed(error) }
     }
-    var project: String { selection?.hasPrefix("project:") == true ? String(selection!.dropFirst(8)) : "" }
     var now: Double { displayTime + clockSkew }
     var projects: [String] { Array(Set(state.projectPaths + (project.isEmpty ? [] : [project]))).sorted() }
-    func persistSelection() { defaults.set(selection, forKey: "selection") }
+    var scopedWaitingJobs: [Job] { state.waitingJobs.filter { project.isEmpty || $0.projectPath == project } }
+    var scopedWaitingSessions: [ClaudeSession] { state.waitingSessions.filter { project.isEmpty || $0.projectPath == project } }
+    var scopedPendingCount: Int { project.isEmpty ? pendingCount : scopedWaitingJobs.count + scopedWaitingSessions.count }
+    var scopedEvents: [CrewEvent] {
+        guard !project.isEmpty else { return events }
+        let jobs = Dictionary(state.jobs.map { ($0.id, $0.projectPath) }, uniquingKeysWith: { first, _ in first })
+        let sessions = Dictionary(state.claude.map { ($0.id, $0.projectPath) }, uniquingKeysWith: { first, _ in first })
+        return events.filter { event in
+            // A live session may have resolved its root since recording the event.
+            let path = event.job_id.flatMap { jobs[$0] } ?? event.session_id.flatMap { sessions[$0] } ?? event.project
+            return path == project
+        }
+    }
+    func persistSelection() {
+        defaults.set(selection, forKey: "selection")
+        defaults.set(project, forKey: "project")
+    }
     /// The detail panel's width as the user last dragged it, kept across launches.
     var panelWidth: CGFloat = WorkspaceStyle.panelWidth
     func persistPanelWidth() { defaults.set(Double(panelWidth), forKey: "panelWidth") }
     func openJob(_ id: String, navigate: Bool = false) {
         if navigate {
             search = ""
-            if let job = state.jobs.first(where: { $0.id == id }) { selection = "project:\(job.projectPath)" }
-            else { selection = "overview" }
+            project = state.jobs.first(where: { $0.id == id })?.projectPath ?? ""
+            selection = "overview"
         }
         selectedSession = nil
         selectedJob = id

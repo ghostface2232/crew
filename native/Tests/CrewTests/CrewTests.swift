@@ -1006,12 +1006,93 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
     }
     @Test func pendingAcrossProjectsAndSavedFilterRemainReachable() throws {
         let store = try store()
-        store.selection = "project:/missing/project"
+        store.project = "/missing/project"
+        store.selection = "history"
         #expect(store.projects.contains("/missing/project"))
         #expect(store.state.pendingCount == 1)
         store.openJob("cx-question", navigate: true)
         #expect(store.project == "/workspace/Crew")
+        #expect(store.selection == "overview")
         #expect(store.selectedJob == "cx-question")
+        store.openJob("missing", navigate: true)
+        #expect(store.project.isEmpty)
+        #expect(store.selection == "overview")
+    }
+    @Test func savedProjectSelectionMigratesToOverview() throws {
+        let suite = "crew-tests-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("project:/workspace/Crew", forKey: "selection")
+        let store = CrewStore(api: CrewAPI(port: 0), defaults: defaults)
+        #expect(store.selection == "overview")
+        #expect(store.project == "/workspace/Crew")
+        #expect(defaults.string(forKey: "selection") == "overview")
+        #expect(defaults.string(forKey: "project") == "/workspace/Crew")
+    }
+    @Test func choosingProjectKeepsPageAndPersistsBothChoices() throws {
+        let store = try store()
+        store.selection = "activity"
+        store.openJob("cx-question")
+        store.project = "/workspace/Crew"
+        #expect(store.selection == "activity")
+        #expect(!store.detailOpen)
+        store.persistSelection()
+        let restored = CrewStore(api: CrewAPI(port: 0), defaults: store.defaults)
+        #expect(restored.selection == "activity")
+        #expect(restored.project == "/workspace/Crew")
+        store.defaults.set("obsolete", forKey: "selection")
+        let recovered = CrewStore(api: CrewAPI(port: 0), defaults: store.defaults)
+        #expect(recovered.selection == "overview")
+        #expect(recovered.project == "/workspace/Crew")
+    }
+    @Test func pendingListsAndCountFollowProjectScope() throws {
+        let store = try store()
+        let index = try #require(store.state.claude.firstIndex { $0.id == "lead-2" })
+        store.state.claude[index].state = "waiting"
+        #expect(store.scopedWaitingJobs.map(\.id) == ["cx-question"])
+        #expect(store.scopedWaitingSessions.map(\.id) == ["lead-2"])
+        #expect(store.scopedPendingCount == 2)
+
+        store.project = "/workspace/Crew"
+        #expect(store.scopedWaitingJobs.map(\.id) == ["cx-question"])
+        #expect(store.scopedWaitingSessions.isEmpty)
+        #expect(store.scopedPendingCount == 1)
+
+        store.project = "/workspace/Other"
+        #expect(store.scopedWaitingJobs.isEmpty)
+        #expect(store.scopedWaitingSessions.map(\.id) == ["lead-2"])
+        #expect(store.scopedPendingCount == 1)
+
+        store.project = "/workspace/Empty"
+        #expect(store.scopedWaitingJobs.isEmpty)
+        #expect(store.scopedWaitingSessions.isEmpty)
+        #expect(store.scopedPendingCount == 0)
+        #expect(store.pendingCount == 2)
+        #expect(store.state.pendingCount == 2)
+    }
+    @Test func activityPrefersLiveProjectsAndFallsBackToRecordedProject() throws {
+        let store = try store()
+        let other = try #require(store.state.claude.firstIndex { $0.id == "lead-1" })
+        store.state.claude[other].root = "/workspace/Other"
+        let index = try #require(store.state.claude.firstIndex { $0.id == "lead-2" })
+        store.state.claude[index].root = "/workspace/Crew"
+        store.events = try JSONDecoder().decode([CrewEvent].self, from: Data("""
+            [
+                {"seq":1,"ts":"","agent":"codex","job_id":"cx-question","session_id":"lead-1","project":"/workspace/Other","kind":"progress","detail":""},
+                {"seq":2,"ts":"","agent":"claude","job_id":"missing","session_id":"lead-2","project":"/workspace/Other","kind":"progress","detail":""},
+                {"seq":3,"ts":"","agent":"claude","session_id":"gone","project":"/workspace/Crew","kind":"progress","detail":""},
+                {"seq":4,"ts":"","agent":"claude","session_id":"gone","kind":"progress","detail":""}
+            ]
+            """.utf8))
+        #expect(store.scopedEvents.map(\.id) == [1, 2, 3, 4])
+
+        store.project = "/workspace/Crew"
+        #expect(store.scopedEvents.map(\.id) == [1, 2, 3])
+
+        store.state.claude.remove(at: index)
+        #expect(store.scopedEvents.map(\.id) == [1, 3])
+        store.project = "/workspace/Other"
+        #expect(store.scopedEvents.map(\.id) == [2])
     }
     @Test func pendingCountFollowsEveryChangeToTheState() throws {
         let store = try store()

@@ -24,7 +24,7 @@ struct WorkspaceTabs: NSViewRepresentable {
     private static let pages = ["overview", "needs", "activity", "history"]
     private static let titles = [String(localized: "Overview"), String(localized: "Needs You"), String(localized: "Activity"), String(localized: "History")]
     private static let symbols = ["square.grid.2x2", "bell", "bolt", "clock.arrow.circlepath"]
-    private var current: String { store.project.isEmpty ? store.selection ?? "overview" : "overview" }
+    private var current: String { store.selection ?? "overview" }
 
     func makeNSView(context: Context) -> NSSegmentedControl {
         let control = NSSegmentedControl(labels: Self.titles, trackingMode: .selectOne,
@@ -38,7 +38,7 @@ struct WorkspaceTabs: NSViewRepresentable {
         coordinator.store = store
         // Only touch the control when something it shows has changed. Setting images or the selection
         // again on every toolbar update restarts the system's sliding selection animation.
-        let badged = store.state.pendingCount > 0
+        let badged = store.scopedPendingCount > 0
         if coordinator.badged != badged {
             coordinator.badged = badged
             for index in Self.pages.indices {

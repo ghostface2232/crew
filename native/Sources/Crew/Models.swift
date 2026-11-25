@@ -193,6 +193,7 @@ struct CrewEvent: Codable, Sendable, Identifiable, Equatable {
     var agent: String
     var session_id: String?
     var job_id: String?
+    var project: String?
     var kind: String
     var detail: String
     var id: Int { seq }

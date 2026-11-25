@@ -84,7 +84,11 @@ private struct MenuBarMenu: View {
         Text(store.connected ? String(localized: "Crew is connected") : String(localized: "Crew is reconnecting"))
         Button("Open Crew") { show(nil) }
         if pending > 0 {
-            Button(pending == 1 ? String(localized: "1 request needs you") : String(localized: "\(pending) requests need you")) { show(nil); store.selection = "needs" }
+            Button(pending == 1 ? String(localized: "1 request needs you") : String(localized: "\(pending) requests need you")) {
+                show(nil)
+                store.project = ""
+                store.selection = "needs"
+            }
         }
         Divider()
         ForEach(Array(waiting.prefix(5))) { job in

@@ -12,6 +12,8 @@ struct BoardView: View {
     @State private var scroll = ScrollPosition(edge: .top)
     /// Lets a card that changes column glide across instead of fading out of one and into the other.
     @Namespace private var cards
+    private var pageKey: String { "\(store.project)|\(store.selection ?? "overview")" }
+    private var overview: Bool { (store.selection ?? "overview") == "overview" }
     var body: some View {
         NavigationSplitView {
             ProjectSidebar(store: store, openSettings: openSettings)
@@ -35,7 +37,7 @@ struct BoardView: View {
                 }
         }
         .frame(minHeight: WorkspaceStyle.windowMinHeight)
-        .onChange(of: store.selection) {
+        .onChange(of: pageKey) {
             store.persistSelection()
             scroll.scrollTo(edge: .top)
         }
@@ -44,13 +46,15 @@ struct BoardView: View {
         .sheet(isPresented: $store.showingWelcome, onDismiss: store.markWelcomed) { WelcomeView(store: store) }
     }
     private var page: some View {
-        ScrollView {
+        let pending = store.scopedPendingCount
+        let issuesProject = store.connected && overview ? store.project : ""
+        return ScrollView {
             // Lazy so a long history builds only the panels on screen.
             LazyVStack(alignment: .leading, spacing: WorkspaceStyle.cardGap) {
                 if !store.connected { connectionBanner }
-                heading
-                if store.connected && store.project.isEmpty && (store.selection == "overview" || store.selection == nil) { SetupCard(api: store.api) }
-                if store.state.pendingCount > 0 && store.selection != "needs" && !store.project.isEmpty { attentionBanner.transition(.card) }
+                heading(pending: pending)
+                if store.connected && store.project.isEmpty && overview { SetupCard(api: store.api) }
+                if pending > 0 && store.selection != "needs" && !store.project.isEmpty { attentionBanner(pending: pending).transition(.card) }
                 if store.selection == "needs" { NeedsYouView(store: store) }
                 else if store.selection == "activity" { activity }
                 else { workspace }
@@ -58,27 +62,26 @@ struct BoardView: View {
             .onGeometryChange(for: Bool.self) { $0.size.width >= Self.twoColumnWidth } action: { wide = $0 }
             // A project's issue suggestions, read again on reconnect. The daemon keeps each answer ten minutes, so
             // asking more often only reads its cache.
-            .task(id: store.connected ? store.project : "") {
-                let project = store.project
-                guard store.connected, !project.isEmpty else { return }
+            .task(id: issuesProject) {
+                guard !issuesProject.isEmpty else { return }
                 while !Task.isCancelled {
-                    await store.loadIssues(project)
+                    await store.loadIssues(issuesProject)
                     try? await Task.sleep(for: .seconds(600))
                 }
             }
             // The banner and the heading's review button come and go with requests; the page below makes room.
-            .animation(Motion.reduced(Motion.reflow, reduceMotion), value: store.state.pendingCount > 0)
+            .animation(Motion.reduced(Motion.reflow, reduceMotion), value: pending > 0)
             .background(OverlayScrollers())
             .padding(.horizontal, WorkspaceStyle.pageMargin).padding(.top, WorkspaceStyle.pageTop).padding(.bottom, WorkspaceStyle.pageMargin)
             .frame(maxWidth: WorkspaceStyle.pageMaxWidth).frame(maxWidth: .infinity)
-            // Only the contents change with the tab. Replacing the scroll view itself left the toolbar's scroll edge
+            // Only the contents change during navigation. Replacing the scroll view itself left the toolbar's scroll edge
             // effect with nothing under it for a few frames, which showed as a light flash at the top.
-            .id(store.selection ?? "overview")
+            .id(pageKey)
             // A crossfade layers two full pages at once; only the incoming page animates.
             .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .identity))
             // Tied to the page itself, so tabs, the sidebar and keyboard shortcuts all get the same entrance;
             // a withAnimation in the AppKit tab control's action did not reach this view.
-            .animation(Motion.reduced(Motion.page, reduceMotion), value: store.selection)
+            .animation(Motion.reduced(Motion.page, reduceMotion), value: pageKey)
         }
         .scrollPosition($scroll)
         // The page keeps scrolling and working beside the open panel. A click on it that no control takes
@@ -134,7 +137,7 @@ struct BoardView: View {
     }
     /// Matched within the page only: the same mission on another page must not fly across when the page changes.
     private func placed<Card: View>(_ card: Card, _ tile: Tile) -> some View {
-        card.matchedGeometryEffect(id: "\(store.selection ?? "overview")/\(tile.id)", in: cards).transition(.card)
+        card.matchedGeometryEffect(id: "\(pageKey)/\(tile.id)", in: cards).transition(.card)
     }
     private var title: String {
         if !store.project.isEmpty { return projectName(store.project, among: store.projects) }
@@ -158,26 +161,25 @@ struct BoardView: View {
             Button("Retry") { store.start() }.pillButton()
         }.padding(WorkspaceStyle.bannerPadding).background(Palette.attention(Palette.warning), in: RoundedRectangle(cornerRadius: WorkspaceStyle.cardRadius))
     }
-    private var attentionBanner: some View {
+    private func attentionBanner(pending: Int) -> some View {
         Button { store.selection = "needs"; store.search = "" } label: {
             HStack {
                 Image(systemName: "bell.badge.fill").foregroundStyle(Palette.warning)
-                Text(store.state.pendingCount == 1 ? String(localized: "1 request needs your attention") : String(localized: "\(store.state.pendingCount) requests need your attention")).font(Typeface.bodyStrong)
+                Text(pending == 1 ? String(localized: "1 request needs your attention") : String(localized: "\(pending) requests need your attention")).font(Typeface.bodyStrong)
                 Spacer()
                 Text("Review").font(Typeface.callout)
                 Image(systemName: "chevron.right").font(Typeface.micro)
             }.padding(WorkspaceStyle.bannerPadding).contentShape(Rectangle())
         }.buttonStyle(.plain).glassEffect(.regular, in: .rect(cornerRadius: WorkspaceStyle.cardRadius))
     }
-    private var heading: some View {
-        let overview = store.selection == "overview" || store.selection == nil
-        let pending = store.state.pendingCount
+    private func heading(pending: Int) -> some View {
+        let showReview = overview && store.project.isEmpty && pending > 0
         return ViewThatFits(in: .horizontal) {
-            if overview || !store.project.isEmpty {
+            if overview {
                 HStack(alignment: .top, spacing: Space.x5l) {
                     // A fixed ideal width keeps a long project path from forcing the stacked layout;
                     // the path truncates instead.
-                    headingCopy(overview: overview, pending: pending)
+                    headingCopy(showReview: showReview)
                         .frame(minWidth: Self.headingCopyWidth, idealWidth: Self.headingCopyWidth, maxWidth: .infinity)
                         // Align the title's cap height, not its line box, with the top of the summary card.
                         .alignmentGuide(.top) { $0[.firstTextBaseline] - Typeface.pageTitleCapHeight }
@@ -185,22 +187,22 @@ struct BoardView: View {
                 }
             }
             VStack(alignment: .leading, spacing: Space.x3l) {
-                headingCopy(overview: overview, pending: pending)
-                if overview || !store.project.isEmpty { WorkspaceSummary(store: store) }
+                headingCopy(showReview: showReview)
+                if overview { WorkspaceSummary(store: store) }
             }
         }.padding(.top, Space.s).padding(.bottom, Space.s)
     }
-    private func headingCopy(overview: Bool, pending: Int) -> some View {
+    private func headingCopy(showReview: Bool) -> some View {
         VStack(alignment: .leading, spacing: Space.xxl) {
             WorkspaceHeading(title: title, subtitle: store.project.isEmpty ? nil : store.project)
-            if overview && pending > 0 {
+            if showReview {
                 Button("Review Requests", systemImage: "arrow.up.right") { store.selection = "needs"; store.search = "" }
                     .glassPillButton(prominent: false)
             }
         }
     }
     @ViewBuilder private var workspace: some View {
-        if store.selection != "history" && store.search.isEmpty {
+        if overview && store.search.isEmpty {
             // The page already puts cardGap between its items; the rest makes up a section's gap.
             AgentOverview(store: store).padding(.bottom, WorkspaceStyle.sectionGap - WorkspaceStyle.cardGap)
             if store.connected && !store.project.isEmpty {
@@ -272,14 +274,14 @@ struct BoardView: View {
         }.animation(Motion.reduced(Motion.reflow, reduceMotion), value: layout)
     }
     private var activity: some View {
+        let events = store.scopedEvents.filter { matches("\($0.detail) \($0.agent)") }
         // The page heading already names this list.
-        ContentPanel(title: nil) {
-            let events = store.events.filter { matches("\($0.detail) \($0.agent)") }
+        return ContentPanel(title: nil) {
             if events.isEmpty { Text(store.search.isEmpty ? String(localized: "No activity yet.") : String(localized: "No matching activity.")).foregroundStyle(.secondary) }
             EventList(events: events) { store.openJob($0) }
         }
         // On the panel rather than the list, so the panel grows with the rows instead of snapping to its new height.
-        .animation(Motion.reduced(Motion.reflow, reduceMotion), value: store.events.last?.id)
+        .animation(Motion.reduced(Motion.reflow, reduceMotion), value: events.last?.id)
     }
 }
 
@@ -676,8 +678,8 @@ struct NeedsYouView: View {
     @Bindable var store: CrewStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private func matches(_ text: String) -> Bool { store.search.isEmpty || text.localizedCaseInsensitiveContains(store.search) }
-    private var jobs: [Job] { store.state.waitingJobs.filter { matches("\($0.title) \($0.projectPath) \($0.agent) \($0.waiting?.reason ?? "")") } }
-    private var sessions: [ClaudeSession] { store.state.waitingSessions.filter { matches("\($0.title) \($0.projectPath) \(agentName($0.agent)) \($0.waitingFor ?? "")") } }
+    private var jobs: [Job] { store.scopedWaitingJobs.filter { matches("\($0.title) \($0.projectPath) \($0.agent) \($0.waiting?.reason ?? "")") } }
+    private var sessions: [ClaudeSession] { store.scopedWaitingSessions.filter { matches("\($0.title) \($0.projectPath) \(agentName($0.agent)) \($0.waitingFor ?? "")") } }
     var body: some View {
         let jobs = jobs, sessions = sessions
         // Requests come and go as agents ask and get answered; the cards around them close up or make room.
@@ -685,7 +687,7 @@ struct NeedsYouView: View {
             .animation(Motion.reduced(Motion.reflow, reduceMotion), value: jobs.map(\.id) + ["sessions"] + sessions.map(\.id))
     }
     @ViewBuilder private func content(jobs: [Job], sessions: [ClaudeSession]) -> some View {
-        if store.state.pendingCount == 0 {
+        if store.scopedPendingCount == 0 {
             EmptyState(title: String(localized: "All caught up"), symbol: "checkmark.circle").transition(.card)
         } else if jobs.isEmpty && sessions.isEmpty {
             EmptyState(title: String(localized: "No matching requests"), symbol: "magnifyingglass").transition(.card)
@@ -765,7 +767,7 @@ private enum Tile: Identifiable {
     }
 }
 
-/// Projects live in a sidebar so a long list stays scannable; choosing one scopes the overview to it.
+/// Projects live in a sidebar so a long list stays scannable; choosing one scopes every page to it.
 struct ProjectSidebar: View {
     @Bindable var store: CrewStore
     var openSettings: () -> Void
@@ -773,9 +775,8 @@ struct ProjectSidebar: View {
     var body: some View {
         let projects = store.projects
         List(selection: Binding<String?>(
-            // The other pages select no row, so choosing All projects from them returns to the overview.
-            get: { !store.project.isEmpty ? store.project : (store.selection ?? "overview") == "overview" ? "" : nil },
-            set: { path in store.selection = path.map { $0.isEmpty ? "overview" : "project:\($0)" } ?? "overview" }
+            get: { store.project },
+            set: { path in store.project = path ?? "" }
         )) {
             Label("All projects", systemImage: "square.stack").tag("")
             Section("Projects") {

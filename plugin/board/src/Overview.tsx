@@ -3,18 +3,18 @@ import type { CSSProperties, ReactNode } from 'react';
 import {
   AddRegular, ArrowRight16Filled, ArrowUpRight16Filled, ChatMultipleRegular, CheckmarkCircle16Regular,
   CheckmarkCircleRegular, ChevronDown16Regular, ChevronUp16Regular, CircleMultipleConcentric16Regular,
-  ErrorCircle16Regular, ErrorCircleRegular, LayerRegular, SearchRegular, StackRegular,
+  DismissRegular, ErrorCircle16Regular, ErrorCircleRegular, LayerRegular, SearchRegular, StackRegular, TaskListLtrRegular,
 } from '@fluentui/react-icons';
 import type { ProviderUsage } from '../../bridge/usage.ts';
 import type { Holder } from '../../bridge/config.ts';
-import type { BoardJob, CrewEvent, Mission, SetupState, Snapshot, WorkerAgent } from './types.ts';
+import type { BoardJob, CrewEvent, IssueList, Mission, SetupState, Snapshot, WorkerAgent } from './types.ts';
 import { formatDate, longDay, shortDateTime, shortDay, shortMonth, timeOfDay } from './dates.ts';
 import { request } from './api.ts';
 import {
   dailyCounts, elapsed, endedPerHour, holdersOf, jobLabel, leadMission, limitWindowLabel, NAMES, projectOf, relativeDuration, rolesOf, runningPerHour,
   sessionAgent, usageWindowName, unsettled,
 } from './model.ts';
-import { AgentMark, Chip, EmptyState, Icon, RollingNumber, StatusIcon, tNodes, useFade, useClock, useLanguage, useStableItems } from './ui.tsx';
+import { AgentMark, Chip, CopyButton, EmptyState, Icon, RollingNumber, StatusIcon, tNodes, useFade, useClock, useLanguage, useStableItems } from './ui.tsx';
 import { JobRow, jobKind, jobStatusState, MissionPanel, SessionRow } from './Missions.tsx';
 import { t, translated } from './i18n.ts';
 
@@ -572,6 +572,57 @@ function Setup() {
   );
 }
 
+/** How many suggestions a project shows at once; the next one takes the place of one the user dismisses. */
+const SHOWN_ISSUES = 3;
+
+/**
+ * Open issues of the project's repository that are the user's to start: assigned to them, or to no one. Each can be
+ * copied as a /crew:run command or dismissed for good. Says nothing when there are none or gh cannot list them, as in the app.
+ */
+function IssueSuggestions({ project, command }: { project: string; command: string }) {
+  const [found, setFound] = useState<IssueList | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let live = true;
+    setFound(null);
+    const load = () => request<IssueList>(`/api/issues?project=${encodeURIComponent(project)}`).then((next) => live && setFound(next), () => {});
+    load();
+    // The daemon keeps each answer ten minutes, so asking more often only reads its cache.
+    const timer = setInterval(load, 10 * 60_000);
+    return () => { live = false; clearInterval(timer); };
+  }, [project]);
+  const shown = found?.issues.slice(0, SHOWN_ISSUES) ?? [];
+  if (!shown.length) return null;
+  const dismiss = async (url: string) => {
+    setError('');
+    try {
+      await request('/api/issues/dismiss', { url });
+      setFound((current) => current && { ...current, issues: current.issues.filter((issue) => issue.url !== url) });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  return (
+    <Panel label={t('Start from an issue')} className="issue-suggestions" action={<Icon icon={TaskListLtrRegular} />}>
+      <ul className="issue-list">
+        {shown.map((issue) => (
+          <li key={issue.url}>
+            <a className="issue-title selectable" href={issue.url} target="_blank" rel="noreferrer" title={issue.title}>
+              <span className="digits secondary">#{issue.number}</span> {issue.title}
+            </a>
+            {issue.labels.length > 0 && <span className="caption secondary issue-labels">{issue.labels.slice(0, 3).join(' · ')}</span>}
+            <CopyButton text={`${command} ${issue.url}`} short={t('Copy')}>{t('Copy Command')}</CopyButton>
+            <button className="icon" aria-label={t('Dismiss #{number}', { number: issue.number })} title={t('Dismiss. This issue is not suggested again.')} onClick={() => void dismiss(issue.url)}>
+              <Icon icon={DismissRegular} />
+            </button>
+          </li>
+        ))}
+      </ul>
+      {error && <p className="callout error selectable" role="status"><Icon icon={ErrorCircleRegular} size={13} />{error}</p>}
+    </Panel>
+  );
+}
+
 /** Shows the `backticked` names in a setup item as code. */
 const withCode = (text: string) => text.split('`').map((part, index) => (index % 2 ? <code key={index}>{part}</code> : part));
 
@@ -651,6 +702,8 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
       <div className="dash">
         <div className="dash-main">
           {!project && <Setup />}
+          {/* Codex names a plugin skill with $, so the command is copied in the form the project's latest lead takes. */}
+          {project && <IssueSuggestions project={project} command={sessions.toSorted((a, b) => b.activeAt - a.activeAt)[0]?.host === 'codex' ? '$crew:run' : '/crew:run'} />}
           {active.map(panel)}
           {loose.length > 0 && (
             <Panel label={t('Other jobs')} style={{ '--i': active.length } as CSSProperties} action={<Icon icon={StackRegular} />}>

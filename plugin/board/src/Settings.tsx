@@ -4,7 +4,7 @@ import {
   LocalLanguage16Regular, Options16Regular, ShieldCheckmark16Regular, TextFont16Regular, Wrench16Regular,
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
-import type { AppUpdate, Preset, PresetName, Snapshot } from './types.ts';
+import type { AppUpdate, Preset, PresetName, ProjectSettings, Snapshot } from './types.ts';
 import type { AgentSettings, Holder, JobKind, Role, RoleAssignment, RoleInfo, RoleSettings, WorkerAgent } from '../../bridge/config.ts';
 import { formatDate, timeOfDay } from './dates.ts';
 import { request } from './api.ts';
@@ -62,6 +62,13 @@ const PANES = translated((): Record<Fixed, { title: string; icon: FluentIcon; ki
   language: { title: t('Language'), icon: LocalLanguage16Regular },
   about: { title: t('About Crew'), icon: Info16Regular },
 }));
+
+/** What each of a project's switches lets Crew do there without asking, as in the app. */
+const PROJECT_SWITCHES = translated((): { key: keyof ProjectSettings; label: string; note: string }[] => [
+  { key: 'autonomy', label: t('Push and open pull requests'), note: t('Only after the work is reviewed and its checks pass. Crew never merges, closes, or deploys.') },
+  { key: 'watchAway', label: t('Watch pull requests while away'), note: t('Read every 10 minutes while the lead session is closed; news waits until it is back.') },
+  { key: 'autoResume', label: t('Resume after a usage limit'), note: t('A job stopped by a usage limit carries on once usage resets, unless its mission was finished or dismissed.') },
+]);
 
 /**
  * The note under the update section, said only where it explains what the user sees: no updates at all, or one
@@ -379,6 +386,16 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       board.receive('peerRatings', (await request<{ peerRatings: boolean }>('/api/peer-ratings', { enabled })).peerRatings);
     } catch (error) {
       setRatingsStatus((error as Error).message);
+    }
+  };
+  // A project's switches save as they are flipped, like peer ratings.
+  const [projectStatus, setProjectStatus] = useState('');
+  const setProjectSwitch = async (dir: string, key: keyof ProjectSettings, on: boolean) => {
+    setProjectStatus('');
+    try {
+      board.receive('projects', (await request<{ projects: Record<string, ProjectSettings> }>('/api/project-settings', { project: dir, changes: { [key]: on } })).projects);
+    } catch (error) {
+      setProjectStatus(t('Not saved: {error}', { error: (error as Error).message }));
     }
   };
   // Stored as it is picked; the board then switches to the language the daemon reports (followSetting in i18n.ts).
@@ -745,6 +762,27 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                   </div>
                   {/* The board switches at once; only the macOS app needs reopening, and it says so itself. */}
                   {languageStatus && <p className={styles.footnote} role="alert">{languageStatus}</p>}
+                </section>
+              )}
+              {project !== null && pageScope !== null && state.projects !== undefined && (
+                <section className={styles.group}>
+                  <div className={styles.rows}>
+                    {PROJECT_SWITCHES().map(({ key, label, note }) => (
+                      <label key={key} className={`${styles.row} ${styles.described}`}>
+                        <span>
+                          {label}
+                          <small>{note}</small>
+                        </span>
+                        <input
+                          type="checkbox"
+                          className="switch"
+                          checked={state.projects?.[project]?.[key] === true}
+                          onChange={(event) => void setProjectSwitch(project, key, event.target.checked)}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  {projectStatus && <p className={styles.footnote} role="alert">{projectStatus}</p>}
                 </section>
               )}
               {pageScope !== null && (

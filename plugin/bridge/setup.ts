@@ -213,7 +213,7 @@ async function registerCodex(root: string): Promise<HostRegistration | null> {
   const current = codexMarketplaces(list.out).get('crew');
   const marketplace = PACKAGED ? path.join(CODEX_DIR, 'marketplace') : MARKETPLACE;
   const other = current !== undefined && !sameFolder(current, marketplace);
-  // A source checkout's hooks run its scripts on the Node in PATH, as its own MCP server does.
+  // A source checkout's hooks run on the Node in PATH, as its own MCP server does.
   let runtime = 'node';
   if (PACKAGED) {
     if (other && !writtenByCrew(current)) return { ok: true, current: false, detail: `Registered from ${current}; the app leaves it as it is.` };
@@ -232,8 +232,11 @@ async function registerCodex(root: string): Promise<HostRegistration | null> {
   if (!added.ok) return { ok: false, current: false, detail: `Could not register the marketplace with Codex: ${lastLine(added.out)}` };
   const plugin = await run(bin, ['plugin', 'add', CODEX_PLUGIN], 60_000);
   if (!plugin.ok) return { ok: false, current: false, detail: `Could not install the plugin in Codex: ${lastLine(plugin.out)}` };
+  // A source checkout's hooks run Codex's copy of it, as its MCP server does, not the checkout as it changes.
+  const copy = /^Installed plugin root:\s*(.+?)\s*$/m.exec(plugin.out)?.[1]?.replace(/^\\\\\?\\/, '');
+  if (!PACKAGED && !copy) return { ok: false, current: false, detail: `Could not tell where Codex installed the plugin: ${lastLine(plugin.out)}` };
   try {
-    const bridge = path.join(root, 'plugin', 'bridge');
+    const bridge = PACKAGED ? path.join(root, 'plugin', 'bridge') : path.join(copy!, 'bridge');
     const launcher = writeLauncher(path.join(CODEX_DIR, 'bin'), runtime, bridge, PACKAGED ? '.js' : '.ts');
     installCodexHooks(codexHooksFile(), codexHooks(readJson(path.join(root, 'plugin', CODEX_HOOKS)), launcher), launcher);
   } catch (err) {
@@ -438,6 +441,15 @@ export async function codexHooksItem(bin: string, timeout = HOOK_LIST_TIMEOUT_MS
     };
   }
   if (trust === 'trusted') return { ...item, ok: true, detail: 'Trusted.', summary: 'Complete' };
+  if (trust === 'missing' && PACKAGED) {
+    // The app leaves a source checkout's registration as it is, so its Install would not add the hooks.
+    const list = await run(bin, ['plugin', 'marketplace', 'list'], 60_000);
+    const current = list.ok ? codexMarketplaces(list.out).get('crew') : undefined;
+    if (current && !sameFolder(current, path.join(CODEX_DIR, 'marketplace')) && !writtenByCrew(current)) return {
+      ...item, ok: false, detail: `Codex runs Crew from ${current}, which the app leaves as it is. Run \`crew install\` from there to add its hooks to ${codexHooksFile()}.`,
+      summary: 'Run `crew install` from the Crew checkout Codex runs.',
+    };
+  }
   if (trust === 'missing') return {
     ...item, ok: false, repairable: true, detail: `Crew's hooks are missing from ${codexHooksFile()}, or are there more than once.`,
     summary: 'Select Install to add Crew hooks to Codex.',

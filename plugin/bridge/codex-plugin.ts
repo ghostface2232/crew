@@ -88,11 +88,12 @@ export function codexHooks(source: HooksFile, launcher: string, platform: NodeJS
  * `codexHooks` writes one, `<launcher> <script>`; each is taken out wherever it is, so none is left twice. Crew's
  * groups go where the first group holding one stood, so the key Codex trusts each hook by, its event, group and
  * index, stays the same, and new ones go after the user's own. A user's handler inside Crew's group stays, in a group
- * of its own. A file that is not a hooks file is left as it is. A symbolic link is written through, keeping the
- * target's permissions.
+ * of its own, unless Crew's handlers are already as `hooks` has them: then the file is left as it is, so registering
+ * again moves no one's hook. A file that is not a hooks file is left as it is.
  */
 export function installCodexHooks(file: string, hooks: HooksFile, launcher: string, platform: NodeJS.Platform = process.platform): boolean {
   let current: { hooks?: unknown; [key: string]: unknown } = { hooks: {} };
+  // A link whose target is missing counts as no file: writing through it creates the target.
   const exists = fs.existsSync(file);
   if (exists) {
     current = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -103,9 +104,16 @@ export function installCodexHooks(file: string, hooks: HooksFile, launcher: stri
   const events = { ...existing } as Record<string, unknown>;
   const prefix = commandPrefix(launcher, platform);
   const ours = (hook: unknown) => typeof (hook as HookEntry | null)?.command === 'string' && (hook as HookEntry).command!.startsWith(prefix);
-  for (const event of new Set([...Object.keys(events), ...Object.keys(hooks.hooks)])) {
+  const names = [...new Set([...Object.keys(events), ...Object.keys(hooks.hooks)])];
+  for (const event of names) {
     const groups = events[event] ?? [];
     if (!Array.isArray(groups) || groups.some((group) => !Array.isArray(group?.hooks))) throw new Error(`${file} has hooks for ${event} that are not a list.`);
+  }
+  const installed = (event: string) => JSON.stringify((events[event] as { hooks: unknown[] }[] | undefined ?? []).flatMap((group) => group.hooks.filter(ours)));
+  const wanted = (event: string) => JSON.stringify((hooks.hooks[event] ?? []).flatMap((group) => group.hooks));
+  if (names.every((event) => installed(event) === wanted(event))) return false;
+  for (const event of names) {
+    const groups = (events[event] ?? []) as { hooks: unknown[] }[];
     const at = groups.findIndex((group) => group.hooks.some(ours));
     // A group of Crew's alone goes; one the user added a handler to keeps the user's handlers.
     const kept = groups.flatMap((group) => {
@@ -121,9 +129,10 @@ export function installCodexHooks(file: string, hooks: HooksFile, launcher: stri
   }
   const updated = { ...current, hooks: events };
   if (JSON.stringify(updated) === JSON.stringify(current)) return false;
-  const target = exists ? fs.realpathSync(file) : file;
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  writeAtomic(target, `${JSON.stringify(updated, null, 2)}\n`, exists ? fs.statSync(target).mode & 0o777 : undefined);
+  if (!exists) fs.mkdirSync(path.dirname(file), { recursive: true });
+  // Written in place rather than replaced, so the file keeps what the user gave it: a symbolic link, its permissions,
+  // and on Windows its access control list, which a replacement would take from the folder instead.
+  fs.writeFileSync(file, `${JSON.stringify(updated, null, 2)}\n`);
   return true;
 }
 
@@ -191,11 +200,51 @@ export const pointer = (value: unknown): string => {
   return value.slice(2);
 };
 
-/** The launcher `writeLauncher` writes in `dir`, which the hook commands name. */
-export const launcherPath = (dir: string, platform: NodeJS.Platform = process.platform) => path.join(dir, platform === 'win32' ? 'hook.cmd' : 'hook');
+/**
+ * The launcher `writeLauncher` writes in `dir`, which the hook commands name. Not the `hook` an earlier Crew wrote
+ * there for its plugin hooks, which an older copy registering again would write back without the launcher's checks.
+ */
+export const launcherPath = (dir: string, platform: NodeJS.Platform = process.platform) => path.join(dir, platform === 'win32' ? 'lead-hook.cmd' : 'lead-hook');
 
 /** Set in the environment of the `codex app-server` that runs Crew's workers, whose hooks the launcher skips. */
 export const WORKER_ENV = 'CREW_CODEX_WORKER';
+
+/**
+ * Whether Codex's `config.toml` text has Crew's plugin installed and on: a `plugins."crew@crew"` table or key (Codex
+ * removes the table with the plugin), its `enabled` not false, and the `plugins` feature not turned off. It reads the
+ * TOML Codex and people write, comments and quoted keys included, but not multi-line strings. The launcher runs its
+ * source, so it names nothing outside itself.
+ */
+export function crewPluginOn(config: string): boolean {
+  const unquote = (key: string) => key.replace(/^"(.*)"$|^'(.*)'$/s, '$1$2');
+  const keys = (dotted: string) => (dotted.match(/"[^"]*"|'[^']*'|[^.\s]+/g) ?? []).map(unquote);
+  const falsy = (value: string) => /^false\b/.test(value.trim());
+  let table: string[] = [];
+  let present = false;
+  let enabled = true;
+  let plugins = true;
+  for (const raw of config.split(/\r?\n/)) {
+    const line = raw.replace(/^((?:[^#"']|"[^"]*"|'[^']*')*)#.*$/, '$1').trim();
+    if (!line) continue;
+    const header = /^\[\[?\s*(.+?)\s*\]\]?$/.exec(line);
+    if (header) {
+      table = keys(header[1]);
+      if (table[0] === 'plugins' && table[1] === 'crew@crew') present = true;
+      continue;
+    }
+    const pair = /^((?:"[^"]*"|'[^']*'|[^="'])+?)\s*=\s*(.*)$/.exec(line);
+    if (!pair) continue;
+    const key = [...table, ...keys(pair[1])];
+    if (key[0] === 'plugins' && key[1] === 'crew@crew') {
+      present = true;
+      if (key.length === 3 && key[2] === 'enabled') enabled = !falsy(pair[2]);
+      const inline = key.length === 2 ? /["']?enabled["']?\s*=\s*(\w+)/.exec(pair[2]) : null;
+      if (inline) enabled = !falsy(inline[1]);
+    }
+    if (key.length === 2 && key[0] === 'features' && key[1] === 'plugins') plugins = !falsy(pair[2]);
+  }
+  return present && enabled && plugins;
+}
 
 /**
  * The launcher hooks run: `hook <script> [args]` runs `<bridge>/<script><ext>` on the runtime, `.js` for a built
@@ -208,7 +257,7 @@ export const WORKER_ENV = 'CREW_CODEX_WORKER';
  */
 export function writeLauncher(dir: string, runtime: string, bridge: string, ext: '.js' | '.ts', platform: NodeJS.Platform = process.platform): string {
   fs.mkdirSync(dir, { recursive: true });
-  const module = path.join(dir, 'hook.mjs');
+  const module = path.join(dir, 'lead-hook.mjs');
   writeAtomic(module, [
     "import fs from 'node:fs';",
     "import os from 'node:os';",
@@ -221,17 +270,10 @@ export function writeLauncher(dir: string, runtime: string, bridge: string, ext:
     '  process.exit(1);',
     '}',
     `if (process.env.${WORKER_ENV}) process.exit(0);`,
-    '/** Whether config.toml has Crew\'s plugin, as Codex writes it, and not turned off. Codex removes the table with the plugin. */',
-    'function pluginOn() {',
-    "  let config = '';",
-    "  try { config = fs.readFileSync(path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'config.toml'), 'utf8'); } catch { return false; }",
-    `  const table = /^[ \\t]*\\[[ \\t]*plugins[ \\t]*\\.[ \\t]*(["'])${CODEX_PLUGIN}\\1[ \\t]*\\][ \\t]*$/m.exec(config);`,
-    '  if (!table) return false;',
-    '  const rest = config.slice(table.index + table[0].length);',
-    '  const next = /^[ \\t]*\\[/m.exec(rest);',
-    '  return !/^[ \\t]*enabled[ \\t]*=[ \\t]*false\\b/m.test(next ? rest.slice(0, next.index) : rest);',
-    '}',
-    'if (!pluginOn()) process.exit(0);',
+    crewPluginOn.toString(),
+    "let config = '';",
+    "try { config = fs.readFileSync(path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'config.toml'), 'utf8'); } catch {}",
+    `if (!${crewPluginOn.name}(config)) process.exit(0);`,
     `const file = path.join(bridge, \`\${name}${ext}\`);`,
     'if (!fs.existsSync(file)) process.exit(0);',
     '// A script that runs only as the entry point compares process.argv[1] with its own path, which Node resolves.',
@@ -248,7 +290,7 @@ export function writeLauncher(dir: string, runtime: string, bridge: string, ext:
     // %~dp0, and the runtime's is written through %LOCALAPPDATA% or %USERPROFILE% where it can be. cmd.exe would
     // look for a bare `node` in the session's project folder before PATH, unless told not to.
     const node = cmdPath(runtime);
-    const lines = ['@set NoDefaultCurrentDirectoryInExePath=1', ...(fixed ? [`@if not exist "${node}" exit /b 0`] : []), `@"${node}" "%~dp0hook.mjs" %*`];
+    const lines = ['@set NoDefaultCurrentDirectoryInExePath=1', ...(fixed ? [`@if not exist "${node}" exit /b 0`] : []), `@"${node}" "%~dp0lead-hook.mjs" %*`];
     writeAtomic(launcher, `${lines.join('\r\n')}\r\n`);
     return launcher;
   }

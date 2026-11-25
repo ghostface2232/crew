@@ -521,6 +521,7 @@
 "Install the Codex CLI." = "Codex CLI를 설치해 주세요.";
 "Run `codex login` to sign in." = "터미널에서 `codex login`을 실행해 로그인해 주세요.";
 "Select Install to set up the Crew plugin in Codex." = "‘설치’를 선택해 Codex에 Crew 플러그인을 설정해 주세요.";
+"Run `crew install` from the Crew checkout Codex runs." = "Codex가 실행하는 Crew 체크아웃에서 `crew install`을 실행해 주세요.";
 "Select Install to add Crew hooks to Codex." = "‘설치’를 선택해 Codex에 Crew 훅을 추가해 주세요.";
 "Trust Hooks" = "훅 신뢰";
 "Crew hooks were updated. Select Trust Hooks to trust them again." = "Crew 훅이 업데이트됐어요. ‘훅 신뢰’를 선택해 다시 신뢰해 주세요.";

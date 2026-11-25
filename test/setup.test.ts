@@ -294,6 +294,10 @@ test('a built copy registers with Codex, records it as complete only when both h
   assert.match(left.detail, /Codex: Registered from .*checkout; the app leaves it as it is\./);
   assert.deepEqual(codexCalls().filter((call) => /remove|add/.test(call)), []);
   assert.ok(fs.existsSync(path.join(theirs, 'untracked')));
+  // Its hooks are not the app's to add, so the checklist sends the user to that checkout rather than to Install.
+  const sourceOwned = (await checks()).find((item: SetupItem) => item.id === 'codex-hooks');
+  assert.deepEqual([sourceOwned?.ok, sourceOwned?.repairable, sourceOwned?.summary], [false, undefined, 'Run `crew install` from the Crew checkout Codex runs.']);
+  assert.match(sourceOwned?.detail ?? '', /Codex runs Crew from .*checkout, which the app leaves as it is\. Run `crew install` from there/);
   // Claude Code runs this copy, but Codex does not: recorded, so an older copy finds this one registered, but not
   // complete, so the next start tries again.
   const complete = () => JSON.parse(fs.readFileSync(record, 'utf8')).complete;
@@ -325,9 +329,9 @@ test('a built copy registers with Codex, records it as complete only when both h
   assert.equal(firstRun?.summary, 'Select Trust Hooks to let Codex run Crew hooks.');
   // Crew's hooks are in the user's Codex hooks file, run through the launcher, which runs this copy's compiled bridge.
   const userHooks = JSON.parse(fs.readFileSync(path.join(profile, '.codex', 'hooks.json'), 'utf8'));
-  const launcher = path.join(profile, '.crew', 'codex', 'bin', process.platform === 'win32' ? 'hook.cmd' : 'hook');
+  const launcher = path.join(profile, '.crew', 'codex', 'bin', process.platform === 'win32' ? 'lead-hook.cmd' : 'lead-hook');
   assert.ok(userHooks.hooks.SessionStart[0].hooks.every((hook: { command: string }) => hook.command.includes(launcher)));
-  assert.match(fs.readFileSync(path.join(profile, '.crew', 'codex', 'bin', 'hook.mjs'), 'utf8'), /\$\{name\}\.js/);
+  assert.match(fs.readFileSync(path.join(profile, '.crew', 'codex', 'bin', 'lead-hook.mjs'), 'utf8'), /\$\{name\}\.js/);
   const claudeCheck = setupItems.find((item) => item.id === 'claude');
   assert.equal(claudeCheck?.summary, 'Installed');
   assert.equal(claudeCheck?.detail, '2.1.326 (Claude Code)');
@@ -385,6 +389,32 @@ test('a built copy registers with Codex, records it as complete only when both h
   assert.match(codexOnly.detail, /^Claude Code was not found\. Codex: Installed in Codex\./);
   assert.ok(fs.existsSync(record));
   assert.ok(fs.existsSync(path.join(profile, '.local', 'bin', 'crew')));
+});
+
+test("a source checkout's Codex hooks run Codex's installed copy of it, not the checkout", async (t) => {
+  const profile = fs.mkdtempSync(path.join(home, 'profile-'));
+  const installedCopy = path.join(profile, '.codex', 'plugins', 'cache', 'crew', 'crew', '0.0.0');
+  writeFakeBin(path.join(profile, 'claude'), "console.log(process.argv[2] === '--version' ? '2.1.326 (Claude Code)' : '[]');");
+  writeFakeBin(path.join(profile, 'codex'), `
+    const args = process.argv.slice(2).join(' ');
+    if (args === 'plugin marketplace list') console.log('MARKETPLACE  ROOT');
+    if (args === 'plugin add crew@crew') console.log('Added plugin \`crew\` from marketplace \`crew\`.\\nInstalled plugin root: ' + ${JSON.stringify(installedCopy)});`);
+  const originalPath = process.env.PATH;
+  process.env.PATH = profile + path.delimiter + originalPath;
+  const codexHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = path.join(profile, '.codex');
+  t.after(() => {
+    process.env.PATH = originalPath;
+    if (codexHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = codexHome;
+  });
+  t.mock.method(os, 'homedir', () => profile);
+  const { register } = await import(new URL('../plugin/bridge/setup.ts?source-codex', import.meta.url).href);
+  const registered = await register(true);
+  assert.match(registered.detail, /Codex: Installed in Codex\./);
+  const module = fs.readFileSync(path.join(profile, '.crew', 'codex', 'bin', 'lead-hook.mjs'), 'utf8');
+  assert.ok(module.includes(JSON.stringify(path.join(installedCopy, 'bridge'))), module);
+  assert.match(module, /\$\{name\}\.ts/);
+  assert.ok(fs.existsSync(path.join(profile, '.codex', 'hooks.json')));
 });
 
 test('a job ledger that was set aside shows in the checklist until the file is gone', async () => {

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { codexHooks, crewHooks, hookTrust, installCodexHooks, launcherPath, listedCrewHooks, WORKER_ENV, writeCodexPlugin, writeLauncher, writtenByCrew } from '../plugin/bridge/codex-plugin.ts';
+import { codexHooks, crewHooks, crewPluginOn, hookTrust, installCodexHooks, launcherPath, listedCrewHooks, WORKER_ENV, writeCodexPlugin, writeLauncher, writtenByCrew } from '../plugin/bridge/codex-plugin.ts';
 import type { HooksFile } from '../plugin/bridge/codex-plugin.ts';
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-codex-plugin-'));
@@ -108,6 +108,12 @@ test("installCodexHooks keeps the user's hooks and replaces Crew's where they st
   fs.writeFileSync(file, JSON.stringify({ hooks: { SessionStart: [mine, { ...crewStart, hooks: [...crewStart.hooks, added] }, crewStart] } }));
   installCodexHooks(file, crew(''), launcher, 'darwin');
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).hooks.SessionStart, [mine, crewStart, { ...crewStart, hooks: [added] }]);
+  // Registering the same hooks again moves nothing, a mixed group and the groups after it included.
+  const next = { hooks: [{ type: 'command', command: 'echo next' }] };
+  const mixed = JSON.stringify({ hooks: { SessionStart: [mine, { ...crewStart, hooks: [...crewStart.hooks, added] }, next] } });
+  fs.writeFileSync(file, mixed);
+  assert.equal(installCodexHooks(file, { hooks: { SessionStart: crew('').hooks.SessionStart } }, launcher, 'darwin'), false);
+  assert.equal(fs.readFileSync(file, 'utf8'), mixed);
   // A handler that only mentions the launcher is the user's.
   const mention = { hooks: [{ type: 'command', command: `test -x '${launcher}' && echo ok` }] };
   fs.writeFileSync(file, JSON.stringify({ hooks: { Stop: [mention] } }));
@@ -125,6 +131,23 @@ test("installCodexHooks keeps the user's hooks and replaces Crew's where they st
     assert.ok(fs.lstatSync(file).isSymbolicLink());
     assert.deepEqual(JSON.parse(fs.readFileSync(real, 'utf8')), crew(''));
     assert.equal(fs.statSync(real).mode & 0o777, 0o600);
+    // A link whose target is missing gets its target written, and stays a link.
+    fs.rmSync(real);
+    installCodexHooks(file, crew(''), launcher, 'darwin');
+    assert.ok(fs.lstatSync(file).isSymbolicLink());
+    assert.deepEqual(JSON.parse(fs.readFileSync(real, 'utf8')), crew(''));
+    fs.rmSync(file);
+  }
+  if (process.platform === 'win32') {
+    // A file whose access control list the user protected keeps it.
+    fs.writeFileSync(file, '{}');
+    const acl = (script: string) => spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' });
+    const quoted = `'${file.replaceAll("'", "''")}'`;
+    acl(`$a = Get-Acl -LiteralPath ${quoted}; $a.SetAccessRuleProtection($true, $true); Set-Acl -LiteralPath ${quoted} -AclObject $a`);
+    const isProtected = () => acl(`(Get-Acl -LiteralPath ${quoted}).AreAccessRulesProtected`).stdout.trim();
+    assert.equal(isProtected(), 'True');
+    installCodexHooks(file, crew(''), launcher, 'darwin');
+    assert.equal(isProtected(), 'True');
     fs.rmSync(file);
   }
 
@@ -150,8 +173,10 @@ test('the launcher is rewritten for each build while the hook commands name the 
   assert.equal(first, second);
   assert.equal(second, launcherPath(dir, 'darwin'));
   assert.match(fs.readFileSync(second, 'utf8'), /runtime-2/);
-  assert.match(fs.readFileSync(path.join(dir, 'hook.mjs'), 'utf8'), /build-2/);
-  assert.equal(launcherPath(dir, 'win32'), path.join(dir, 'hook.cmd'));
+  assert.match(fs.readFileSync(path.join(dir, 'lead-hook.mjs'), 'utf8'), /build-2/);
+  // Not the `hook` an earlier Crew wrote for its plugin hooks, which an older copy would write back.
+  assert.equal(launcherPath(dir, 'win32'), path.join(dir, 'lead-hook.cmd'));
+  assert.equal(launcherPath(dir, 'darwin'), path.join(dir, 'lead-hook'));
 });
 
 test('the hook command runs the named script through the launcher only while Crew runs in that Codex home', () => {
@@ -205,6 +230,29 @@ test('the hook command runs the named script through the launcher only while Cre
     assert.equal(local.status, 3, local.stderr);
     assert.equal(local.stdout, '["stop-json"]{"session_id":"t"}');
   }
+});
+
+test("crewPluginOn reads Crew's plugin state from config.toml as Codex writes it and people edit it", () => {
+  const on = [
+    '[plugins."crew@crew"]\nenabled = true',
+    '[plugins."crew@crew"] # Installed by Crew\nenabled = true',
+    "[plugins.'crew@crew']\nenabled = true\n\n[other]\nenabled = false",
+    '[plugins."crew@crew"]\nenabled = true\n[other]\nname = "a # b"',
+    '[plugins]\n"crew@crew" = { enabled = true }',
+    '[plugins."crew@crew"]',
+  ];
+  const off = [
+    '',
+    '[plugins."other@x"]\nenabled = true',
+    '[plugins."crew@crew"]\nenabled = false',
+    '[plugins."crew@crew"]\n"enabled" = false',
+    '[plugins."crew@crew"]\nenabled = false # off for now',
+    '[features]\nplugins = false\n\n[plugins."crew@crew"]\nenabled = true',
+    '[plugins]\n"crew@crew" = { enabled = false }',
+    'plugins."crew@crew".enabled = false',
+  ];
+  for (const text of on) assert.equal(crewPluginOn(text), true, text);
+  for (const text of off) assert.equal(crewPluginOn(text), false, text);
 });
 
 test('Windows hook commands call the launcher through pwsh', () => {

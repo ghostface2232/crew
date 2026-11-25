@@ -14,6 +14,7 @@ import { followUps, jobRole, Jobs, outOfScope, parseOutcome } from '../plugin/br
 import type { Adapter, CrewEvent, Job, JobCtl, JobSpec, Probe, ReviewTarget } from '../plugin/bridge/jobs.ts';
 import { describe, needsLead, outcomeContradiction } from '../plugin/bridge/render.ts';
 import { tierModel } from '../plugin/bridge/tiers.ts';
+import type { Usage, UsageStatus } from '../plugin/bridge/usage.ts';
 import { checkLine, runCheck, windowsSandboxArgs } from '../plugin/bridge/check.ts';
 
 /** Where the bridge can hold a check to the worker's limits: macOS's sandbox-exec, or Codex's sandbox on Windows. */
@@ -82,6 +83,183 @@ async function settled(jobs: Jobs, job: Job): Promise<Job> {
   while (job.state === 'running') await jobs.wait(job.id, job.seq, 2000);
   return job;
 }
+
+test('a turn budget interrupts once, reports a resumable failure, and starts fresh after reply', async (t) => {
+  const repo = tempRepo();
+  let worker!: JobCtl;
+  const h = harness((ctl) => { worker = ctl; });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const job = await h.jobs.create({ kind: 'delegate', cwd: repo, task: 'edit', difficulty: 'routine' });
+  h.adapter.cancel = async () => { h.calls.push('cancel'); worker.cancelled(); };
+  const total = 60_000_002;
+  worker.tokens(total, { input: total, cachedInput: 0, output: 0 });
+  worker.done('late completion');
+  await settled(h.jobs, job);
+  assert.deepEqual(h.calls, ['cancel']);
+  assert.deepEqual([job.state, job.error?.budget, job.error?.limit, job.sessionId], ['failed', true, false, 'session-1']);
+  assert.match(job.error!.message, /token cap of 60000000.*60000002/);
+  assert.deepEqual(job.news!.map((n) => n.kind), ['failed']);
+  assert.ok(fs.existsSync(job.worktree!.path));
+  h.adapter.reply = async (ctl) => { worker = ctl; };
+  await h.jobs.reply(job.id, { message: 'continue' });
+  worker.tokens(total + 2, { input: total + 2, cachedInput: 0, output: 0 });
+  assert.equal(job.tokenUse?.turn, 2);
+  assert.equal(job.state, 'running');
+  job.turnStartedAt = Date.now() - 121 * 60_000;
+  (h.jobs as any).checkStalls();
+  await settled(h.jobs, job);
+  assert.match(job.error!.message, /wall-clock cap of 120 minutes.*72\d\d seconds/);
+  assert.equal(job.turns, 2);
+});
+
+test('the turn budget pauses for user decisions and resumes with the remaining running time', async (t) => {
+  let worker!: JobCtl;
+  const h = harness((ctl) => { worker = ctl; });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'edit' });
+  let now = job.createdAt;
+  t.mock.method(Date, 'now', () => now);
+  const minute = 60_000;
+  now += 30 * minute;
+  worker.waiting('approval', 'Run the check?');
+  const approval = job.waiting!.id;
+  now += 12 * 60 * minute;
+  (h.jobs as any).checkStalls();
+  assert.deepEqual(h.calls, []);
+  assert.equal(job.waiting?.id, approval);
+
+  // Adapters can present the next queued request without resuming in between.
+  h.adapter.answer = async (ctl) => ctl.waiting('question', 'Which file?');
+  await h.jobs.reply(job.id, { request_id: approval, decision: 'approve' });
+  now += 10 * minute;
+  h.adapter.answer = async (ctl) => ctl.resumed();
+  await h.jobs.reply(job.id, { request_id: job.waiting!.id, message: 'app.js' });
+  now += 150 * minute - 1;
+  worker.activity();
+  (h.jobs as any).checkStalls();
+  assert.deepEqual(h.calls, []);
+  assert.equal(job.state, 'running');
+
+  now += 1;
+  (h.jobs as any).checkStalls();
+  assert.deepEqual(h.calls, ['cancel']);
+  await settled(h.jobs, job);
+  assert.equal(job.error?.budget, true);
+  assert.match(job.error!.message, /wall-clock cap of 180 minutes reached \(10800 seconds observed\)/);
+
+  h.adapter.reply = async (ctl) => { worker = ctl; };
+  await h.jobs.reply(job.id, { message: 'continue' });
+  now += 180 * minute;
+  worker.done('finished');
+  await settled(h.jobs, job);
+  assert.equal(job.error?.budget, true);
+});
+
+test('bridge compares checks on detached bases and sends at most one automatic fix before publishing', async (t) => {
+  const repo = tempRepo();
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n');
+  fs.mkdirSync(path.join(repo, 'node_modules'));
+  let refuse = false;
+  const h = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'app.js'), 'broken\n');
+    if (refuse) ctl.refused('edit elsewhere', 'outside the workspace');
+    ctl.done('first report');
+  });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const bases: string[] = [];
+  (h.jobs as any).runJobCheck = async (command: string, cwd: string, network: boolean, codex: string) => {
+    const broken = fs.readFileSync(path.join(cwd, 'app.js'), 'utf8') === 'broken\n';
+    if (!broken) {
+      bases.push(cwd);
+      assert.equal(execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd, encoding: 'utf8' }).trim(), 'HEAD');
+      assert.equal(network, false);
+      assert.equal(codex, config.codex.bin);
+      if (command === 'unavailable') throw new Error('test sandbox unavailable');
+    }
+    return { command, exit: broken || command === 'always fails' ? 1 : 0, timedOut: false, ms: 15, output: 'failed assertion', sandboxed: true };
+  };
+  const create = (check: string) => h.jobs.create({ kind: 'delegate', cwd: repo, check, task: 'edit' }).then((job) => settled(h.jobs, job));
+  const inherited = await create('always fails');
+  assert.equal(inherited.turns, 1);
+  assert.equal(inherited.receipts![0].base!.exit, 1);
+  assert.match(describe(inherited), /also fails on the base commit/);
+  assert.match(inherited.notes.join('\n'), /node_modules.*\.worktreeinclude/);
+  refuse = true;
+  const declined = await create('regression');
+  assert.equal(declined.turns, 1);
+  assert.match(describe(declined), /passes on the base commit/);
+  assert.doesNotMatch(declined.notes.join('\n'), /list them in .worktreeinclude/);
+  refuse = false;
+  const send = h.adapter.reply;
+  h.adapter.reply = async (ctl, message) => {
+    const saved = JSON.parse(fs.readFileSync(path.join(h.home, 'jobs.json'), 'utf8')).jobs.find((job: Job) => job.id === ctl.job.id);
+    assert.deepEqual([saved.turns, saved.autoFixTurn], [2, 2]);
+    await send(ctl, message);
+  };
+  const fix = await create('regression');
+  assert.deepEqual(fix.receipts!.map((r) => [r.turn, r.base?.exit]), [[1, 0], [2, 0]]);
+  assert.equal(fix.autoFixTurn, 2);
+  assert.equal(followUps(fix), 0);
+  assert.deepEqual(fix.news!.map((n) => n.kind), ['done']);
+  assert.match(fix.news![0].reason, /automatic fix turn 2/i);
+  assert.equal(h.calls.length, 1);
+  assert.match(h.calls[0], /without weakening the check[^]*regression[^]*failed assertion/);
+  const unavailable = await create('unavailable');
+  assert.equal(unavailable.turns, 1);
+  assert.match(describe(unavailable), /Base check unavailable: test sandbox unavailable/);
+  assert.equal(bases.length, 3);
+  for (const cwd of bases) assert.ok(!fs.existsSync(cwd));
+  assert.doesNotMatch(execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8' }), /detached/);
+});
+
+test('a fresh usage reading resumes only a limited job in an opted-in active mission', async (t) => {
+  const repo = tempRepo();
+  let enabled = false;
+  const h = harness((ctl) => ctl.fail('out of usage', { limit: true }), () => ({ ...config, projects: { [canonicalPath(repo)]: { autoResume: enabled } } }));
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const job = await h.jobs.create({ kind: 'delegate', cwd: repo, mission: 'm', task: 'edit' });
+  const read = (status: UsageStatus, capturedAt = job.endedAt! + 1): Usage => ({ generatedAt: Date.now(), source: 'agentgauge',
+    providers: [{ agent: job.agent, reason: '', capturedAt, status, plan: null, windows: [] }] });
+  await h.jobs.resumeLimited(read('ok'), () => true);
+  enabled = true;
+  await h.jobs.resumeLimited(read('ok'), () => false);
+  let active = true;
+  const closing = h.jobs.resumeLimited(read('ok'), () => active);
+  active = false;
+  await closing;
+  for (const status of ['exhausted', 'stale', 'unknown'] as const) await h.jobs.resumeLimited(read(status), () => true);
+  await h.jobs.resumeLimited(read('ok', job.endedAt!), () => true);
+  job.state = 'cancelled';
+  await h.jobs.resumeLimited(read('ok'), () => true);
+  job.state = 'failed';
+  job.error!.limit = false;
+  await h.jobs.resumeLimited(read('ok'), () => true);
+  job.error!.limit = true;
+  delete job.mission;
+  await h.jobs.resumeLimited(read('ok'), () => true);
+  job.mission = 'm';
+  const worktree = job.worktree!;
+  job.worktree = { ...worktree, path: path.join(repo, 'missing') };
+  await h.jobs.resumeLimited(read('ok'), () => true);
+  job.worktree = worktree;
+  job.sessionId = null;
+  await h.jobs.resumeLimited(read('ok'), () => true);
+  job.sessionId = 'session-1';
+  assert.equal(job.turns, 1);
+  const send = h.adapter.reply;
+  h.adapter.reply = async (ctl, message) => {
+    const saved = JSON.parse(fs.readFileSync(path.join(h.home, 'jobs.json'), 'utf8')).jobs.find((item: Job) => item.id === job.id);
+    assert.deepEqual([saved.state, saved.autoResumes], ['running', 1]);
+    await send(ctl, message);
+  };
+  const fresh = read('tight');
+  await Promise.all([1, 2].map(() => h.jobs.resumeLimited(fresh, () => true)));
+  await settled(h.jobs, job);
+  await h.jobs.resumeLimited(fresh, () => true);
+  assert.deepEqual(h.calls, ['reply:Your usage limit has reset; continue where you stopped.']);
+  assert.equal(job.turns, 2);
+  assert.equal(followUps(job), 0);
+});
 
 test('parses the first word under the Outcome heading', () => {
   assert.equal(parseOutcome('## Outcome\n\npartial — tests not run\n\n## Result\nEdited a file.'), 'partial');

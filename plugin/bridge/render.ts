@@ -90,9 +90,16 @@ export function describe(job: JobView, waitingHint?: string): string {
       lines.push(`reviewed (turn ${receipt.turn}): ${receipt.reviewed.target}${at}${receipt.reviewed.diff ? `, diff ${receipt.reviewed.diff}` : ''}${stale}`);
     } else if (receipt.check) {
       lines.push(`check by the bridge (turn ${receipt.turn}${at}): ${checkLine(receipt.check)}${stale}`);
+      if (receipt.base) {
+        const base = receipt.base;
+        lines.push(base.unavailable ? `Base check unavailable: ${base.unavailable}` : base.timedOut ? 'The check timed out on the base commit.'
+          : base.exit === 0 ? 'The check passes on the base commit. This change broke it.'
+          : `The check also fails on the base commit (exit ${base.exit}). The failure predates this change.`);
+      }
       if (receipt.check.exit !== 0 && receipt.check.output) lines.push(`check output (end):\n${receipt.check.output.split('\n').slice(-15).map((line) => `  ${line}`).join('\n')}`);
     }
   }
+  if (job.autoFixTurn) lines.push(`Crew sent turn ${job.autoFixTurn} automatically to fix the failing check.`);
   if (job.capabilities) {
     const { filesystem, network, plugins } = job.capabilities;
     lines.push(`runs with: ${filesystem}; network ${network}${plugins.length ? `; plugins ${plugins.join(', ')} (act outside the sandbox)` : ''}`);

@@ -325,10 +325,12 @@ const pulls: Pulls = new Pulls({
   polled: (watch) => broadcast('pull', pullView(watch)),
 });
 
-const usage = new UsageMonitor(agentGaugeDir(), (latest) => broadcast('usage', latest));
+const usage = new UsageMonitor(agentGaugeDir(), (latest) => {
+  broadcast('usage', latest);
+  void jobs.resumeLimited(latest, (id) => missions.list().some((mission) => mission.id === id && mission.state === 'active'))
+    .catch((err) => log('could not resume a limited job:', err));
+});
 const usageModels = (live: Config) => ({ antigravity: live.roles.polish.antigravity?.model ?? live.antigravity.model });
-usage.setModels(usageModels(config));
-usage.start().catch((err) => log('usage monitor could not start:', err));
 codex.onLimits = (limits) => {
   broadcast('limits', { codex: limits });
   usage.supplement(fromCodexLimits(limits, Date.now()));
@@ -376,6 +378,8 @@ const jobs: Jobs = loadJobs({
   pulls,
   userPrompts: (session) => claude.recentPrompts(session),
 });
+usage.setModels(usageModels(config));
+usage.start().catch((err) => log('usage monitor could not start:', err));
 
 // The board shows who holds each role and which preset is in effect, so it must hear about edits to the file.
 fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {

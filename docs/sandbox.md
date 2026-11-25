@@ -137,6 +137,8 @@ On start or resume, Crew queries `plugin/installed`, enables matching installed-
 
 ## Sandboxed checks
 
+The [base comparison](jobs.md#outcome-reporting) uses the same runner and permissions, with a detached checkout for the base and a fresh temp directory for the command.
+
 On macOS and Windows, `check` reads anywhere except the daemon token, writes only to the worktree and its temp directory, and keeps `.git` read-only. Local servers remain reachable, outside network access requires `runs_app`, and the check times out after 10 minutes. On macOS the check's process group also carries a limit of its own, 30 seconds past the bridge's: a watchdog started in the check's shell kills the group, so a check does not outlive a daemon that was killed. On Windows a killed daemon takes its checks with it: Node holds a child it does not detach, here the PowerShell job host, in a job object that kills it when the daemon's handle closes, and the host's own job, nested in that one, ends everything in the check. On daemon shutdown, Crew kills each active check’s process group on macOS or terminates its PowerShell host on Windows. Terminating the host closes its Job Object and stops the processes inside it.
 
 ## Not verified

@@ -12,7 +12,8 @@ import { withUserApps } from '../prompts.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer } from '../rpc.ts';
 import { clip } from '../text.ts';
 
-type Answer = { approve: boolean; message?: string; cancelled?: boolean; forJob?: boolean };
+type RefusedBy = 'the user' | 'the lead' | 'Crew';
+type Answer = { approve: boolean; message?: string; cancelled?: boolean; forJob?: boolean; refusedBy?: RefusedBy };
 /** A plugin tool approval the user may allow for the rest of the job: `key` matches later requests, `label` names what it covers. */
 interface Grant { key: string; label: string }
 interface Pending {
@@ -41,7 +42,12 @@ interface Run {
   turnId: string | null;
   awaitingTurn: { response: AbortController; timedOut: boolean } | null;
   interrupt: ReturnType<typeof Promise.withResolvers<void>> | null;
+  interruptRequested?: boolean;
+  approvalAbort?: string;
   message: string;
+  guardianWarning?: string;
+  retrying?: { since: number; cause: string };
+  reviewFailed?: boolean;
   pending: Pending[];
   crewCalls: Set<string>;
   items: Map<string, ItemDetails>;
@@ -64,7 +70,7 @@ export interface CodexLimits {
 }
 
 const CREW_TOOLS = ['ask_lead', 'lead_answers', 'siblings', 'search', 'recent_changes', 'rate'];
-const LIMIT_ERRORS = ['usageLimitExceeded', 'rateLimitExceeded', 'sessionBudgetExceeded'];
+const EMPTY_REVIEW = 'Reviewer failed to output a response.';
 const IDLE_SHUTDOWN_MS = 10 * 60_000;
 /**
  * Codex applies the job's sandbox rules before it answers `thread/start` or `thread/resume`. On Windows that is an
@@ -87,8 +93,42 @@ const WORKER_CWD = /[\\/]worktrees[\\/][^\\/]+-[0-9a-f]{8}[\\/](cx|ag)-[0-9a-f]{
 const CREW_PLUGIN = 'crew@crew';
 const LEAN = {
   skills: { include_instructions: false },
-  features: { apps: false, plugins: false, tool_suggest: false },
+  features: { apps: false, plugins: false, tool_suggest: false, multi_agent_v2: false },
+  memories: { generate_memories: false, use_memories: false },
+  auto_review: { circuit_break_action: 'strict' },
 };
+
+function classify(info: unknown): { limit?: true; next?: string } {
+  const kind = info && typeof info === 'object' ? Object.keys(info)[0] : info;
+  switch (kind) {
+    case 'usageLimitExceeded':
+    case 'sessionBudgetExceeded':
+    case 'apiKeySpendLimitExceeded':
+    case 'projectSpendLimitExceeded':
+    case 'organizationSpendLimitExceeded':
+      return { limit: true };
+    case 'unauthorized':
+      return { next: 'Run `codex login`, then reply to resume the job.' };
+    case 'contextWindowExceeded':
+      return { next: 'A reply will not help. Start a fresh job with a narrower brief.' };
+    case 'rateLimitExceeded':
+    case 'serverOverloaded':
+    case 'internalServerError':
+    case 'httpConnectionFailed':
+    case 'responseStreamConnectionFailed':
+    case 'responseStreamDisconnected':
+    case 'responseTooManyFailedAttempts':
+      return { next: 'This is a transient failure. Reply to resume the job.' };
+    case 'sandboxError':
+      return { next: 'See docs/sandbox.md.' };
+    default:
+      return {};
+  }
+}
+
+function errorMessage(error: { message?: string; additionalDetails?: string | null } | undefined, fallback = ''): string {
+  return [error?.message || fallback, error?.additionalDetails].filter(Boolean).join('\n');
+}
 
 /**
  * Drives Codex through `codex app-server` (JSON-RPC over stdio). One server
@@ -239,7 +279,8 @@ export class CodexAdapter implements Adapter {
         } else undelivered(peer ? 'no confirmed turn to steer' : 'the Codex connection is closed');
       } else ctl.note(`The user declined an action: ${request.reason}\nDo it another way within the job permissions, or report what could not be verified.`, { declined: true });
     }
-    this.settleRequest(run, 0, { approve, message, forJob: opts?.forJob });
+    const refusedBy = approve ? undefined : opts?.by === 'lead' ? 'the lead' : 'the user';
+    this.settleRequest(run, 0, { approve, message, forJob: opts?.forJob, refusedBy });
   }
 
   async cancel(ctl: JobCtl): Promise<void> {
@@ -253,6 +294,7 @@ export class CodexAdapter implements Adapter {
     if (run.interrupt) throw new Error('Cancellation is already in progress.');
     const interrupt = Promise.withResolvers<void>();
     run.interrupt = interrupt;
+    run.interruptRequested = true;
     for (const request of run.pending.splice(0)) request.resolve({ approve: false, cancelled: true });
     run.ctl.resumed();
     try {
@@ -319,6 +361,9 @@ export class CodexAdapter implements Adapter {
     }
     // Starting and interrupting a turn have their own timeouts.
     if (run.awaitingTurn || run.interrupt) return { verdict: 'working', detail: 'Codex has yet to confirm the turn' };
+    if (run.retrying && Date.now() - run.retrying.since >= this.config.stallSeconds * 1000) {
+      return { verdict: 'unknown', detail: `Codex cannot reach the model: ${run.retrying.cause}` };
+    }
     const read = async (id: string) => (await peer.request('thread/read', { threadId: id, includeTurns: false }, PROBE_TIMEOUT_MS))?.thread?.status;
     const settled = async (id: string) => {
       const first = await read(id);
@@ -392,7 +437,9 @@ export class CodexAdapter implements Adapter {
     const disabled = explicit.filter((name) => installed.some((plugin) => named(plugin.id, name)) && !installed.some((plugin) => plugin.enabled && named(plugin.id, name)));
     if (disabled.length) ctl.note(`Codex has plugin ${disabled.join(', ')}, but the user has it off; the job runs without it.`);
     if (!installed.some((plugin) => plugin.enabled && wanted.some((name) => named(plugin.id, name)))) return LEAN;
+    const { skills: _skills, ...lean } = LEAN;
     return {
+      ...lean,
       // Codex 0.167's include_instructions hides the entire skill catalog, including plugin skills.
       // Keep it on here so enabled plugins remain usable; it cannot suppress only user skills.
       features: { ...LEAN.features, plugins: true },
@@ -514,6 +561,11 @@ export class CodexAdapter implements Adapter {
   private async sendTurn(peer: RpcPeer, run: Run, method: string, params: unknown): Promise<void> {
     run.held = null;
     run.message = '';
+    run.guardianWarning = undefined;
+    run.retrying = undefined;
+    run.interruptRequested = undefined;
+    run.approvalAbort = undefined;
+    run.reviewFailed = false;
     run.items.clear();
     const start = { response: new AbortController(), timedOut: false };
     run.awaitingTurn = start;
@@ -717,11 +769,15 @@ export class CodexAdapter implements Adapter {
         for (const key of owner?.items.keys() ?? []) if (key.startsWith(`${threadId}\0`)) owner?.items.delete(key);
         if (owner) this.childSettled(owner, threadId);
       }
-      this.children.get(threadId)?.ctl.activity();
+      if (method !== 'error' || !p.willRetry) owner?.ctl.activity();
       return;
     }
     const { ctl } = run;
     this.lastUsed = Date.now();
+    const delta = method.startsWith('item/') && (method.endsWith('/delta') || method.endsWith('Delta'));
+    if (delta || method === 'item/started' || method === 'item/completed' || method === 'turn/completed') {
+      run.retrying = undefined;
+    }
 
     switch (method) {
       case 'turn/started':
@@ -763,7 +819,18 @@ export class CodexAdapter implements Adapter {
         }
         break;
       case 'error':
-        if (p.willRetry) ctl.progress(`retrying: ${p.error.message}`);
+        if (p.willRetry) {
+          const cause = errorMessage(p.error, 'connection to the model failed');
+          // Both phase and progress reset the stall clock. Later retries only update the probe's cause.
+          if (run.retrying) run.retrying.cause = cause;
+          else {
+            run.retrying = { since: Date.now(), cause };
+            ctl.progress(`retrying: ${cause}`);
+          }
+        }
+        break;
+      case 'guardianWarning':
+        if (run.turnId || run.awaitingTurn) run.guardianWarning = p.message || 'automatic reviewer warning';
         break;
       case 'turn/completed': {
         this.confirmStart(run);
@@ -779,7 +846,7 @@ export class CodexAdapter implements Adapter {
       }
       default:
         // Streaming deltas and other chatter: proof of life, nothing to log.
-        ctl.activity();
+        if (!run.retrying) ctl.activity();
     }
   }
 
@@ -808,18 +875,29 @@ export class CodexAdapter implements Adapter {
     }
     const report = run.message;
     run.message = '';
+    const warning = run.guardianWarning;
+    run.guardianWarning = undefined;
+    const reviewFailed = run.reviewFailed;
+    run.reviewFailed = false;
     const turn = p.turn;
-    if (run.interrupt || turn.status === 'interrupted') ctl.cancelled();
-    else if (turn.status === 'completed') ctl.done(report);
-    else {
-      const info = turn.error?.codexErrorInfo;
-      const message = turn.error?.message ?? 'turn failed';
-      // Not a fault in the work: the reviewer's refusals ended it, and they are listed with the job.
-      if (info === 'tooManyDenials') {
-        const listed = ctl.job.refusals?.some((refusal) => refusal.turn === ctl.job.turns);
-        ctl.fail(`Codex stopped the turn after too many of its actions were refused (${message}).${listed ? ' The refused actions are listed with the job.' : ''}`);
-      }
-      else ctl.fail(message, { limit: typeof info === 'string' && LIMIT_ERRORS.includes(info) });
+    const info = turn.error?.codexErrorInfo;
+    if (run.interrupt || (turn.status === 'interrupted' && run.interruptRequested)) ctl.cancelled();
+    else if (turn.status === 'completed') {
+      if (reviewFailed) ctl.fail(EMPTY_REVIEW);
+      else ctl.done(report);
+    } else if (turn.status === 'interrupted' && run.approvalAbort) {
+      ctl.fail(run.approvalAbort);
+    } else if (info === 'tooManyDenials' || (turn.status === 'interrupted' && warning)) {
+      const listed = ctl.job.refusals?.some((refusal) => refusal.turn === ctl.job.turns);
+      const message = errorMessage(turn.error, warning ?? '');
+      ctl.fail(`Codex stopped the turn after too many of its actions were refused${message ? ` (${message})` : ''}.${listed ? ' The refused actions are listed with the job.' : ''}`);
+    } else if (turn.status === 'interrupted') {
+      const message = errorMessage(turn.error);
+      ctl.fail(`Codex ended the turn itself.${message ? `\n${message}` : ''}`);
+    } else {
+      const { next, limit } = classify(info);
+      const message = errorMessage(turn.error, 'turn failed');
+      ctl.fail(next ? `${message}\n${next}` : message, limit ? { limit } : undefined);
     }
     run.interrupt?.resolve();
   }
@@ -859,6 +937,7 @@ export class CodexAdapter implements Adapter {
         break;
       case 'exitedReviewMode':
         run.message = item.review;
+        run.reviewFailed = item.review?.trim() === EMPTY_REVIEW;
         break;
       case 'fileChange':
         if (item.status === 'completed') for (const change of item.changes) ctl.touched(change.path);
@@ -920,23 +999,35 @@ export class CodexAdapter implements Adapter {
 
     switch (method) {
       case 'item/commandExecution/requestApproval': {
-        const deny = p.availableDecisions && !p.availableDecisions.includes('decline') ? 'cancel' : 'decline';
+        // A decline lets Codex continue the turn even when it only advertises accept and cancel.
+        const deny = p.kind === 'writeStdin' ? 'cancel' : 'decline';
         const command = p.command ? `Run:\n${reviewedAction({ type: 'command', command: p.command, cwd: p.cwd })}` : '';
         const network = p.networkApprovalContext ? `Network access: ${detail(p.networkApprovalContext.host ?? '(target missing)')} (${detail(p.networkApprovalContext.protocol ?? 'protocol missing')})` : '';
         const permissions = p.additionalPermissions ? `Additional permissions:\n${permissionText(p.additionalPermissions)}` : '';
         const description = detail([command, network, permissions].filter(Boolean).join('\n') + why, 8000);
+        const abortApproval = (by: RefusedBy = 'Crew') => {
+          // A child approval can abort its own turn without stopping the job's turn.
+          if (run && this.runs.get(threadId) === run) {
+            const terminalInput = p.kind === 'writeStdin';
+            const action = terminalInput ? 'terminal input' : 'a command approval';
+            const cause = terminalInput ? 'Codex ends the turn when terminal input is refused.' : 'Codex offered no way to decline and continue the turn.';
+            run.approvalAbort ??= `The turn ended because ${by} refused ${action}. ${cause}\n${description.trim() || 'Exact action unavailable (input missing).'}`;
+          }
+          return { decision: 'cancel' };
+        };
         if (p.availableDecisions && !p.availableDecisions.includes('accept')) {
           run?.ctl.note(`The bridge declined a command approval that offered no acceptance: ${command || network ? description : `exact action unavailable (input missing)${description ? `\n${description}` : ''}`}. Do it another way or report what could not be verified.`, { declined: true });
-          return { decision: deny };
+          return p.availableDecisions.includes('decline') ? { decision: 'decline' } : abortApproval();
         }
         if (!command && !network) {
           run?.ctl.note(`The bridge declined a command approval that omitted the command (exact action unavailable; input missing).${description ? `\n${description}` : ''} Send a request naming the command, or do it another way.`, { declined: true });
-          return { decision: deny };
+          return deny === 'cancel' ? abortApproval() : { decision: deny };
         }
         const answer = await ask('approval', description);
         if (!answer) return;
-        const cancel = !p.availableDecisions || p.availableDecisions.includes('cancel') ? 'cancel' : deny;
-        return { decision: answer.cancelled ? cancel : answer.approve ? 'accept' : deny };
+        if (answer.cancelled) return { decision: 'cancel' };
+        if (answer.approve) return { decision: 'accept' };
+        return deny === 'cancel' ? abortApproval(answer.refusedBy) : { decision: deny };
       }
       case 'item/fileChange/requestApproval': {
         const answer = await ask('approval', `write files: ${item?.files ?? fileList(p.files)}${p.grantRoot ? `\nGrant root: ${detail(p.grantRoot)}` : ''}${why}`);

@@ -42,7 +42,9 @@
               "watch"
             ],
             "timeout": 86400,
-            "asyncRewake": true
+            "asyncRewake": true,
+            "rewakeMessage": "News from Crew about the background jobs this session leads (from Crew, not from the user):",
+            "rewakeSummary": "Crew has news from a background job"
           }
         ]
       }
@@ -108,7 +110,9 @@
               "watch"
             ],
             "timeout": 86400,
-            "asyncRewake": true
+            "asyncRewake": true,
+            "rewakeMessage": "News from Crew about the background jobs this session leads (from Crew, not from the user):",
+            "rewakeSummary": "Crew has news from a background job"
           }
         ]
       }
@@ -137,7 +141,9 @@
               "watch"
             ],
             "timeout": 86400,
-            "asyncRewake": true
+            "asyncRewake": true,
+            "rewakeMessage": "News from Crew about the background jobs this session leads (from Crew, not from the user):",
+            "rewakeSummary": "Crew has news from a background job"
           }
         ]
       }
@@ -234,7 +240,9 @@
               "watch"
             ],
             "timeout": 86400,
-            "asyncRewake": true
+            "asyncRewake": true,
+            "rewakeMessage": "News from Crew about the background jobs this session leads (from Crew, not from the user):",
+            "rewakeSummary": "Crew has news from a background job"
           }
         ]
       }

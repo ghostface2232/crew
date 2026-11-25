@@ -11,6 +11,50 @@ import { resolveConfig } from '../plugin/bridge/config.ts';
 import { attached, untrackedPaths, changesSince, cloneDirectory, cloneRefused, cloneTree, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, NO_HOOKS, NO_SUBMODULES, projectRoot, removeDirectory, repoRoot, removeEmptyLeftover, removeWorktree, reviewDiff, withBaseWorktree, worktreeIncludeHint, worktreeSlot } from '../plugin/bridge/git.ts';
 import type { Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { buildPrompt } from '../plugin/bridge/prompts.ts';
+import { describe } from '../plugin/bridge/render.ts';
+import type { JobView } from '../plugin/bridge/render.ts';
+
+test('finished job acceptance checks current HEAD without changing the index, files or refs', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-merge-preview-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
+  const repo = path.join(home, 'lead');
+  const worker = path.join(home, 'worker');
+  fs.mkdirSync(repo);
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' });
+  const commit = (cwd: string) => git(cwd, ...NO_HOOKS, '-c', 'user.name=Test', '-c', 'user.email=t@example.com', 'commit', '-qam', 'change');
+  const file = 'é conflict.ts';
+  git(repo, 'init', '-q');
+  fs.writeFileSync(path.join(repo, file), 'base\n');
+  git(repo, 'add', '.');
+  commit(repo);
+  const base = git(repo, 'rev-parse', 'HEAD').trim();
+  git(repo, 'worktree', 'add', '-qb', 'crew-preview', worker);
+  fs.writeFileSync(path.join(worker, file), 'worker\n');
+  commit(worker);
+
+  const job: JobView = {
+    id: 'cx-preview', title: 'Edit a file', agent: 'codex', kind: 'delegate', state: 'done', phase: 'done',
+    project: repo, repo, cwd: worker, sandbox: 'workspace-write', nativeReview: null, targets: [], sessionId: null,
+    createdAt: 0, activeAt: 1000, endedAt: 1000, turns: 1, stalled: false, waiting: null, report: '',
+    notes: [], error: null, tokens: null, seq: 1, delivered: 0,
+    worktree: { path: worker, branch: 'crew-preview', base }, result: { files: [file], stat: '1 file', outOfScope: [], commit: null },
+  };
+  fs.writeFileSync(path.join(repo, file), 'unstaged\n');
+  assert.match(describe(job), /--- next ---[^]*\nMerges cleanly into the committed HEAD\n/);
+  fs.writeFileSync(path.join(repo, file), 'lead\n');
+  commit(repo);
+  fs.writeFileSync(path.join(repo, file), 'staged\n');
+  git(repo, 'add', '.');
+  fs.writeFileSync(path.join(repo, file), 'unstaged\n');
+  const index = fs.readFileSync(path.join(repo, '.git', 'index'));
+  const refs = git(repo, 'show-ref', '--head');
+  assert.match(describe(job), /Conflicts with the committed HEAD in: é conflict\.ts — reply with sync: true, or resolve while merging/);
+  assert.deepEqual(fs.readFileSync(path.join(repo, '.git', 'index')), index);
+  assert.equal(fs.readFileSync(path.join(repo, file), 'utf8'), 'unstaged\n');
+  assert.equal(git(repo, 'show-ref', '--head'), refs);
+  assert.doesNotMatch(describe({ ...job, worktree: { ...job.worktree!, branch: 'crew-missing' } }), /Merges cleanly|Conflicts with the committed HEAD/);
+  assert.doesNotMatch(describe({ ...job, state: 'running' }), /Merges cleanly|Conflicts with the committed HEAD/);
+});
 
 test('preflight names only existing ignored root paths and remembers the hint for each project', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-preflight-'));

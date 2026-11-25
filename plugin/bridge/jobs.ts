@@ -305,6 +305,12 @@ export interface Job {
   /** The worker's final message for the latest turn. */
   report: string;
   outcome?: 'done' | 'partial' | 'blocked';
+  /** Structured findings from the latest completed review report. */
+  review?: {
+    verdict: 'approve' | 'approve with fixes' | 'request changes' | undefined;
+    findings: { blocker: number; major: number; minor: number };
+    evidence: { reproduced: number; read: number; suspected: number };
+  };
   /** The worker was told to declare an outcome. Absent on a job from before outcomes existed. */
   outcomeAsked?: boolean;
   questions?: LeadQuestion[];
@@ -450,9 +456,8 @@ export function expectsOutcome(job: Pick<Job, 'kind' | 'role' | 'ask' | 'debate'
   return !job.ask && !job.debate && job.role !== 'debate' && (job.kind === 'delegate' || job.kind === 'polish');
 }
 
-/** Reads the worker's own declaration so examples in its report cannot count as outcomes. */
-export function parseOutcome(report: string): Job['outcome'] {
-  const lines = report.split(/\r?\n/);
+/** Keeps fenced examples out of report parsing. */
+function* unfencedLines(lines: string[]): IterableIterator<[number, string]> {
   let fence: string | undefined;
   for (const [i, line] of lines.entries()) {
     const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
@@ -464,11 +469,61 @@ export function parseOutcome(report: string): Job['outcome'] {
       fence = marker[1];
       continue;
     }
+    yield [i, line];
+  }
+}
+
+/** Reads the worker's own declaration so examples in its report cannot count as outcomes. */
+export function parseOutcome(report: string): Job['outcome'] {
+  const lines = report.split(/\r?\n/);
+  for (const [i, line] of unfencedLines(lines)) {
     const heading = /^ {0,3}##[ \t]+Outcome(?::[ \t]*(.*?))?(?:[ \t]+#+)?[ \t]*$/i.exec(line);
     if (!heading) continue;
     const declared = heading[1] ?? lines.slice(i + 1).find((text) => text.trim()) ?? '';
     return /^(?:-[ \t]+)?(\*\*|\*|_|`)?(done|partial|blocked)\1(?=$|[^\w`*_-])/i.exec(declared.trimStart())?.[2].toLowerCase() as Job['outcome'];
   }
+}
+
+/** Reads review declarations and findings outside examples, with a fallback for native Codex priorities. */
+export function parseReview(report: string): NonNullable<Job['review']> {
+  const findings = { blocker: 0, major: 0, minor: 0 };
+  const evidence = { reproduced: 0, read: 0, suspected: 0 };
+  const priorities = { P0: 'blocker', P1: 'major', P2: 'minor', P3: 'minor' } as const;
+  const native = { ...findings };
+  let inFindings = false;
+  let sawVerdict = false;
+  let declared: string | undefined;
+
+  for (const [, line] of unfencedLines(report.split(/\r?\n/))) {
+    if (sawVerdict && declared === undefined && line.trim()) declared = line;
+    const heading = /^ {0,3}(#{1,2})(?:[ \t]+(.*?))?[ \t]*$/.exec(line);
+    if (heading) {
+      const title = heading[2]?.replace(/[ \t]+#+[ \t]*$/, '') ?? '';
+      inFindings = heading[1] === '##' && /^Findings$/i.test(title);
+      const verdict = heading[1] === '##' && /^Verdict(?::[ \t]*(.*))?$/i.exec(title);
+      if (verdict && !sawVerdict) {
+        sawVerdict = true;
+        declared = verdict[1] || undefined;
+      }
+      continue;
+    }
+    if (inFindings) {
+      const finding = /^[ \t]*[-*+][ \t]+\[(blocker|major|minor)\](?:[ \t]+\[(reproduced|read|suspected)\])?/i.exec(line);
+      if (finding) {
+        findings[finding[1].toLowerCase() as keyof typeof findings]++;
+        if (finding[2]) evidence[finding[2].toLowerCase() as keyof typeof evidence]++;
+      }
+    }
+    const priority = /^[ \t]*[-*+][ \t]+\[(P[0-3])\][ \t]+\S/.exec(line);
+    if (priority) native[priorities[priority[1] as keyof typeof priorities]]++;
+  }
+
+  const verdict = /^(?:-[ \t]+)?(\*\*|\*|_|`)?(approve with fixes|request changes|approve)\1(?=$|[ \t]*[—–:.,!-])/i
+    .exec(declared?.trim() ?? '')?.[2].toLowerCase() as NonNullable<Job['review']>['verdict'];
+  if (!sawVerdict) {
+    for (const severity of Object.keys(findings) as (keyof typeof findings)[]) findings[severity] += native[severity];
+  }
+  return { verdict, findings, evidence };
 }
 
 /**
@@ -1794,6 +1849,7 @@ export class Jobs {
     exchanged(job, 'worker', report);
     job.report = report;
     if (expectsOutcome(job)) job.outcome = parseOutcome(report);
+    if (job.kind === 'review') job.review = parseReview(report);
     job.result = result;
     if (fix) {
       try {

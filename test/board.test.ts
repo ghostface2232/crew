@@ -83,6 +83,7 @@ test('a project\'s events follow their job or session, then the project recorded
     events,
     jobs: [{ id: 'job-a', project: '/a', root: '/a' }, { id: 'job-b', project: '/b' }] as BoardJob[],
     claude: [{ id: 'lead-a', cwd: '/a/sub', root: '/a' }] as ClaudeSession[],
+    missions: [] as Mission[],
   };
   // A live job or session wins over what was recorded, which may predate the session finding its root.
   assert.deepEqual(eventsIn('/a', state).map((item) => item.seq), [1, 2, 3, 6]);
@@ -90,6 +91,10 @@ test('a project\'s events follow their job or session, then the project recorded
   assert.deepEqual(eventsIn('C:\\a', state).map((item) => item.seq), [8]);
   // A folder that is a project of its own keeps its events.
   assert.deepEqual(eventsIn('/a', { ...state, jobs: [...state.jobs, { id: 'job-c', project: '/a/sub' } as BoardJob] }).map((item) => item.seq), [1, 2, 3]);
+  // A nested repository known only by its mission keeps its events, and their subfolders', out of the one around it.
+  const nested = { ...state, events: [...events, event(9, { session_id: 'gone', project: '/a/vendor' }), event(10, { session_id: 'gone', project: '/a/vendor/lib' })], missions: [{ id: 'm', project: '/a/vendor', root: '/a/vendor' }] as Mission[] };
+  assert.deepEqual(eventsIn('/a', nested).map((item) => item.seq), [1, 2, 3, 6]);
+  assert.deepEqual(eventsIn('/a/vendor', nested).map((item) => item.seq), [9, 10]);
   // Every project's events with none chosen, including those that name no project.
   assert.equal(eventsIn('', state), events);
 });

@@ -96,7 +96,8 @@ export function describe(job: JobView, waitingHint?: string): string {
         const base = receipt.base;
         lines.push(base.unavailable ? `Base check unavailable: ${base.unavailable}` : base.timedOut ? 'The check timed out on the base commit.'
           : base.exit === 0 ? 'The check passes on the base commit. This change broke it.'
-          : `The check also fails on the base commit (exit ${base.exit}). The failure predates this change.`);
+          : `The check also fails on the base commit (exit ${base.exit}). Compare the failures.`);
+        if (base.output && base.exit !== 0) lines.push(`base check output (end):\n${base.output.split('\n').slice(-15).map((line) => `  ${line}`).join('\n')}`);
       }
       if (receipt.check.exit !== 0 && receipt.check.output) lines.push(`check output (end):\n${receipt.check.output.split('\n').slice(-15).map((line) => `  ${line}`).join('\n')}`);
     }
@@ -115,7 +116,7 @@ export function describe(job: JobView, waitingHint?: string): string {
   }
   if (job.error) {
     lines.push(`error: ${job.error.message}`);
-    if (job.error.limit && job.resumesAfterLimit) lines.push(`${workerInfo(job.agent).name} is out of usage for now. The user has Crew resume this job by itself once that usage resets, so do not redo it: carry on with other work, and you will hear when it ends. To do it yourself instead, cancel it with discard first.`);
+    if (job.error.limit && job.resumesAfterLimit) lines.push(`${workerInfo(job.agent).name} is out of usage for now. The user has Crew resume this job by itself once that usage resets, so do not redo it: carry on with other work, and you will hear when it ends. To take it over instead, first carry over the changes in its worktree, which may not be committed; cancelling with discard then deletes them and stops the resume.`);
     else if (job.error.limit) lines.push(`${workerInfo(job.agent).name} is out of usage for now. ${job.kind === 'review' ? 'Run crew:self-reviewer again with the review focus, and tell the user the cross-review was skipped' : 'Do this piece yourself, in a subagent if it is large, and tell the user the work was not delegated'}.`);
   }
   if (job.tokens != null) {

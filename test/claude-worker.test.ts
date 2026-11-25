@@ -26,13 +26,15 @@ const fakeClaude = `
   // As where the model or plan does not offer automatic mode: Claude Code falls back to the manual one.
   const noAuto = fs.existsSync(path.join(cwd, 'no-auto'));
   let current = noAuto && modes[0] === 'auto' ? 'default' : modes[0];
-  const success = () => {
+  const success = (before) => {
     running = false;
-    send({
+    const result = {
       type: 'result', subtype: 'success', is_error: false, session_id: session,
       result: JSON.stringify({ prompt, turns, args, mcp, instructions, replies, cwd, modes, overlap }),
       usage: { input_tokens: 3, cache_creation_input_tokens: 5, cache_read_input_tokens: 7, output_tokens: 11 },
-    });
+    };
+    if (before) process.stdout.write([before, result].map((line) => JSON.stringify(line) + '\\n').join(''));
+    else send(result);
   };
   const ask = (tool, input) => {
     const id = 'tool-' + step;
@@ -78,7 +80,9 @@ const fakeClaude = `
     turns++;
     replies = [];
     step = 0;
-    send({ type: 'system', subtype: 'init', session_id: session, model: 'test-model', effort: 'medium', permissionMode: current });
+    const init = { type: 'system', subtype: 'init', session_id: session, model: 'test-model', effort: 'medium', permissionMode: current };
+    if (prompt === 'buffered result') return success(init);
+    send(init);
     if (prompt === 'policy') return ask(...policy[0]);
     if (prompt === 'read-only edit') return ask('NotebookEdit', { notebook_path: local });
     if (prompt === 'linked edit') return ask('Edit', { file_path: path.join(cwd, 'link', 'new', 'file.txt') });
@@ -101,7 +105,7 @@ const fakeClaude = `
       console.error('Worker disappeared');
       return process.exit(2);
     }
-    if (prompt === 'hold') return setTimeout(success, 500);
+    if (prompt === 'hold') return setTimeout(() => success(), 500);
     success();
   });
 `;
@@ -438,4 +442,35 @@ test('Claude Code may not edit .git, and the browser tool asks the user', async 
   const browser = harness(t, 'browser', { sandbox: 'read-only' });
   await browser.adapter.start(browser.ctl);
   assert.deepEqual(await browser.event('waiting'), ['approval', 'mcp__crew__browser', undefined]);
+});
+
+test('Claude Code collects final usage at the cap and keeps the worker warm', async (t) => {
+  const h = harness(t, 'first task');
+  const count = h.ctl.tokens;
+  const stops: Promise<void | false>[] = [];
+  h.ctl.tokens = (total, parts, final) => {
+    count(total, parts);
+    if (!final) stops.push(h.adapter.cancel(h.ctl, 'budget'));
+  };
+  await h.adapter.start(h.ctl);
+  await h.report();
+  await Promise.all(stops);
+  assert.equal(h.ctl.job.tokens, 26);
+  assert.deepEqual(stops, []);
+  await h.adapter.reply(h.ctl, 'follow-up');
+  assert.equal((await h.report(1)).turns, 2);
+});
+
+test('Claude Code keeps a successful result buffered when a budget interrupt starts', async (t) => {
+  const h = harness(t, 'buffered result');
+  const session = h.ctl.session;
+  const stopping = Promise.withResolvers<void>();
+  h.ctl.session = (id) => {
+    session(id);
+    h.adapter.cancel(h.ctl, 'budget').then(() => stopping.resolve(), stopping.reject);
+  };
+  await h.adapter.start(h.ctl);
+  await stopping.promise;
+  assert.equal(h.events.done?.length, 1);
+  assert.equal((await h.report()).prompt, 'buffered result');
 });

@@ -65,9 +65,9 @@ const PANES = translated((): Record<Fixed, { title: string; icon: FluentIcon; ki
 
 /** What each of a project's switches lets Crew do there without asking, as in the app. */
 const PROJECT_SWITCHES = translated((): { key: keyof ProjectSettings; label: string; note: string }[] => [
-  { key: 'autonomy', label: t('Push and open pull requests'), note: t('Only after the work is reviewed and its checks pass. Crew never merges, closes, or deploys.') },
-  { key: 'watchAway', label: t('Watch pull requests while away'), note: t('Read every 10 minutes while the lead session is closed; news waits until it is back.') },
-  { key: 'autoResume', label: t('Resume after a usage limit'), note: t("A mission's job stopped by a usage limit carries on once usage resets, unless the mission was finished or dismissed.") },
+  { key: 'autonomy', label: t('Push and open pull requests'), note: t('Work is pushed only after it is reviewed and its checks pass. Crew never merges or deploys.') },
+  { key: 'watchAway', label: t('Watch pull requests while away'), note: t('Crew checks pull requests every 10 minutes while the lead session is closed.') },
+  { key: 'autoResume', label: t('Resume after a usage limit'), note: t('A job stopped by the limit continues once usage resets, but only for a mission still in progress.') },
 ]);
 
 /**
@@ -414,7 +414,10 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     setProjectStatus(null);
     setProjectSaving(true);
     try {
-      board.receive('projects', (await request<{ projects: Record<string, ProjectSettings> }>('/api/project-settings', { project: dir, changes: { [key]: on } })).projects);
+      // A newer state from the stream, such as the app's flip, wins over this save's older answer.
+      const revision = board.getProjectsRevision();
+      const saved = await request<{ projects: Record<string, ProjectSettings> }>('/api/project-settings', { project: dir, changes: { [key]: on } });
+      if (board.getProjectsRevision() === revision) board.receive('projects', saved.projects);
     } catch (error) {
       setProjectStatus({ project: dir, text: t('Not saved: {error}', { error: (error as Error).message }) });
     } finally {
@@ -717,11 +720,8 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                       )}
                       <p className={styles.footnote}>
                         {budget === null
-                          ? t('A worker turn stops at {routine} tokens for a routine job, {standard} for a standard one, and {hard} for a hard one.', { routine: tokenCount(60_000_000), standard: tokenCount(80_000_000), hard: tokenCount(120_000_000) })
-                          : budget === 'unlimited'
-                            ? t('A worker turn is never stopped for its tokens, so one that goes in circles keeps spending them until its time runs out.')
-                            : t('Every worker turn stops at this many tokens, whatever its difficulty.')}
-                        {' '}{t('A turn also stops after 2 to 4 hours of work, by difficulty. A stopped job can be resumed.')}
+                          ? t("A worker turn's token cap depends on job difficulty: {routine} for routine, {standard} for standard, and {hard} for hard. A turn also stops after 2 to 4 hours.", { routine: tokenCount(60_000_000), standard: tokenCount(80_000_000), hard: tokenCount(120_000_000) })
+                          : budget === 'unlimited' ? t('Tokens never stop a turn; only the 2-to-4-hour time limit does.') : t('Besides this token cap, a turn also stops after 2 to 4 hours.')}
                       </p>
                     </section>
                   )}

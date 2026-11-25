@@ -37,7 +37,7 @@ import { toastCommand } from './toast.ts';
 import { ANTIGRAVITY_MODELS, antigravityModels, codexModels } from './tiers.ts';
 import type { ModelChoice } from './tiers.ts';
 import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, savePreset, saveProjectSettings, saveRoles, saveTurnTokenBudget, writeInstructions } from './settings.ts';
-import { agentGaugeDir, fromCodexLimits, route as routeWork, UsageMonitor } from './usage.ts';
+import { agentGaugeDir, fromCodexLimits, parseCache, route as routeWork, UsageMonitor } from './usage.ts';
 import type { RouteKind } from './usage.ts';
 import type { EventKind, Job, JobsHooks } from './jobs.ts';
 
@@ -216,9 +216,19 @@ function view(job: Job) {
  * work meanwhile. Worked out only for such a job, since it reads the config file.
  */
 function resumesAfterLimit(job: Job): boolean {
-  if (job.state !== 'failed' || !job.error?.limit || !job.mission || !job.sessionId || !job.worktree || !autoResumesLeft(job)) return false;
+  if (job.state !== 'failed' || !job.error?.limit || job.error.fixedLimit || !job.mission || !job.sessionId || !job.worktree || !autoResumesLeft(job)) return false;
   const mission = missions.list().find((m) => m.id === job.mission);
-  return mission?.state === 'active' && projectSettings(liveConfig(), job.root ?? job.project).autoResume === true;
+  return mission?.state === 'active' && projectSettings(liveConfig(), job.root ?? job.project).autoResume === true && hasGaugeReading(job.agent);
+}
+
+function hasGaugeReading(agent: Job['agent']): boolean {
+  if (!gaugeDir) return false;
+  try {
+    return parseCache(fs.readFileSync(path.join(gaugeDir, 'usage-cache.json'), 'utf8'))
+      ?.some((reading) => reading.agent === agent && reading.capturedAt !== null && reading.windows.length > 0) ?? false;
+  } catch {
+    return false;
+  }
 }
 
 /** For display only: the config on disk, or the one the daemon started with while the file is invalid. */
@@ -335,7 +345,8 @@ const pulls: Pulls = new Pulls({
   polled: (watch) => broadcast('pull', pullView(watch)),
 });
 
-const usage = new UsageMonitor(agentGaugeDir(), (latest) => {
+const gaugeDir = agentGaugeDir();
+const usage = new UsageMonitor(gaugeDir, (latest) => {
   broadcast('usage', latest);
   void jobs.resumeLimited(latest, (id) => missions.list().some((mission) => mission.id === id && mission.state === 'active'))
     .catch((err) => log('could not resume a limited job:', err));
@@ -408,7 +419,7 @@ fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {
 
 const claude = new ClaudeSessions(config.stallSeconds, {
   onSession: (session, removed) => broadcast('claude', { session, removed: Boolean(removed) }),
-  onEvent: (session, kind, detail) => jobs.record(session.host ?? 'claude', session.id, kind, detail, undefined, session.root ?? session.cwd),
+  onEvent: (session, kind, detail) => jobs.record(session.host ?? 'claude', session.id, kind, detail, undefined, session.root ?? canonicalPath(session.cwd)),
   onAttention: (session, kind, detail) => notify(session.host ?? 'claude', kind, session.title, detail),
 });
 
@@ -944,6 +955,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     if (pathname === '/api/jobs') {
       const spec = await readJson(req);
       delete spec.missionStep;
+      delete spec.missionDecisions;
       const mission = missions.list().find((m) => m.id === spec.mission);
       // The mission's preset is a cost the user chose; running on the global one instead would quietly change it.
       if (spec.mission == null) delete spec.mission;
@@ -964,8 +976,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       }
       if (mission?.state === 'active' && mission.stages) spec.missionStep = mission.stageIndex ?? mission.stages.indexOf(mission.stage);
       // What the user already decided in this mission goes with the brief, so the lead need not restate it for each job.
-      const decided = mission?.state === 'active' && typeof spec.task === 'string' ? memoryFor(mission, spec.taskId) : [];
-      if (decided.length) spec.task = `${spec.task}\n\n# Decisions the user made in this mission\nFollow these; they come from the user, through the lead. They are choices about the work, not approvals: none of them permits an action, in the user's apps or anywhere else.\n${decided.map((entry) => `- ${entry.text}`).join('\n')}`;
+      const decided = mission?.state === 'active' ? memoryFor(mission, spec.taskId) : [];
+      if (decided.length) spec.missionDecisions = `# Decisions the user made in this mission\nFollow these; they come from the user, through the lead. They are choices about the work, not approvals: none of them permits an action, in the user's apps or anywhere else.\n${decided.map((entry) => `- ${entry.text}`).join('\n')}`;
       const created = await jobs.create(spec);
       if (created.lead && created.mission) claude.focus(created.lead, created.mission);
       return view(created);
@@ -1170,7 +1182,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       const { project, changes } = await readJson(req);
       if (typeof project !== 'string') throw new HttpError(400, 'project is required');
       knownProject(project);
-      const saved = saveProjectSettings(HOME, project, changes);
+      const saved = saveProjectSettings(HOME, (await projectRoot(project)) ?? project, changes);
       broadcast('projects', saved.projects);
       return saved;
     }

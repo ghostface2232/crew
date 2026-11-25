@@ -1076,6 +1076,33 @@ test('the live Overview has no endless animations during active work', async ({ 
     .map((animation) => (animation as CSSAnimation).animationName))).toEqual([]);
 });
 
+test('New Job and Welcome settle out when they close, as Settings does', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const leaves = async (open: () => Promise<void>, name: string) => {
+    await open();
+    const sheet = page.getByRole('dialog', { name });
+    await expect(sheet).toBeVisible();
+    await settle(page);
+    // Caught as the sheet turns inert, when its exit starts, so a busy machine cannot miss it between two looks.
+    await sheet.evaluate((dialog) => {
+      (window as any).leaving = new Promise<boolean>((resolve) => {
+        new MutationObserver(() => resolve((dialog as HTMLElement).inert && dialog.getAnimations().length > 0))
+          .observe(dialog, { attributes: true, attributeFilter: ['inert'] });
+        new MutationObserver(() => { if (!dialog.isConnected) resolve(false); }).observe(document.body, { childList: true, subtree: true });
+      });
+    });
+    await page.keyboard.press('Escape');
+    expect(await page.evaluate(() => (window as any).leaving)).toBe(true);
+    await expect(sheet).toHaveCount(0);
+  };
+  await leaves(() => page.getByRole('button', { name: 'New Job', exact: true }).click(), 'New Job');
+  await leaves(async () => {
+    await page.getByRole('button', { name: 'Search', exact: false }).first().click();
+    await page.keyboard.type('Welcome');
+    await page.keyboard.press('Enter');
+  }, 'Welcome to Crew');
+});
+
 test('entrances let go once played, so a mission\'s menu opens above the cards after it', async ({ page, request }) => {
   const data = fixture();
   data.missions.push({ ...data.missions[0], id: 'mission-2', title: 'Ship the next one', state: 'done', endedAt: NOW - 1000 });
@@ -1288,6 +1315,31 @@ test('the top bar keeps its controls on one row at every width', async ({ page }
   await expect(page.locator('.tab').first()).toHaveAttribute('title', 'Overview');
 });
 
+test('a waiting count that changes mid-slide leaves the thumb sliding', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1440, height: 800 });
+  const thumb = page.locator('.tabs-thumb');
+  await page.getByRole('navigation', { name: 'Pages' }).getByRole('button', { name: 'Activity' }).click();
+  await expect(thumb).toHaveAttribute('data-slide', 'true');
+  await request.post('/__push', { data: { type: 'job', data: { id: 'cx-question', state: 'running', waiting: null } } });
+  await expect(page.locator('.tab-dot')).toHaveCount(0);
+  await expect(thumb).toHaveAttribute('data-slide', 'true');
+});
+
+test('forced colors keep the current page and the waiting dot visible in the top bar', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 800 });
+  await page.emulateMedia({ forcedColors: 'active' });
+  // Forced colors paint a plain fill as Canvas, which is what the page behind them is.
+  const colors = await page.locator('.topbar-bar').evaluate((bar) => {
+    const fill = (selector: string) => getComputedStyle(bar.querySelector(selector)!).backgroundColor;
+    const probe = document.body.appendChild(Object.assign(document.createElement('i'), { style: 'background: Canvas' }));
+    const canvas = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return { canvas, thumb: fill('.tabs-thumb'), dot: fill('.tab-dot') };
+  });
+  expect(colors.thumb).not.toBe(colors.canvas);
+  expect(colors.dot).not.toBe(colors.canvas);
+});
+
 test('320px sheets keep controls within the viewport and support reduced motion', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 800 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -1404,16 +1456,16 @@ test('the turn token budget follows difficulty, or is one of its caps, or unlimi
   await openSettings(page, 'Model Presets');
   const select = page.getByRole('combobox', { name: 'Tokens per Turn' });
   await expect(select).toHaveText('By Difficulty');
-  await expect(page.getByText('A worker turn stops at 60M tokens for a routine job, 80M for a standard one, and 120M for a hard one.', { exact: false })).toBeVisible();
+  await expect(page.getByText("A worker turn's token cap depends on job difficulty: 60M for routine, 80M for standard, and 120M for hard. A turn also stops after 2 to 4 hours.", { exact: false })).toBeVisible();
   await pick(select, '5M');
   await expect(select).toHaveText('5M');
-  await expect(page.getByText('Every worker turn stops at this many tokens, whatever its difficulty.', { exact: false })).toBeVisible();
+  await expect(page.getByText('Besides this token cap, a turn also stops after 2 to 4 hours.', { exact: false })).toBeVisible();
   await lastBody(request, '/api/turn-token-budget').toEqual({ budget: 5_000_000 });
   if (process.env.CREW_E2E_SHOT) await page.screenshot({ path: process.env.CREW_E2E_SHOT });
   await pick(select, '100M');
   await lastBody(request, '/api/turn-token-budget').toEqual({ budget: 100_000_000 });
   await pick(select, 'Unlimited');
-  await expect(page.getByText('so one that goes in circles keeps spending them until its time runs out', { exact: false })).toBeVisible();
+  await expect(page.getByText('Tokens never stop a turn; only the 2-to-4-hour time limit does.', { exact: false })).toBeVisible();
   await lastBody(request, '/api/turn-token-budget').toEqual({ budget: 'unlimited' });
   await pick(select, 'By Difficulty');
   await lastBody(request, '/api/turn-token-budget').toEqual({ budget: null });

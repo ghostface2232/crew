@@ -1097,6 +1097,16 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         #expect(CrewStore.path("C:\\work\\app", isInside: "C:\\work"))
         store.project = "/workspace/Other"
         #expect(store.scopedEvents.map(\.id) == [2])
+
+        // A nested repository known only by its mission keeps its events, and its subfolders', from the one around it.
+        let mission = try JSONDecoder().decode(Mission.self, from: Data("""
+            {"id":"m-nested","title":"Nested","project":"/workspace/Crew/app","root":"/workspace/Crew/app","stage":"plan","state":"active","outcome":"","createdAt":0,"updatedAt":0}
+            """.utf8))
+        store.state.missions.append(mission)
+        store.project = "/workspace/Crew"
+        #expect(store.scopedEvents.map(\.id) == [1, 3])
+        store.project = "/workspace/Crew/app"
+        #expect(store.scopedEvents.map(\.id) == [5])
     }
     @Test func pendingCountFollowsEveryChangeToTheState() throws {
         let store = try store()

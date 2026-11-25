@@ -317,6 +317,7 @@ button:focus-visible, summary:focus-visible, [role="tab"]:focus-visible, [role="
   button:not(:disabled):hover { background: var(--fill-strong); }
   button.prominent:not(:disabled):hover { background: color-mix(in srgb, var(--ink), var(--canvas) 14%); }
   button.glass:not(:disabled):hover { background: color-mix(in srgb, var(--raised), var(--label) 4%); }
+  button.tinted:not(:disabled):hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
   button.borderless:not(:disabled):hover, button.link:not(:disabled):hover { background: none; color: var(--label); }
   button.link:not(:disabled):hover svg { translate: 2px 0; }
 }
@@ -786,8 +787,6 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .brand-mark { flex: none; width: 26px; height: 26px; }
 .brand-name { font: 600 17px/1 var(--text-face); letter-spacing: -0.01em; }
 .nav { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
-.nav-heading { padding: 6px 10px 4px; }
-.nav-heading { color: var(--tertiary); font: 550 10.5px/1.2 var(--text-face); letter-spacing: 0.06em; text-transform: uppercase; }
 .nav-list { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 /* A soft highlight that glides to the item under the pointer. */
 .nav-glide {
@@ -1250,11 +1249,10 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .mission-controls { display: flex; align-items: center; gap: 6px; margin-inline-start: auto; }
 .mission-hint { margin-top: 8px; }
 .mission-body { display: grid; gap: 16px; padding-block-start: 14px; }
-/* Only where the title would be left too little room beside them do a row's status and time move under it. */
+/* Only where the title would be left too little room beside them do a row's time and status move under it, to the end. */
 @container page (max-width: 340px) {
   .job-row { flex-wrap: wrap; row-gap: 6px; }
   .job-row > .job-row-text { flex-basis: calc(100% - 40px); }
-  .job-row > .status-icon { margin-inline-start: 38px; }
   .job-row-time { margin-inline-start: auto; }
 }
 .disclosure { transition: rotate 320ms var(--ease-out), translate 320ms var(--ease-out); translate: 0 0.5px; }
@@ -1567,7 +1565,7 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
   .spinner { animation-duration: 0.8s !important; animation-iteration-count: infinite !important; }
 }
 @media (forced-colors: active) {
-  .agent-mark, .share-bar i, .usage-bar i, .connection > i, .nav-dot, .heatmap-grid > i, .spark > i { forced-color-adjust: none; background: CanvasText; }
+  .agent-mark, .share-bar i, .usage-bar i, .connection > i, .nav-dot, .tab-dot, .heatmap-grid > i, .spark > i { forced-color-adjust: none; background: CanvasText; }
   /* The light's color is gone here, so a connection that is not live shows as a ring. */
   .connection:not([data-state="live"]) > i { background: Canvas; box-shadow: inset 0 0 0 1px CanvasText; }
   /* The drawn controls show their state by fill, which forced colors would take away. */
@@ -1578,6 +1576,10 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
   input[type="checkbox"].switch:checked::before { background: HighlightText; }
   .select-list > li[data-active] { forced-color-adjust: none; background: Highlight; color: HighlightText; }
   .select-list > li[data-active] > svg { color: HighlightText; }
+  /* The raised thumb is drawn by fill and shadow alone, so the page you are on is marked as a selection is. */
+  .tabs-thumb { forced-color-adjust: none; background: Highlight; box-shadow: none; }
+  .tab[aria-current="page"], .tab[aria-current="page"] svg { forced-color-adjust: none; color: HighlightText; }
+  .tab[aria-current="page"] .tab-dot { background: HighlightText; }
 }
 /* The agent rows carry their own padding for the hover fill, so the label sits closer above them. */
 .agents.panel { gap: 6px; }

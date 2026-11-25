@@ -54,7 +54,8 @@ struct BoardView: View {
                 if !store.connected { connectionBanner }
                 heading(pending: pending)
                 if store.connected && store.project.isEmpty && overview { SetupCard(api: store.api) }
-                if pending > 0 && store.selection != "needs" && !store.project.isEmpty { attentionBanner(pending: pending).transition(.card) }
+                // All projects' overview has Review Requests in its heading instead.
+                if pending > 0 && store.selection != "needs" && !(overview && store.project.isEmpty) { attentionBanner(pending: pending).transition(.card) }
                 if store.selection == "needs" { NeedsYouView(store: store) }
                 else if store.selection == "activity" { activity }
                 else { workspace }
@@ -781,10 +782,8 @@ struct ProjectSidebar: View {
             set: { path in store.project = path ?? "" }
         )) {
             Label("All projects", systemImage: "square.stack").tag("")
-            Section("Projects") {
-                ForEach(projects, id: \.self) { path in
-                    ProjectRow(name: projectName(path, among: projects), waiting: waiting.contains(path)).tag(path).help(path)
-                }
+            ForEach(projects, id: \.self) { path in
+                ProjectRow(name: projectName(path, among: projects), waiting: waiting.contains(path)).tag(path).help(path)
             }
         }
         .listStyle(.sidebar)

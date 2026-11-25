@@ -153,17 +153,24 @@ final class CrewStore {
         guard !project.isEmpty else { return events }
         let jobs = Dictionary(state.jobs.map { ($0.id, $0.projectPath) }, uniquingKeysWith: { first, _ in first })
         let sessions = Dictionary(state.claude.map { ($0.id, $0.projectPath) }, uniquingKeysWith: { first, _ in first })
-        let known = Set(jobs.values).union(sessions.values)
+        let known = Set(state.projectPaths + [project])
+        var owners: [String: String] = [:]
+        // The innermost known project a recorded folder sits in, so a nested repository keeps its own events.
+        let owner = { (path: String) -> String in
+            if let found = owners[path] { return found }
+            let found = known.filter { Self.path(path, isInside: $0) }.max { $0.count < $1.count } ?? ""
+            owners[path] = found
+            return found
+        }
         let nonEmpty = { (path: String?) in path.flatMap { $0.isEmpty ? nil : $0 } }
         return events.filter { event in
             // A live job or session wins: a session may have resolved its root since recording the event.
             if let live = nonEmpty(event.job_id.flatMap { jobs[$0] }) ?? nonEmpty(event.session_id.flatMap { sessions[$0] }) {
                 return live == project
             }
-            // A session's first events carry its folder until git names the root, so a recorded folder that is no
-            // project of its own counts for the project it sits in, as on the board (`eventsIn`).
-            let recorded = event.project ?? ""
-            return recorded == project || (!known.contains(recorded) && Self.path(recorded, isInside: project))
+            // A session's first events carry its folder until git names the root, so a recorded folder counts for
+            // the innermost known project it sits in, as on the board (`eventsIn`).
+            return owner(event.project ?? "") == project
         }
     }
     /// Whether a path is a project's folder or inside it, in either platform's separators.
@@ -252,7 +259,11 @@ final class CrewStore {
         case "usage":
             usage = try JSONDecoder().decode(Usage.self, from: event.data)
             return
-        case "turnTokenBudget", "state": turnTokenBudgetRevision += 1
+        case "turnTokenBudget": turnTokenBudgetRevision += 1
+        case "projects": projectsRevision += 1
+        case "state":
+            turnTokenBudgetRevision += 1
+            projectsRevision += 1
         case "limits":
             limits.merge(try JSONDecoder().decode([String: LimitUsage?].self, from: event.data)) { _, new in new }
             return
@@ -355,13 +366,16 @@ final class CrewStore {
         }
     }
     static func projectSwitchKey(_ project: String) -> String { "project-settings:\(project)" }
+    /// As for the budget: a save's reply does not undo switches that arrived from the stream meanwhile.
+    private var projectsRevision = 0
     /// One of a project's switches, saved as it is flipped, as in the board.
     func setProjectSwitch(_ project: String, _ key: String, on: Bool) async {
         struct Change: Encodable, Sendable { var project: String; var changes: [String: Bool] }
         struct Saved: Decodable, Sendable { var projects: [String: ProjectSettings] }
         await run(Self.projectSwitchKey(project)) {
+            let revision = projectsRevision
             let saved: Saved = try await api.post("/api/project-settings", Change(project: project, changes: [key: on]))
-            state.projects = saved.projects
+            if projectsRevision == revision { state.projects = saved.projects }
         }
     }
     /// Drops a decision the user no longer wants later jobs of the mission to follow.

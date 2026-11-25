@@ -96,10 +96,13 @@ export class BoardStore {
   getPresetRevision = () => this.presetRevision;
   private budgetRevision = 0;
   getBudgetRevision = () => this.budgetRevision;
+  private projectsRevision = 0;
+  getProjectsRevision = () => this.projectsRevision;
 
   private update(patch: Partial<Snapshot>) {
     if ('preset' in patch) this.presetRevision++;
     if ('turnTokenBudget' in patch) this.budgetRevision++;
+    if ('projects' in patch) this.projectsRevision++;
     this.snapshot = { ...this.snapshot, ...patch };
     if (patch.connection !== undefined) this.notify();
     else if (this.listeners.size && !this.cancelNotification) this.scheduleNotification();

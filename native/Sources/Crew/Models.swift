@@ -651,12 +651,11 @@ enum TurnTokenBudget: Codable, Sendable, Hashable {
     }
     var footnote: String {
         let caps = Self.byDifficultyCaps
-        let own = switch self {
-        case .byDifficulty: String(localized: "A worker turn stops at \(Self.count(caps.routine)) tokens for a routine job, \(Self.count(caps.standard)) for a standard one, and \(Self.count(caps.hard)) for a hard one.")
-        case .unlimited: String(localized: "A worker turn is never stopped for its tokens, so one that goes in circles keeps spending them until its time runs out.")
-        case .tokens: String(localized: "Every worker turn stops at this many tokens, whatever its difficulty.")
+        return switch self {
+        case .byDifficulty: String(localized: "A worker turn's token cap depends on job difficulty: \(Self.count(caps.routine)) for routine, \(Self.count(caps.standard)) for standard, and \(Self.count(caps.hard)) for hard. A turn also stops after 2 to 4 hours.")
+        case .unlimited: String(localized: "Tokens never stop a turn; only the 2-to-4-hour time limit does.")
+        case .tokens: String(localized: "Besides this token cap, a turn also stops after 2 to 4 hours.")
         }
-        return own + " " + String(localized: "A turn also stops after 2 to 4 hours of work, by difficulty. A stopped job can be resumed.")
     }
     /// Brief, in the language the app shows: 80M, or 8000만.
     static func count(_ tokens: Int) -> String {

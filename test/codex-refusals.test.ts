@@ -687,3 +687,35 @@ test('final cumulative thread usage can arrive after its turn completes', () => 
   h.notify('thread/tokenUsage/updated', { tokenUsage: { total: { totalTokens: 110 } } });
   assert.equal(h.job.tokens, 110);
 });
+
+for (const [reason, status, outcome] of [
+  ['budget', 'completed', 'finished'],
+  ['budget', 'interrupted', 'cancelled'],
+  [undefined, 'completed', 'cancelled'],
+] as const) {
+  test(`Codex settles a ${reason ?? 'manual'} interrupt racing a turn that ended as ${status}`, async () => {
+    const h = harness();
+    const interrupts: string[] = [];
+    h.internal.peer = { request: async (method: string) => { interrupts.push(method); return {}; } };
+    const outcomes: string[] = [];
+    h.ctl.done = (report?: string) => { outcomes.push(report!); };
+    h.ctl.cancelled = () => { outcomes.push('cancelled'); };
+    h.internal.runs.get('parent').message = 'finished';
+    const stopping = h.adapter.cancel(h.ctl as any, reason);
+    assert.deepEqual(interrupts, ['turn/interrupt']);
+    h.notify('turn/completed', { turn: { id: 'turn', status } });
+    await stopping;
+    assert.deepEqual(outcomes, [outcome]);
+  });
+}
+
+test('Codex spend and session caps stay limits without pretending to reset with usage windows', () => {
+  for (const kind of ['usageLimitExceeded', 'sessionBudgetExceeded', 'apiKeySpendLimitExceeded',
+    'projectSpendLimitExceeded', 'organizationSpendLimitExceeded']) {
+    const h = harness();
+    const failures: unknown[] = [];
+    Object.assign(h.ctl, { fail: (_message: string, opts: unknown) => failures.push(opts) });
+    h.notify('turn/completed', { turn: { id: 'turn', status: 'failed', error: { codexErrorInfo: kind } } });
+    assert.deepEqual(failures, [kind === 'usageLimitExceeded' ? { limit: true } : { limit: true, fixedLimit: true }]);
+  }
+});

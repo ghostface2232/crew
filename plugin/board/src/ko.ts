@@ -3,6 +3,12 @@
  * test/i18n.test.ts checks that every literal t() key has an entry here with the same placeholders.
  */
 export const ko: Record<string, string> = {
+  'A worker turn\'s token cap depends on job difficulty: {routine} for routine, {standard} for standard, and {hard} for hard. A turn also stops after 2 to 4 hours.': '워커 턴의 토큰 한도는 작업 난이도에 따라 단순 {routine}, 표준 {standard}, 어려움 {hard}으로 정해져요. 시간 한도도 있어 2~4시간이 지나면 턴이 멈춰요.',
+  'Tokens never stop a turn; only the 2-to-4-hour time limit does.': '토큰 수로는 턴이 멈추지 않고, 2~4시간 한도로만 멈춰요.',
+  'Besides this token cap, a turn also stops after 2 to 4 hours.': '선택한 토큰 한도 외에도 2~4시간이 지나면 턴이 멈춰요.',
+  'Work is pushed only after it is reviewed and its checks pass. Crew never merges or deploys.': '리뷰를 마치고 검사를 통과한 뒤에만 푸시해요. Crew는 병합하거나 배포하지 않아요.',
+  'Crew checks pull requests every 10 minutes while the lead session is closed.': '리드 세션이 닫혀 있는 동안 10분마다 PR을 확인해요.',
+  'A job stopped by the limit continues once usage resets, but only for a mission still in progress.': '사용량이 초기화되면 한도로 멈춘 작업을 이어가요. 아직 진행 중인 미션에만 적용돼요.',
   ' ago': ' 전',
   '1 active job': '진행 중인 작업 1개',
   '1 active job · {total} in all': '진행 중인 작업 1개 · 총 {total}개',
@@ -21,9 +27,6 @@ export const ko: Record<string, string> = {
   '5-hour': '5시간',
   '<1m': '1분 미만',
   'A browser tab stays signed in only while it is open, so a reload signs it out.': '브라우저 탭은 열려 있는 동안에만 로그인이 유지되므로 새로고침하면 로그아웃돼요.',
-  'A turn also stops after 2 to 4 hours of work, by difficulty. A stopped job can be resumed.': '턴은 작업 시간으로도 난이도에 따라 2~4시간이 지나면 멈춰요. 멈춘 작업은 재개할 수 있어요.',
-  'A worker turn is never stopped for its tokens, so one that goes in circles keeps spending them until its time runs out.': '토큰 때문에 턴을 멈추지 않아요. 같은 일을 맴도는 턴도 작업 시간 한도에 닿을 때까지 토큰을 계속 써요.',
-  'A worker turn stops at {routine} tokens for a routine job, {standard} for a standard one, and {hard} for a hard one.': '워커의 한 턴은 단순한 작업이면 토큰 {routine}, 표준 작업이면 {standard}, 어려운 작업이면 {hard}에서 멈춰요.',
   'Abandoned': '중단됨',
   'About Crew': 'Crew 정보',
   'Action': '동작',
@@ -103,12 +106,9 @@ export const ko: Record<string, string> = {
   'Decisions': '결정 사항',
   'Dismiss #{number}': '#{number} 추천에서 빼기',
   'Dismiss. This issue is not suggested again.': '추천에서 빼요. 이 이슈는 다시 추천하지 않아요.',
-  'Every worker turn stops at this many tokens, whatever its difficulty.': '난이도와 상관없이 모든 워커 턴이 이 토큰 수에서 멈춰요.',
   'Forget this decision. Jobs started after this no longer get it.': '이 결정을 기억에서 지워요. 이후에 시작하는 작업부터는 전달되지 않아요.',
   'Forget “{text}”': '“{text}” 기억에서 지우기',
-  'Only after the work is reviewed and its checks pass. Crew never merges, closes, or deploys.': '리뷰를 마치고 검사를 통과한 뒤에만 진행해요. Crew는 병합하거나 닫거나 배포하지 않아요.',
   'Push and open pull requests': '푸시하고 PR 열기',
-  'Read every 10 minutes while the lead session is closed; news waits until it is back.': '리드 세션이 닫혀 있는 동안 10분마다 확인하고, 새 소식은 세션이 다시 열리면 전해요.',
   'Resume after a usage limit': '사용량 한도 도달 후 재개',
   'Sends “{message}”': '“{message}” 메시지를 보내요.',
   'Open Issue': '이슈 열기',
@@ -642,5 +642,4 @@ export const ko: Record<string, string> = {
   '{tokens} tokens in 24h': '24시간 동안 토큰 {tokens}개',
   '{used} of {size} ({percent}%)': '{size} 중 {used}({percent}%)',
   '{workflow} {running} running': '{workflow}에서 {running}개 실행 중',
-  "A mission's job stopped by a usage limit carries on once usage resets, unless the mission was finished or dismissed.": '미션에 속한 작업이 사용량 한도로 멈추면 사용량이 초기화될 때 이어서 진행해요. 완료됐거나 추적을 중지한 미션에서는 재개하지 않아요.',
 };

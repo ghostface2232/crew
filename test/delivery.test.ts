@@ -14,7 +14,7 @@ import { Jobs } from '../plugin/bridge/jobs.ts';
 import type { Adapter, Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
 import { addNews, Delivery, HOOK_SECONDS, jsonBytes, LEAD_BYTES, OFFER_MS, PRESENT_MS, textPage, unread, WATCH_MS, WATCH_REPLACE_MS } from '../plugin/bridge/delivery.ts';
-import { Pulls } from '../plugin/bridge/pulls.ts';
+import { Pulls, type PullWatch } from '../plugin/bridge/pulls.ts';
 import { ClaudeSessions } from '../plugin/bridge/claude.ts';
 import { leadHook, rewakeSummary } from '../plugin/bridge/wake.ts';
 import type { api } from '../plugin/bridge/client.ts';
@@ -410,7 +410,7 @@ test('a wake-up names its jobs for the user, and says when one asks a question',
 });
 
 test('a session that leads nothing gets no watcher, so a foreground hook under claude -p ends at once', () => {
-  const delivery = new Delivery(() => [{ lead: 'lead', news: [] } as unknown as Job], () => {});
+  const delivery = new Delivery(() => [{ lead: 'lead', seq: 0, state: 'running', news: [] } as unknown as Job], () => {});
   const now = Date.now();
   assert.equal(delivery.watch('other', now + 3_600_000, now), null);
   assert.ok(delivery.watch('lead', now + 3_600_000, now));
@@ -418,8 +418,34 @@ test('a session that leads nothing gets no watcher, so a foreground hook under c
   assert.ok(delivery.watch('owner', now + 3_600_000, now, true));
 });
 
+test('a finished job only gets a watcher while its news is unread', async (t) => {
+  const h = harness(t);
+  const job = await h.create();
+  h.workers.get(job.id)!.done('finished');
+  assert.equal(job.state, 'done');
+  const now = Date.now();
+  const deadline = now + 3_600_000;
+  const watch = h.delivery.watch('lead', deadline, now)!;
+  assert.ok(watch);
+  h.delivery.ack('lead', h.delivery.offer('lead', {}, now)!.receipt);
+  h.delivery.release('lead', watch.generation, now);
+  assert.equal(h.delivery.watch('lead', deadline, now), null);
+});
+
+test('a pull request still being watched can wake the lead after the mission finishes', () => {
+  const pull = { lead: 'lead', news: [] } as unknown as PullWatch;
+  const delivery = new Delivery(() => [], () => {}, () => [pull]);
+  const now = Date.now();
+  const deadline = now + 3_600_000;
+  const watch = delivery.watch('lead', deadline, now)!;
+  assert.ok(watch);
+  delivery.release('lead', watch.generation, now);
+  pull.ended = true;
+  assert.equal(delivery.watch('lead', deadline, now), null);
+});
+
 test('a watcher that died without releasing is replaced once it stops beating', () => {
-  const delivery = new Delivery(() => [{ lead: 'lead', news: [] } as unknown as Job], () => {});
+  const delivery = new Delivery(() => [{ lead: 'lead', seq: 0, state: 'running', news: [] } as unknown as Job], () => {});
   const now = Date.now();
   const first = delivery.watch('lead', now + 3_600_000, now)!;
   assert.equal(delivery.watch('lead', now + 3_600_000, now + 10_000), null, 'a live watcher is not duplicated');
@@ -562,7 +588,7 @@ test('job creation validates a task against its mission before detaching ended m
   const create = vm.runInNewContext(stripTypeScriptTypes(`(async (req: any) => { const pathname = '/api/jobs'; ${route} })`), {
     HttpError: class extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; } },
     readJson: async (req: unknown) => req, missions: { list: () => [mission] },
-    missionPreset: () => 'economy', liveConfig: () => ({}),
+    missionPreset: () => 'economy', liveConfig: () => ({}), memoryFor: () => [],
     jobs: { create: async (spec: unknown) => spec }, view: (job: unknown) => job,
   });
   await assert.rejects(create({ taskId: 'build' }), { status: 400, message: /task_id.*mission/ });

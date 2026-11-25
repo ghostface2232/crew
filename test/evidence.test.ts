@@ -227,6 +227,9 @@ test('a job stopped by a usage limit tells the lead to redo it, unless Crew will
   } as unknown as JobView;
   assert.match(describe(job), /Do this piece yourself/);
   const resumed = describe({ ...job, resumesAfterLimit: true });
-  assert.match(resumed, /resume this job by itself once that usage resets, so do not redo it/);
+  assert.match(resumed, /Crew resume this job by itself once that usage resets, so do not redo it/);
+  assert.match(resumed, /first carry over the changes in its worktree, which may not be committed/);
+  assert.doesNotMatch(resumed, /cancel it with discard first/);
+  assert.doesNotMatch(resumed, /discard first/);
   assert.doesNotMatch(resumed, /Do this piece yourself/);
 });

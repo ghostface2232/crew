@@ -67,6 +67,7 @@ class Turn {
   nextSteer = Promise.resolve();
   handover?: PromiseWithResolvers<void>;
   cancelViolation?: string;
+  budgetInterrupt?: boolean;
   readonly drained = Promise.withResolvers<void>();
   abandonControl?: () => void;
 
@@ -293,7 +294,7 @@ export class AntigravityAdapter implements Adapter {
     else ctl.resumed();
   }
 
-  async cancel(ctl: JobCtl): Promise<void> {
+  async cancel(ctl: JobCtl, reason?: 'budget'): Promise<void | false> {
     const session = this.sessions.get(ctl.job.sessionId ?? '');
     const turn = session?.turn;
     if (!session || !turn?.alive) return;
@@ -301,10 +302,12 @@ export class AntigravityAdapter implements Adapter {
       session.end(turn);
       return;
     }
+    if (reason === 'budget' && turn.phase === 'finishing') return false;
+    turn.budgetInterrupt = reason === 'budget';
     turn.phase = 'cancelling';
     drop(turn);
     turn.ctl.resumed();
-    await this.interrupt(session, turn);
+    return this.interrupt(session, turn);
   }
 
   shutdown(): void {
@@ -337,12 +340,15 @@ export class AntigravityAdapter implements Adapter {
 
   private async collect(peer: RpcPeer, session: Session, turn: Turn): Promise<void> {
     let outcome: PromptAnswer = {};
-    for (const prompt of turn.prompts) {
+    for (const [index, prompt] of turn.prompts.entries()) {
       const answer = await prompt;
       if (answer.refused) continue;
       outcome = answer;
       if (answer.error && turn.phase === 'working') this.finish(peer, session, turn, answer);
-      this.counted(turn, answer.res?.usage);
+      this.counted(turn, answer.res?.usage, index === turn.prompts.length - 1);
+    }
+    if (turn.phase === 'cancelling' && turn.budgetInterrupt && !turn.cancelViolation && outcome.res?.stopReason === 'end_turn') {
+      turn.phase = 'working';
     }
     turn.drained.resolve();
     try {
@@ -397,16 +403,20 @@ export class AntigravityAdapter implements Adapter {
   }
 
   /** Cancel goes straight to agy. The close is ordered with session setup, with a bounded wait for a stuck option RPC. */
-  private interrupt(session: Session, turn: Turn): Promise<void> {
+  private interrupt(session: Session, turn: Turn): Promise<void | false> {
     const peer = this.peer;
     if (!peer) return Promise.resolve();
     peer.notify('session/cancel', { sessionId: session.id });
     const stopped = Promise.race([turn.drained.promise.then(() => true), delay(CANCEL_TIMEOUT_MS, false, { ref: false })]);
     const watchdog = setTimeout(() => turn.abandonControl?.(), CANCEL_TIMEOUT_MS + CLOSE_QUEUE_GRACE_MS).unref();
-    const result = Promise.withResolvers<void>();
+    const result = Promise.withResolvers<void | false>();
     void session.enqueue(async () => {
       const confirmed = await stopped;
       try {
+        if (turn.budgetInterrupt && turn.phase === 'finishing') {
+          result.resolve(false);
+          return;
+        }
         if (confirmed) result.resolve();
         else if (!this.canClose) throw new Error('Antigravity did not confirm cancellation. The job is still active.');
         await this.close(peer, session);
@@ -420,6 +430,7 @@ export class AntigravityAdapter implements Adapter {
           if (turn.cancelViolation) turn.ctl.fail(turn.cancelViolation);
           if (turn.phase === 'stopping' || turn.cancelViolation) session.end(turn, 'stopped');
           else {
+            turn.budgetInterrupt = undefined;
             turn.phase = 'working';
             void this.enforceMode(peer, session, turn);
           }
@@ -436,7 +447,7 @@ export class AntigravityAdapter implements Adapter {
    * agy reports each prompt's tokens; a job's are the sum over its prompts. Its input excludes what was read from cache.
    * A turn that ended without its answer cannot have the tokens added later: they would count toward the next turn.
    */
-  private counted(turn: Turn, usage: any): void {
+  private counted(turn: Turn, usage: any, final: boolean): void {
     if (!usage || typeof usage.totalTokens !== 'number') return;
     const { ctl } = turn;
     const before = ctl.job.tokenUse ?? { input: 0, cachedInput: 0, output: 0 };
@@ -445,7 +456,7 @@ export class AntigravityAdapter implements Adapter {
       input: before.input + (usage.inputTokens ?? 0) + cached,
       cachedInput: before.cachedInput + cached,
       output: before.output + (usage.outputTokens ?? 0),
-    });
+    }, final);
   }
 
   /**

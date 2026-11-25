@@ -20,9 +20,8 @@ export interface NavItem {
  * A list of sidebar items. A soft highlight glides to the item under the pointer while the others dim, and comes
  * to rest on nothing when the pointer leaves, as the reference menus behave.
  */
-export const NavList = memo(function NavList({ label, heading, items, current, onSelect, onHover }: {
+export const NavList = memo(function NavList({ label, items, current, onSelect, onHover }: {
   label: string;
-  heading?: string;
   items: NavItem[];
   current: string;
   onSelect: (id: string) => void;
@@ -40,7 +39,6 @@ export const NavList = memo(function NavList({ label, heading, items, current, o
   }, [hovered, items.length]);
   return (
     <nav className="nav" aria-label={label}>
-      {heading && <h2 className="nav-heading">{heading}</h2>}
       <div
         className="nav-list"
         ref={list}
@@ -95,18 +93,20 @@ export const PageTabs = memo(function PageTabs({ label, items, current, onSelect
   const list = useRef<HTMLElement>(null);
   const [thumb, setThumb] = useState<{ left: number; width: number; slide: boolean } | null>(null);
   const shown = useRef('');
+  // Kept across runs: new items (a count changing) must not restart the thumb where it already is, or cut its slide.
+  const placed = useRef('');
   // A narrow bar shows the tabs' icons only (board.css), so each then names itself in a tooltip. Read from the label,
   // since the bar's width, not the window's, decides.
   const [compact, setCompact] = useState(false);
   useLayoutEffect(() => {
     const element = list.current!;
-    let placed = '';
     const measure = () => {
       const tab = element.querySelector<HTMLElement>(`[data-tab="${CSS.escape(current)}"]`);
       if (!tab) return;
       setCompact((tab.querySelector<HTMLElement>('.tab-label')?.offsetWidth ?? 0) <= 1);
-      if (placed === `${tab.offsetLeft}:${tab.offsetWidth}`) return;
-      placed = `${tab.offsetLeft}:${tab.offsetWidth}`;
+      const place = `${current}:${tab.offsetLeft}:${tab.offsetWidth}`;
+      if (placed.current === place) return;
+      placed.current = place;
       setThumb({ left: tab.offsetLeft, width: tab.offsetWidth, slide: shown.current !== '' && shown.current !== current });
       shown.current = current;
     };

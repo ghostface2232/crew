@@ -73,6 +73,8 @@ export interface JobSpec {
   title?: string;
   /** delegate: what to build. polish: what to change. review: what to focus on. */
   task?: string;
+  /** Mission context supplied by the daemon, independently of the lead's brief. */
+  missionDecisions?: string;
   done_when?: string;
   /** delegate: a shell command the bridge runs in the worktree after each turn, recording its exit status. */
   check?: string;
@@ -169,7 +171,7 @@ export interface TurnReceipt {
   head: string | null;
   /** The lead's check, as the bridge ran it after the turn. */
   check?: CheckResult;
-  base?: { exit: number | null; timedOut: boolean; ms: number; unavailable?: string };
+  base?: { exit: number | null; timedOut: boolean; ms: number; output?: string; unavailable?: string };
   /** review: what was under review at the start of the turn. */
   reviewed?: { target: string; diff?: string };
   /** Why this receipt no longer describes the branch, once a round change or sync moved it. */
@@ -297,6 +299,8 @@ export interface Job {
   turnStartedAt?: number;
   /** Time spent on user requests already answered in this turn. */
   turnWaitMs?: number;
+  turnSleepMs?: number;
+  turnResumedAt?: number;
   /** Last sign of life from the worker. */
   activeAt: number;
   endedAt: number | null;
@@ -320,7 +324,7 @@ export interface Job {
   questionSeq?: number;
   result: { files: string[]; stat: string; commit: string | null; outOfScope: string[] } | null;
   notes: string[];
-  error: { message: string; limit: boolean; budget?: true } | null;
+  error: { message: string; limit: boolean; budget?: true; fixedLimit?: true } | null;
   tokens: number | null;
   /**
    * What the total is made of, where the agent reports it, and what the latest turn added. Most of a
@@ -353,14 +357,15 @@ export interface JobCtl {
   note(text: string, opts?: { declined?: boolean }): void;
   /** The agent's automatic reviewer refused an action in this turn. */
   refused(action: string, reason: string): void;
-  tokens(total: number, parts?: { input: number; cachedInput: number; output: number }): void;
+  /** Final usage is recorded without trying to interrupt an ended turn. */
+  tokens(total: number, parts?: { input: number; cachedInput: number; output: number }, final?: boolean): void;
   context(used: number, size: number): void;
   /** The changes the running turn has made so far, as one unified diff. */
   diff(text: string): void;
   waiting(type: 'approval' | 'question', reason: string, grant?: string): void;
   resumed(): void;
   done(report: string): void;
-  fail(message: string, opts?: { limit?: boolean }): void;
+  fail(message: string, opts?: { limit?: boolean; fixedLimit?: true }): void;
   cancelled(): void;
 }
 
@@ -371,7 +376,8 @@ export interface Adapter {
   reply(ctl: JobCtl, message: string): Promise<void>;
   /** Resolves the pending approval or question. forJob also allows later requests with the same grant in this job. */
   answer(ctl: JobCtl, approve: boolean, message?: string, opts?: { forJob?: boolean; by?: 'lead' }): Promise<void>;
-  cancel(ctl: JobCtl): Promise<void>;
+  /** A budget stop can return false if the worker has already finished and is reporting its result. */
+  cancel(ctl: JobCtl, reason?: 'budget'): Promise<void | false>;
   /** Releases a finished session before removing its workspace. */
   release?(ctl: JobCtl): Promise<void>;
   /** Asks the agent about a job that has been silent past the stall limit. Without it, a stall is reported unconfirmed. */
@@ -422,6 +428,7 @@ const UNREAD_KEEP_MS = 7 * 24 * 60 * 60_000;
 /** A job that ended this recently stays, whatever its age, so whoever waited on it can read it. */
 const RECENT_MS = 60 * 60_000;
 const KEEP_EVENTS = 5000;
+const SWEEP_MS = 15_000;
 const TURN_BUDGET = {
   routine: { tokens: 60_000_000, minutes: 120 },
   standard: { tokens: 80_000_000, minutes: 180 },
@@ -611,6 +618,7 @@ export class Jobs {
   private browsers = new BrowserServers();
   private finalizing = new Set<string>();
   private cancelling = new Set<string>();
+  private lastSweepAt = Date.now();
   private budgetStops = new Map<string, { message: string; ended: boolean }>();
   private changingRounds = new Set<string>();
   /** Each job's token total when its current turn began, so the turn's own share can be shown. */
@@ -649,7 +657,7 @@ export class Jobs {
     this.platform = platform;
     this.load();
     for (const job of this.jobs.values()) void this.clearLeftover(job);
-    setInterval(() => this.checkStalls(), 15_000).unref();
+    setInterval(() => this.checkStalls(), SWEEP_MS).unref();
   }
 
   list(): Job[] {
@@ -865,6 +873,13 @@ export class Jobs {
       spec.targets = spec.targets?.map((t) => slashed(path.relative(targetRoot, path.resolve(spec.cwd, t))));
 
       const title = clip((spec.title ?? spec.task ?? spec.targets?.join(', ') ?? spec.kind).split('\n')[0], 80);
+      if (spec.missionDecisions) {
+        spec.task = [spec.task, spec.missionDecisions].filter(Boolean).join('\n\n');
+        if (agent === 'codex' && spec.review?.mode === 'standard') {
+          spec.review = { ...spec.review, mode: 'adversarial' };
+          notes.push('Ran an adversarial review so the reviewer could read the mission decisions.');
+        }
+      }
       const now = Date.now();
       const job: Job = {
         id,
@@ -965,11 +980,11 @@ export class Jobs {
   async resumeLimited(usage: Usage, activeMission: (id: string) => boolean): Promise<void> {
     this.latestUsage = usage;
     for (const job of this.jobs.values()) {
-      if (job.state !== 'failed' || !job.error?.limit || !job.worktree || !job.sessionId || !job.mission) continue;
+      if (job.state !== 'failed' || !job.error?.limit || job.error.fixedLimit || !job.worktree || !job.sessionId || !job.mission) continue;
       const turn = job.turns;
       const eligible = () => {
         const reading = this.latestUsage?.providers.find((provider) => provider.agent === job.agent);
-        return job.turns === turn && job.state === 'failed' && Boolean(job.error?.limit && reading?.capturedAt
+        return job.turns === turn && job.state === 'failed' && Boolean(job.error?.limit && !job.error.fixedLimit && reading?.capturedAt
           && reading.capturedAt > (job.endedAt ?? 0) && (reading.status === 'ok' || reading.status === 'tight')
           && job.mission && activeMission(job.mission) && projectSettings(this.readConfig(), job.root ?? job.project).autoResume);
       };
@@ -1127,6 +1142,8 @@ export class Jobs {
     this.turnStartTokens.set(id, job.tokens ?? 0);
     if (job.tokenUse) job.tokenUse.turn = 0;
     delete job.turnWaitMs;
+    delete job.turnSleepMs;
+    delete job.turnResumedAt;
     job.turnStartedAt = job.activeAt = Date.now();
     const what = !retry ? clip(input.message.split('\n')[0], 80) : job.asksUser ? 'refused action retried; the user is asked about each request' : 'refused action retried with the user\'s approval';
     this.event(job, 'started', `follow-up: ${what}`);
@@ -1664,11 +1681,15 @@ export class Jobs {
         (job.refusals ??= []).push({ action, reason, turn: job.turns });
         this.event(job, 'progress', `refused by the automatic reviewer: ${clip(action.split('\n')[0], 120)}`);
       },
-      tokens: (total, parts) => {
+      tokens: (total, parts, final) => {
         job.tokens = total;
         if (parts) {
           job.tokenUse = { ...parts, turn: total - (this.turnStartTokens.get(job.id) ?? 0) };
-          this.checkBudget(job);
+          if (!final) {
+            const now = Date.now();
+            this.accountSleep(now);
+            this.checkBudget(job, now);
+          }
         }
       },
       context: (used, size) => {
@@ -1692,6 +1713,7 @@ export class Jobs {
         if (!live()) return;
         const now = Date.now();
         // Answering a request can expose another queued request without returning to running.
+        this.accountSleep(now);
         this.recordWait(job, now);
         job.state = 'waiting';
         job.stalled = false;
@@ -1703,7 +1725,9 @@ export class Jobs {
       resumed: () => {
         if (job.state !== 'waiting') return;
         const now = Date.now();
+        this.accountSleep(now);
         this.recordWait(job, now);
+        job.turnResumedAt = now;
         job.state = 'running';
         job.waiting = null;
         job.phase = 'working';
@@ -1729,7 +1753,7 @@ export class Jobs {
         });
       },
       fail: (message, opts) => {
-        if (live() && !this.finalizing.has(job.id) && !this.budgetEnded(job)) this.fail(job, message, opts?.limit ?? false);
+        if (live() && !this.finalizing.has(job.id) && !this.budgetEnded(job)) this.fail(job, message, opts?.limit ?? false, false, opts?.fixedLimit);
       },
       cancelled: () => {
         if (!live() || this.finalizing.has(job.id)) return;
@@ -1763,7 +1787,7 @@ export class Jobs {
       const result = withBaseWorktree(repo, sha, async (cwd) => {
         const check = await this.runJobCheck(command, cwd, network, codex, stop.signal);
         const unavailable = check.skipped || (check.exit === null && !check.timedOut ? check.output || 'no exit status' : undefined);
-        return { exit: check.exit, timedOut: check.timedOut, ms: check.ms, ...(unavailable ? { unavailable: clip(unavailable.split(/\r?\n/).at(-1)!, 240) } : {}) };
+        return { exit: check.exit, timedOut: check.timedOut, ms: check.ms, output: check.output, ...(unavailable ? { unavailable: clip(unavailable.split(/\r?\n/).at(-1)!, 240) } : {}) };
       }).catch((err: Error) => ({ exit: null, timedOut: false, ms: 0, unavailable: clip(err.message.split(/\r?\n/)[0], 240) })).finally(() => {
         // Includes can change between comparisons. Keep only the run that other waiters can still join.
         if (this.baseChecks.get(key)?.stop === stop) this.baseChecks.delete(key);
@@ -1879,12 +1903,12 @@ export class Jobs {
     return { files, stat, commit, outOfScope: [...outOfScope(files, job.targets), ...escaped] };
   }
 
-  private fail(job: Job, message: string, limit: boolean, budget = false): void {
+  private fail(job: Job, message: string, limit: boolean, budget = false, fixedLimit?: true): void {
     job.state = 'failed';
     job.waiting = null;
     job.stalled = false;
     job.endedAt = Date.now();
-    job.error = { message, limit, ...(budget ? { budget: true as const } : {}) };
+    job.error = { message, limit, ...(budget ? { budget: true as const } : {}), ...(fixedLimit ? { fixedLimit } : {}) };
     job.phase = limit ? 'usage limit reached' : 'failed';
     const kind: EventKind = limit ? 'limit' : 'error';
     this.event(job, kind, message);
@@ -1912,26 +1936,46 @@ export class Jobs {
     if (this.budgetStops.get(job.id)?.ended) this.budgetEnded(job);
   }
 
-  private checkBudget(job: Job): void {
-    if (job.state !== 'running' || this.finalizing.has(job.id) || this.cancelling.has(job.id)) return;
+  private checkBudget(job: Job, now: number): void {
+    if (isTerminal(job) || this.finalizing.has(job.id) || this.cancelling.has(job.id)) return;
     const budget = TURN_BUDGET[job.difficulty ?? 'standard'];
     const tokenCap = this.turnTokenBudget === 'unlimited' ? Infinity : this.turnTokenBudget ?? budget.tokens;
-    const elapsed = Date.now() - (job.turnStartedAt ?? job.createdAt) - (job.turnWaitMs ?? 0);
+    const elapsed = (job.waiting?.since ?? now) - (job.turnStartedAt ?? job.createdAt) - (job.turnWaitMs ?? 0) - (job.turnSleepMs ?? 0);
     const tokens = job.tokenUse?.turn ?? 0;
-    let stop = this.budgetStops.get(job.id);
-    if (!stop) {
-      const message = tokens >= tokenCap ? `Turn token cap of ${tokenCap} reached (${tokens} tokens observed).`
-        : elapsed >= budget.minutes * 60_000 ? `Turn wall-clock cap of ${budget.minutes} minutes reached (${Math.floor(elapsed / 1000)} seconds observed).` : null;
-      if (!message) return;
-      this.budgetStops.set(job.id, stop = { message, ended: false });
+    const message = tokens >= tokenCap ? `Turn token cap of ${tokenCap} reached (${tokens} tokens observed).`
+      : elapsed >= budget.minutes * 60_000 ? `Turn wall-clock cap of ${budget.minutes} minutes reached (${Math.floor(elapsed / 1000)} seconds observed).` : null;
+    if (!message) {
+      this.budgetStops.delete(job.id);
+      return;
     }
+    if (job.state !== 'running') return;
+    const stop = { message, ended: false };
+    this.budgetStops.set(job.id, stop);
     this.cancelling.add(job.id);
-    void this.adapter(job.agent).cancel(this.ctl(job)).then(() => { stop.ended = true; }, () => {
+    void this.adapter(job.agent).cancel(this.ctl(job), 'budget').then((confirmed) => {
+      if (confirmed !== false) stop.ended = true;
+    }, () => {
       // An unconfirmed interrupt leaves the worker live. The next budget sweep retries.
     }).finally(() => this.finishCancellation(job));
   }
 
+  private accountSleep(now: number): void {
+    // Keep a normal sweep interval and exclude the rest of a long gap, without counting approval time twice.
+    if (now - this.lastSweepAt <= 4 * SWEEP_MS) return;
+    const gapStart = this.lastSweepAt + SWEEP_MS;
+    this.lastSweepAt = now;
+    for (const job of this.jobs.values()) {
+      if (job.state !== 'running' && job.state !== 'waiting') continue;
+      const runningSince = job.turnResumedAt ?? job.turnStartedAt ?? job.createdAt;
+      const runningUntil = job.waiting?.since ?? now;
+      job.turnSleepMs = (job.turnSleepMs ?? 0) + Math.max(0, runningUntil - Math.max(gapStart, runningSince));
+    }
+  }
+
   private checkStalls(): void {
+    const now = Date.now();
+    this.accountSleep(now);
+    this.lastSweepAt = now;
     const limit = this.settings.stallSeconds * 1000;
     // Read here rather than on each token report, so a change applies within one sweep without a file read per report.
     try {
@@ -1940,7 +1984,7 @@ export class Jobs {
       // An invalid file keeps the budget last read.
     }
     for (const job of this.jobs.values()) {
-      this.checkBudget(job);
+      this.checkBudget(job, now);
       if (this.budgetStops.has(job.id)) continue;
       if (job.state !== 'running' || job.stalled || Date.now() - job.activeAt < limit) continue;
       job.stalled = true;

@@ -511,11 +511,14 @@
 "Too long to give lead sessions in full." = "너무 길어서 리드 세션에는 전문을 보내지 않아요.";
 "Applies the next time the app opens." = "앱을 다시 열면 적용돼요.";
 "Push and open pull requests" = "푸시하고 PR 열기";
-"Only after the work is reviewed and its checks pass. Crew never merges, closes, or deploys." = "리뷰를 마치고 검사를 통과한 뒤에만 진행해요. Crew는 병합하거나 닫거나 배포하지 않아요.";
+"Work is pushed only after it is reviewed and its checks pass. Crew never merges or deploys." = "리뷰를 마치고 검사를 통과한 뒤에만 푸시해요. Crew는 병합하거나 배포하지 않아요.";
+"Crew checks pull requests every 10 minutes while the lead session is closed." = "리드 세션이 닫혀 있는 동안 10분마다 PR을 확인해요.";
+"A job stopped by the limit continues once usage resets, but only for a mission still in progress." = "사용량이 초기화되면 한도로 멈춘 작업을 이어가요. 아직 진행 중인 미션에만 적용돼요.";
+"A worker turn's token cap depends on job difficulty: %@ for routine, %@ for standard, and %@ for hard. A turn also stops after 2 to 4 hours." = "워커 턴의 토큰 한도는 작업 난이도에 따라 단순 %@, 표준 %@, 어려움 %@으로 정해져요. 시간 한도도 있어 2~4시간이 지나면 턴이 멈춰요.";
+"Tokens never stop a turn; only the 2-to-4-hour time limit does." = "토큰 수로는 턴이 멈추지 않고, 2~4시간 한도로만 멈춰요.";
+"Besides this token cap, a turn also stops after 2 to 4 hours." = "선택한 토큰 한도 외에도 2~4시간이 지나면 턴이 멈춰요.";
 "Watch pull requests while away" = "자리를 비운 동안 PR 감시";
-"Read every 10 minutes while the lead session is closed; news waits until it is back." = "리드 세션이 닫혀 있는 동안 10분마다 확인하고, 새 소식은 세션이 다시 열리면 전해요.";
 "Resume after a usage limit" = "사용량 한도 도달 후 재개";
-"A mission's job stopped by a usage limit carries on once usage resets, unless the mission was finished or dismissed." = "미션에 속한 작업이 사용량 한도로 멈추면 사용량이 초기화될 때 이어서 진행해요. 완료됐거나 추적을 중지한 미션에서는 재개하지 않아요.";
 
 /* SetupView.swift */
 "Set up Crew" = "Crew 초기 설정";
@@ -639,7 +642,3 @@
 "Tokens per Turn" = "턴당 토큰";
 "By Difficulty" = "난이도별";
 "Unlimited" = "무제한";
-"A worker turn stops at %@ tokens for a routine job, %@ for a standard one, and %@ for a hard one." = "워커의 한 턴은 단순한 작업이면 토큰 %1$@, 표준 작업이면 %2$@, 어려운 작업이면 %3$@에서 멈춰요.";
-"A worker turn is never stopped for its tokens, so one that goes in circles keeps spending them until its time runs out." = "토큰 때문에 턴을 멈추지 않아요. 같은 일을 맴도는 턴도 작업 시간 한도에 닿을 때까지 토큰을 계속 써요.";
-"Every worker turn stops at this many tokens, whatever its difficulty." = "난이도와 상관없이 모든 워커 턴이 이 토큰 수에서 멈춰요.";
-"A turn also stops after 2 to 4 hours of work, by difficulty. A stopped job can be resumed." = "턴은 작업 시간으로도 난이도에 따라 2~4시간이 지나면 멈춰요. 멈춘 작업은 재개할 수 있어요.";

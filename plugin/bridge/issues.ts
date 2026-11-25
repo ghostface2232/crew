@@ -42,7 +42,7 @@ export class Issues {
   private root: typeof projectRoot;
   private cache = new Map<string, IssueList>();
   private pending = new Map<string, Promise<IssueList>>();
-  private login?: { value: Promise<string>; at: number };
+  private logins = new Map<string, { value: Promise<string>; at: number }>();
   private dismissed?: Set<string>;
   private unreadable = false;
 
@@ -62,18 +62,19 @@ export class Issues {
     return request;
   }
 
-  private user(cwd: string): Promise<string> {
-    if (!this.login || Date.now() - this.login.at >= CACHE_MS) {
-      const value = this.gh(['api', 'user', '--jq', '.login'], cwd).then((text) => {
-        if (!text.trim()) throw new Error('Sign in with gh auth login.');
-        return text.trim().toLowerCase();
-      }).catch((err) => {
-        if (this.login?.value === value) this.login = undefined;
-        throw err;
-      });
-      this.login = { value, at: Date.now() };
-    }
-    return this.login.value;
+  private user(cwd: string, host: string): Promise<string> {
+    const cached = this.logins.get(host);
+    const now = Date.now();
+    if (cached && now - cached.at < CACHE_MS) return cached.value;
+    const value = this.gh(['api', 'user', '--hostname', host, '--jq', '.login'], cwd).then((text) => {
+      if (!text.trim()) throw new Error('Sign in with gh auth login.');
+      return text.trim().toLowerCase();
+    }).catch((err) => {
+      if (this.logins.get(host)?.value === value) this.logins.delete(host);
+      throw err;
+    });
+    this.logins.set(host, { value, at: now });
+    return value;
   }
 
   private async read(project: string): Promise<IssueList> {
@@ -82,10 +83,10 @@ export class Issues {
     try {
       const cwd = await this.root(project);
       if (!cwd) throw new Error('This project is outside a Git repository.');
-      const name = (await this.gh(['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], cwd)).trim();
-      if (!/^[\w.-]+\/[\w.-]+$/.test(name)) throw new Error('No GitHub repository found for this project.');
-      repo = name;
-      const me = await this.user(cwd);
+      const { nameWithOwner, url } = JSON.parse(await this.gh(['repo', 'view', '--json', 'nameWithOwner,url'], cwd));
+      if (typeof nameWithOwner !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(nameWithOwner)) throw new Error('No GitHub repository found for this project.');
+      repo = nameWithOwner;
+      const me = await this.user(cwd, new URL(url).host);
       const fields = 'number,title,url,assignees,labels,updatedAt';
       const rows: GhIssue[] = JSON.parse(await this.gh(['issue', 'list', '--state', 'open', '--limit', '50', '--json', fields], cwd));
       const dismissed = this.dismissals();

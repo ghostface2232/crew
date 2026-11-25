@@ -89,7 +89,7 @@ function limitReached(message: any): boolean {
     : message.rate_limit_info?.status === 'rejected';
 }
 
-function counted(ctl: JobCtl, usage: Usage): void {
+function counted(ctl: JobCtl, usage: Usage, final: boolean): void {
   const before = ctl.job.tokenUse ?? { input: 0, cachedInput: 0, output: 0 };
   const cached = usage.cache_read_input_tokens ?? 0;
   const input = (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + cached;
@@ -98,7 +98,7 @@ function counted(ctl: JobCtl, usage: Usage): void {
     input: before.input + input,
     cachedInput: before.cachedInput + cached,
     output: before.output + output,
-  });
+  }, final);
 }
 
 /**
@@ -212,6 +212,7 @@ class Session {
   /** Messages sent and not yet answered by a result, written or queued. */
   turns = 0;
   stopping = false;
+  private budgetInterrupt = false;
   private idle?: NodeJS.Timeout;
   private forceClose?: NodeJS.Timeout;
   private readonly cleanup: () => void;
@@ -283,13 +284,14 @@ class Session {
     this.write({ type: 'user', message: { role: 'user', content: this.queue.shift() } });
   }
 
-  stop(mode: 'graceful' | 'cancel' | 'shutdown' = 'graceful'): Promise<void> {
+  stop(mode: 'graceful' | 'cancel' | 'budget' | 'shutdown' = 'graceful'): Promise<void> {
     if (!this.stopping) {
       this.stopping = true;
+      this.budgetInterrupt = mode === 'budget';
       clearTimeout(this.idle);
       clearTimeout(this.modeTimeout);
       this.pending.length = 0;
-      if (mode !== 'cancel') this.child.stdin.end();
+      if (mode !== 'cancel' && mode !== 'budget') this.child.stdin.end();
       if (mode === 'graceful') {
         this.forceClose = setTimeout(() => killTree(this.child), CLOSE_GRACE_MS).unref();
       }
@@ -372,11 +374,12 @@ class Session {
   }
 
   private onLine(line: string): void {
-    if (this.stopping || !this.turns) return;
+    if ((this.stopping && !this.budgetInterrupt) || !this.turns) return;
     let message: any;
     try { message = JSON.parse(line); }
     catch { return; }
     if (!message || typeof message.type !== 'string') return;
+    if (this.stopping && (message.type !== 'result' || message.subtype !== 'success' || message.is_error || this.turns !== 1)) return;
     const ctl = this.ctl;
     ctl.activity();
     switch (message.type) {
@@ -454,7 +457,7 @@ class Session {
         break;
       case 'result':
         if (typeof message.session_id === 'string' && message.session_id !== ctl.job.sessionId) ctl.session(message.session_id);
-        if (message.usage) counted(ctl, message.usage);
+        if (message.usage) counted(ctl, message.usage, this.turns === 1 || message.is_error || message.subtype !== 'success');
         // A request still open when its turn ends is stale; it is denied rather than left without an answer.
         if (this.pending.length) {
           for (const request of this.pending.splice(0)) this.respond(request.id, { behavior: 'deny', message: 'The turn ended before this was answered.' });
@@ -468,7 +471,7 @@ class Session {
           const detail = message.result || errors || `Claude Code ended with ${message.subtype ?? 'an error'}.`;
           this.fail(detail, limitReached(message));
         } else if (!this.turns) {
-          this.idle = setTimeout(() => void this.stop(), IDLE_SHUTDOWN_MS).unref();
+          if (!this.stopping) this.idle = setTimeout(() => void this.stop(), IDLE_SHUTDOWN_MS).unref();
           ctl.done(message.result ?? '');
         } else this.flush();
         break;
@@ -530,11 +533,11 @@ export function claudeAdapter(config: Config): Adapter {
       if (!session) throw new Error('The request this job was waiting on is no longer pending.');
       session.answer(approve, message, opts);
     },
-    async cancel(ctl) {
+    async cancel(ctl, reason) {
       const { id } = ctl.job;
       cancelling.add(id);
       try {
-        await sessions.get(id)?.stop('cancel');
+        await sessions.get(id)?.stop(reason ?? 'cancel');
         ctl.cancelled();
       } finally {
         cancelling.delete(id);

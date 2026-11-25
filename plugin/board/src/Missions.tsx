@@ -60,8 +60,8 @@ export const JobRow = memo(function JobRow({ job, selected, openJob, kind, index
         <b>{job.title}</b>
         {detail && <span data-error={job.error ? '' : undefined} key={detail} className="swap">{detail}</span>}
       </span>
-      <StatusIcon state={jobStatusState(job)} label={jobLabel(job)} />
       <span className="job-row-time"><Elapsed start={job.createdAt} end={job.endedAt} /></span>
+      <StatusIcon state={jobStatusState(job)} label={jobLabel(job)} />
       <Icon icon={ChevronRight16Regular} className="row-chevron" />
     </button>
   );
@@ -161,9 +161,9 @@ export const SessionRow = memo(function SessionRow({ session, selected, openSess
         <b>{session.title}</b>
         {detail && <span key={detail} className="swap">{detail}</span>}
       </span>
-      <StatusIcon state={session.stalled ? 'stalled' : session.state} label={sessionStateLabel(session)} />
       {/* An idle session stops its clock at its last activity. */}
       <span className="job-row-time"><Elapsed start={session.startedAt} end={session.state === 'idle' ? session.activeAt : undefined} /></span>
+      <StatusIcon state={session.stalled ? 'stalled' : session.state} label={sessionStateLabel(session)} />
       <Icon icon={ChevronRight16Regular} className="row-chevron" />
     </button>
   );

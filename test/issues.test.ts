@@ -24,10 +24,10 @@ function fixture(t: TestContext) {
     if (data.errorFor === args[0]) throw new Error('gh unavailable\nmore detail');
     switch (args[0]) {
       case 'repo':
-        assert.deepEqual(args, ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner']);
-        return 'Owner/Repo\n';
+        assert.deepEqual(args, ['repo', 'view', '--json', 'nameWithOwner,url']);
+        return JSON.stringify({ nameWithOwner: 'Owner/Repo', url: 'https://github.com/Owner/Repo' });
       case 'api':
-        assert.deepEqual(args, ['api', 'user', '--jq', '.login']);
+        assert.deepEqual(args, ['api', 'user', '--hostname', 'github.com', '--jq', '.login']);
         return data.login;
       case 'issue':
         assert.deepEqual(args, ['issue', 'list', '--state', 'open', '--limit', '50', '--json', 'number,title,url,assignees,labels,updatedAt']);
@@ -56,6 +56,32 @@ test('suggestions are assigned to me or unassigned, newest first within each gro
   const empty = await issues.list('other project');
   assert.deepEqual([empty.repo, empty.issues], ['Owner/Repo', []]);
   assert.equal(calls.filter((args) => args[0] === 'api').length, 1);
+});
+
+test('issue suggestions ask for and cache the signed-in login per repository host', async (t) => {
+  const { home } = fixture(t);
+  const calls: (string | undefined)[] = [];
+  const issues = new Issues(home, async (args, cwd) => {
+    const host = cwd.startsWith('public') ? 'github.com' : 'git.example.org';
+    const repo = `https://${host}/Owner/Repo`;
+    if (args[0] === 'repo') {
+      if (args.includes('--jq')) return 'Owner/Repo';
+      return JSON.stringify({ nameWithOwner: 'Owner/Repo', url: repo });
+    }
+    if (args[0] === 'api') {
+      const hostname = args.indexOf('--hostname');
+      const requested = hostname === -1 ? undefined : args[hostname + 1];
+      calls.push(requested);
+      return requested === 'git.example.org' ? 'enterprise-user' : 'public-user';
+    }
+    assert.equal(args[0], 'issue');
+    return JSON.stringify([row(1, 'public-user'), row(2, 'enterprise-user')].map((issue) => ({
+      ...issue, url: `${repo}/issues/${issue.number}`,
+    })));
+  }, async (project) => project);
+  const results = await Promise.all(['public-one', 'enterprise-one', 'enterprise-two', 'public-two'].map((p) => issues.list(p)));
+  assert.deepEqual(calls, ['github.com', 'git.example.org']);
+  assert.deepEqual(results.map((result) => result.issues.map((issue) => issue.number)), [[1], [2], [2], [1]]);
 });
 
 test('concurrent checks share a request, including refreshes, and failures have the same cache limits', async (t) => {

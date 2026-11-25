@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { CodexLeads, note } from '../plugin/bridge/codex-lead.ts';
+import type { CodexQueue } from '../plugin/bridge/codex-lead.ts';
 import { addNews, Delivery, OFFER_MS } from '../plugin/bridge/delivery.ts';
 import type { DeliveryState } from '../plugin/bridge/delivery.ts';
 import type { Job } from '../plugin/bridge/jobs.ts';
+
+/** A queue that gives no ids, as `codex queue` does. */
+const plain = (add: (thread: string, message: string) => Promise<void>): CodexQueue => ({ add: async (thread, message) => { await add(thread, message); return null; }, remove: async () => {} });
 
 const job = (id: string, lead: string) => ({ id, lead, seq: 1, delivered: 0, state: 'done', turns: 1 } as Job);
 
@@ -13,7 +17,7 @@ test('a Codex lead is queued a one-line note under the automatic offer budget', 
   let saved: DeliveryState | undefined;
   const delivery = new Delivery(() => jobs, () => { saved = structuredClone(delivery.state); });
   const queued: [string, string][] = [];
-  const leads = new CodexLeads(delivery, async (thread, message) => { queued.push([thread, message]); });
+  const leads = new CodexLeads(delivery, plain(async (thread, message) => { queued.push([thread, message]); }));
 
   // A session is woken through Codex only once it said Codex hosts it; a Claude session wakes itself.
   await leads.pass(0);
@@ -49,7 +53,7 @@ test('failed queue commands back off and keep the news offerable until Codex tak
   const delivery = new Delivery(() => jobs, () => {});
   delivery.host('thread', 'codex', 0);
   let tries = 0;
-  const leads = new CodexLeads(delivery, async () => { if (++tries <= 2) throw new Error('codex queue failed'); });
+  const leads = new CodexLeads(delivery, plain(async () => { if (++tries <= 2) throw new Error('codex queue failed'); }));
   await leads.pass(1);
   assert.equal(jobs[0].news![0].offers, 0);
   // Backing off: 30 s after the first failure, then 60 s after the second.
@@ -64,6 +68,45 @@ test('failed queue commands back off and keep the news offerable until Codex tak
   assert.deepEqual([jobs[0].news![0].offers, jobs[0].news![0].acked], [2, false]);
 });
 
+test('a session inside a turn is queued no note until the turn ends, and keeps its offer budget', async () => {
+  const jobs = [job('cx-111111', 'thread')];
+  addNews(jobs[0], 'done', 'Done.');
+  const delivery = new Delivery(() => jobs, () => {});
+  delivery.host('thread', 'codex', 0);
+  const queued: string[] = [];
+  let busy = true;
+  const leads = new CodexLeads(delivery, plain(async (_thread, message) => { queued.push(message); }), () => busy);
+  await leads.pass(1);
+  assert.deepEqual(queued, []);
+  assert.equal(jobs[0].news![0].offers, 0);
+  busy = false;
+  await leads.pass(2);
+  assert.equal(queued.length, 1);
+});
+
+test('a note is taken back once all the news it named is acknowledged some other way', async () => {
+  const jobs = [job('cx-222222', 'thread'), job('cx-333333', 'thread')];
+  addNews(jobs[0], 'done', 'One.');
+  addNews(jobs[1], 'done', 'Two.');
+  const delivery = new Delivery(() => jobs, () => {});
+  delivery.host('thread', 'codex', 0);
+  const removed: string[] = [];
+  const leads = new CodexLeads(delivery, { add: async () => 'q-1', remove: async (thread, id) => { removed.push(`${thread}/${id}`); } });
+  await leads.pass(1);
+  // The lead reads one subject's news through a tool call: the note still names the other.
+  const first = delivery.offer('thread', { ids: ['cx-222222'] }, 2)!;
+  delivery.ack('thread', first.receipt);
+  await leads.pass(3);
+  assert.deepEqual(removed, []);
+  const second = delivery.offer('thread', {}, 4)!;
+  delivery.ack('thread', second.receipt);
+  await leads.pass(5);
+  assert.deepEqual(removed, ['thread/q-1']);
+  // Taken back once only.
+  await leads.pass(6);
+  assert.equal(removed.length, 1);
+});
+
 test('a note settles every snapshot it named, so none is queued again', async () => {
   const jobs = [job('cx-eeeeee', 'thread')];
   addNews(jobs[0], 'question', 'First.');
@@ -71,7 +114,7 @@ test('a note settles every snapshot it named, so none is queued again', async ()
   const delivery = new Delivery(() => jobs, () => {});
   delivery.host('thread', 'codex', 0);
   const queued: string[] = [];
-  const leads = new CodexLeads(delivery, async (_thread, message) => { queued.push(message); });
+  const leads = new CodexLeads(delivery, plain(async (_thread, message) => { queued.push(message); }));
   await leads.pass(1);
   assert.deepEqual(jobs[0].news!.map((news) => news.offers), [2, 2]);
   await leads.pass(OFFER_MS + 2);

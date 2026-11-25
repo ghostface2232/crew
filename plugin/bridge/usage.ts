@@ -62,7 +62,7 @@ export interface RouteDecision {
   fallback: Agent[];
   /** The work goes ahead without its usual cross-check, and the result should say so. */
   degraded: boolean;
-  /** Epoch ms after which deferred work (polish) should be tried again; null when nothing is deferred. */
+  /** Epoch ms after which deferred work should be tried again; null when nothing is deferred. */
   deferUntil: number | null;
   /** For a role: every holder the user gave it, default first, with its usage, so the lead can pick one for the job. */
   holders?: { agent: Agent; status: UsageStatus }[];
@@ -376,6 +376,34 @@ export class UsageMonitor {
 
 const name = (agent: Agent) => (agent === 'claude' ? 'Claude' : WORKERS[agent].name);
 
+function routingReading(provider: ProviderUsage, now: number) {
+  const windows = provider.windows.filter((w) => !provider.decidingKeys || provider.decidingKeys.includes(w.key));
+  const limiting = windows.filter((w) => w.status === provider.status);
+  const fresh = provider.capturedAt !== null && now - provider.capturedAt <= STALE_MS &&
+    provider.status !== 'stale' && provider.status !== 'unknown';
+  const soon = limiting.filter((w) => fresh && w.status === 'tight' && w.resetTime !== null && w.resetTime > now &&
+    w.resetTime - now <= Math.max(15 * 60_000, 0.1 * (w.durationSec ?? 0) * 1000));
+  const blocking = limiting.filter((w) => !soon.includes(w));
+  const times = blocking.flatMap((w) => w.resetTime === null ? [] : [w.resetTime]);
+  const reset = times.length ? Math.max(...times) : null;
+  const status = soon.length && !blocking.length ? 'ok' : provider.status;
+  let reason = provider.reason;
+  if (soon.length && blocking.length) {
+    const tightest = blocking.reduce((a, b) => a.usedRatio >= b.usedRatio ? a : b);
+    reason = `${percent(1 - tightest.usedRatio)} of the ${windowName(tightest)} is left.`;
+  }
+  const longest = Math.max(...windows.map((w) => w.durationSec ?? 0));
+  const belowLine = fresh && longest > 0 && windows.some((w) =>
+    w.durationSec === longest && w.resetTime !== null && w.usedRatio > 1 - 0.5 * (w.resetTime - now) / (longest * 1000));
+  // Every exhausted window must have a future reset before a cross-check can be promised for that time.
+  const canWait = fresh && status === 'exhausted' && times.length === blocking.length && times.every((t) => t > now);
+  return {
+    status, reason, reset, belowLine,
+    soon: soon.map((w) => `${name(provider.agent)}'s ${windowName(w)} resets soon at ${new Date(w.resetTime!).toISOString()}.`).join(' '),
+    wait: canWait && reset !== null && reset - now <= 30 * 60_000 ? reset : null,
+  };
+}
+
 /**
  * Who should take a piece of work, from the role table and current usage (research/agentgauge-integration.md section 8.2; current rules in docs/usage-and-presets.md).
  * It only ever answers with the role's holder or the lead: it never gives an agent a role the user
@@ -386,16 +414,16 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
   // every other agent, Claude too under a Codex lead, is a worker judged by its own usage.
   const you = lead;
   const of = (agent: Agent) => usage.providers.find((p) => p.agent === agent);
+  const now = Date.now();
+  const readings = new Map(usage.providers.map((p) => [p.agent, routingReading(p, now)]));
   const label = name;
-  const status = (agent: Agent): UsageStatus => of(agent)?.status ?? 'unknown';
+  const status = (agent: Agent): UsageStatus => readings.get(agent)?.status ?? 'unknown';
   const short = (agent: Agent) => status(agent) === 'tight' || status(agent) === 'exhausted';
-  const resets = (agent: Agent): number | null => {
-    const provider = of(agent);
-    const times = (provider?.windows ?? []).filter((w) => (!provider?.decidingKeys || provider.decidingKeys.includes(w.key)) && w.status === status(agent) && w.resetTime !== null).map((w) => w.resetTime!);
-    return times.length ? Math.max(...times) : null;
-  };
+  const resets = (agent: Agent) => readings.get(agent)?.reset ?? null;
+  const withResets = (reason: string, agents: Agent[]) =>
+    [reason, ...[...new Set(agents)].map((agent) => readings.get(agent)?.soon)].filter(Boolean).join(' ');
   const plain = (assignee: Agent, reason: string, fallback: Agent[] = []): RouteDecision => ({ kind, assignee, reason, fallback, degraded: false, deferUntil: null });
-  const why = (agent: Agent) => `${label(agent)} is ${status(agent)}: ${of(agent)?.reason ?? 'no reading.'}`;
+  const why = (agent: Agent) => `${label(agent)} is ${status(agent)}: ${readings.get(agent)?.reason ?? 'no reading.'}`;
   /** Said when the holder keeps the work: with no usable reading, that is the assignment and not a finding. */
   const keeps = (agent: Agent) => (status(agent) === 'ok' ? `${label(agent)} holds the role and has room.` : `${label(agent)} holds the role. Its usage is not known (${of(agent)?.reason ?? 'no reading.'}), so the assignment is followed.`);
 
@@ -405,13 +433,15 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
     if (status(you) === 'exhausted') {
       // Antigravity holding implementation does not count: only the other agent that can lead carries the work on.
       const engineerHasRoom = (engineer === 'codex' || engineer === LEAD) && status(engineer) === 'ok';
-      return { kind, assignee: you, reason: `${why(you)} ${engineerHasRoom ? `Finish the step you are on, tell the user that ${label(you)} is out of usage and when it resets, and say what is left.` : 'No other agent can lead; stop and tell the user.'}`, fallback: [], degraded: true, deferUntil: resets(you) };
+      const reason = `${why(you)} ${engineerHasRoom ? `Finish the step you are on, tell the user that ${label(you)} is out of usage and when it resets, and say what is left.` : 'No other agent can lead; stop and tell the user.'}`;
+      return { kind, assignee: you, reason: withResets(reason, engineerHasRoom ? [engineer] : []), fallback: [], degraded: true, deferUntil: resets(you) };
     }
     if (status(you) === 'tight') {
       if (!engineer) return plain(you, `${why(you)} Keep to planning and merge decisions, and give more implementation to subagents.`);
-      return plain(you, `${why(you)} Keep to planning and merge decisions, and hand more implementation to ${label(engineer)}.`, short(engineer) ? [] : [engineer]);
+      return plain(you, withResets(`${why(you)} Keep to planning and merge decisions, and hand more implementation to ${label(engineer)}.`, [engineer]), short(engineer) ? [] : [engineer]);
     }
-    return plain(you, status(you) === 'ok' ? `${label(you)} has room; lead as usual.` : `${label(you)}'s usage is not known (${of(you)?.reason ?? 'no reading.'}); lead as usual.`);
+    const reason = status(you) === 'ok' ? `${label(you)} has room; lead as usual.` : `${label(you)}'s usage is not known (${of(you)?.reason ?? 'no reading.'}); lead as usual.`;
+    return plain(you, withResets(reason, [you]));
   }
 
   // The role's preferred worker first, the lead last.
@@ -425,14 +455,25 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
     const who = holders.map(name).join(' and ');
     return { kind, assignee: you, reason: `${who} cannot take ${kind} work now (disabled, or unable to run the app). Do it yourself, and say that the cross-check was skipped.`, fallback: [], degraded: true, deferUntil: null, holders: listed };
   }
-  // Workers come before the lead; a holder short of usage gives way to the next one with room.
+  // Preserve the slots of holders with no reading, and compare only holders with the same usable status.
+  for (const tier of ['ok', 'tight'] as const) {
+    const slots = usable.flatMap((agent, i) => status(agent) === tier ? [i] : []);
+    const ranked = slots.map((i) => usable[i]).sort((a, b) => Number(readings.get(a)!.belowLine) - Number(readings.get(b)!.belowLine));
+    slots.forEach((slot, i) => { usable[slot] = ranked[i]; });
+  }
   const holder = usable.find((agent) => !short(agent)) ?? usable[0];
-  const moved = holder === holders[0] ? '' : able(holders[0]) ? `${why(holders[0])} ` : `${label(holders[0])} cannot take ${kind} work now. `;
+  const moved = holder === holders[0] ? '' : !able(holders[0]) ? `${label(holders[0])} cannot take ${kind} work now. `
+    : readings.get(holders[0])?.belowLine && status(holders[0]) === status(holder)
+      ? `${label(holders[0])} has less than half the even-spend quota left in its longest window. ` : `${why(holders[0])} `;
   const decision = decide(holder);
   const others = usable.filter((agent) => agent !== decision.assignee && status(agent) !== 'exhausted');
-  return { ...decision, reason: `${moved}${decision.reason}`, fallback: [...new Set([...decision.fallback, ...others])], holders: listed };
+  return { ...decision, reason: withResets(moved + decision.reason, [holders[0], holder, decision.assignee]), fallback: [...new Set([...decision.fallback, ...others])], holders: listed };
 
   function decide(holder: Agent): RouteDecision {
+  const wait = readings.get(holder)?.wait;
+  if (wait != null && (kind === 'review' || kind === 'verify' || kind === 'debate')) {
+    return { kind, assignee: holder, reason: `${why(holder)} Run the ${kind} after the reset at ${new Date(wait).toISOString()} to keep the cross-check.`, fallback: [], degraded: false, deferUntil: wait };
+  }
   if (holder === you) return plain(you, `${label(you)} holds the role: do the work yourself, or in a subagent.`);
   // Each role names its policy, so a new role never falls through to another's.
   const policy: Record<Role, 'build' | 'review' | 'debate' | 'polish'> = { delegate: 'build', refactor: 'build', release: 'build', fix: 'build', review: 'review', verify: 'review', debate: 'debate', polish: 'polish' };

@@ -20,6 +20,7 @@ import { agentCommand, agentEnv, canonicalPath, HOME, installed, isRole, JOB_ID,
 import type { Config, Holder } from './config.ts';
 import { evidenceType, openEvidence } from './evidence.ts';
 import { projectRoot } from './git.ts';
+import { Issues } from './issues.ts';
 import { followUps, isTerminal, Jobs, UnreadableLedger } from './jobs.ts';
 import { missionPreset, Missions } from './missions.ts';
 import type { Mission } from './missions.ts';
@@ -256,6 +257,7 @@ function loadMissions(): Missions {
   }
 }
 const missions = loadMissions();
+const issues = new Issues(HOME, gh);
 
 /** Runs the GitHub CLI as the user has it set up and signed in; Crew holds no GitHub credentials of its own. */
 function gh(args: string[], cwd?: string): Promise<string> {
@@ -572,6 +574,7 @@ const TICKET_MS = 60_000;
  * route added for the lead or the CLI is not the board's until it is listed here.
  */
 const BOARD_POSTS = [
+  /^\/api\/issues\/dismiss$/,
   /^\/api\/jobs$/,
   /^\/api\/jobs\/[\w-]+\/(?:reply|cancel|rounds\/\d+)$/,
   /^\/api\/missions\/[\w-]+$/,
@@ -668,6 +671,11 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       return { file, text: readInstructions(file) };
     }
     if (pathname === '/api/usage') return usage.current();
+    if (pathname === '/api/issues') {
+      const project = url.searchParams.get('project') ?? '';
+      knownProject(project);
+      return issues.list(project, url.searchParams.get('refresh') === '1');
+    }
     if (pathname === '/api/setup') return setupState(url.searchParams.has('refresh'));
     if (pathname === '/api/route') {
       const kind = url.searchParams.get('kind');
@@ -875,6 +883,10 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     if (pathname === '/api/setup/repair') {
       await registerPlugin(true);
       return setupState(true);
+    }
+    if (pathname === '/api/issues/dismiss') {
+      issues.dismiss((await readJson(req))?.url);
+      return { ok: true };
     }
     if (pathname === '/api/setup/trust-hooks') {
       // Asked for by the user from the checklist, the only place Crew records trust in its Codex hooks.

@@ -374,10 +374,6 @@ const jobs: Jobs = loadJobs({
   userPrompts: (session) => claude.recentPrompts(session),
 });
 
-// Codex lead sessions have no hook that can wake them later, so the daemon queues a note to them (codex-lead.ts).
-const codexLeads = new CodexLeads(jobs.delivery, codexQueue(config.codex.bin));
-codexLeads.start();
-
 // The board shows who holds each role and which preset is in effect, so it must hear about edits to the file.
 fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {
   const live = liveConfig();
@@ -396,6 +392,10 @@ const claude = new ClaudeSessions(config.stallSeconds, {
   onEvent: (session, kind, detail) => jobs.record(session.host ?? 'claude', session.id, kind, detail),
   onAttention: (session, kind, detail) => notify(session.host ?? 'claude', kind, session.title, detail),
 });
+
+// Codex lead sessions have no hook that can wake them later, so the daemon queues a note to them (codex-lead.ts).
+const codexLeads = new CodexLeads(jobs.delivery, codexQueue(config.codex.bin), (session, now) => claude.inTurn(session, now));
+codexLeads.start();
 
 function state() {
   const live = liveConfig();

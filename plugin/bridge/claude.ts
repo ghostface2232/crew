@@ -104,6 +104,8 @@ const WRAP_UP = 'mcp__ccd_turn__wrap_up';
 const KEEP_WORKFLOW_MS = 10 * 60_000;
 /** A sub-agent with no event for this long is dropped: its SubagentStop was missed, say across a daemon restart. */
 const FORGET_AGENT_MS = 60 * 60_000;
+/** How long a session inside a turn may be silent before inTurn stops trusting that its turn is still running. */
+const TURN_SILENT_MS = 10 * 60_000;
 /** How often an unknown workflow agent may send the journals to be read again. */
 const RESCAN_JOURNALS_MS = 2_000;
 /** The id the desktop app's claude:// links accept for a session. */
@@ -340,6 +342,15 @@ export class ClaudeSessions {
     if (mission) s.mission = mission;
     else delete s.mission;
     this.hooks.onSession(s);
+  }
+
+  /**
+   * Whether the session's main loop is inside a turn, as its hooks last said. A turn that ends without Stop (Codex
+   * reports no failed turn) would hold this forever, so a session silent for TURN_SILENT_MS no longer counts.
+   */
+  inTurn(id: string, now = Date.now()): boolean {
+    const s = this.sessions.get(id);
+    return Boolean(s && !this.resting.has(id) && now - s.activeAt < TURN_SILENT_MS);
   }
 
   /** The session's recent prompts, oldest first. */

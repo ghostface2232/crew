@@ -15,17 +15,23 @@ const RETRY_MAX_MS = 10 * 60_000;
  * automatic offers like a hook watcher would, under the same lease and retry budget, and queues a short note. A
  * queued note is durable, so news it named is not offered automatically again (Delivery.settle).
  *
+ * A session inside a turn is left alone: a note queued then sits in the thread's composer until the turn ends, and
+ * the turn's Stop hook offers the same news anyway. Only the session's hooks say whether it is in a turn, so a
+ * session they have not reported (hooks untrusted, or the daemon restarted) is queued to as if idle.
+ *
  * The note only names the news. On Windows `codex` is a .cmd file run through cmd.exe, which cannot carry the line
  * breaks and quotes an offer's text has, so the lead reads the news itself with `status`, which offers it again.
  */
 export class CodexLeads {
   private delivery: Delivery;
   private queue: (thread: string, message: string) => Promise<void>;
+  private inTurn: (session: string, now: number) => boolean;
   private stopped = new AbortController();
 
-  constructor(delivery: Delivery, queue: (thread: string, message: string) => Promise<void>) {
+  constructor(delivery: Delivery, queue: (thread: string, message: string) => Promise<void>, inTurn: (session: string, now: number) => boolean = () => false) {
     this.delivery = delivery;
     this.queue = queue;
+    this.inTurn = inTurn;
   }
 
   start(): void {
@@ -48,6 +54,7 @@ export class CodexLeads {
         next = Math.min(next, failed.at - now);
         continue;
       }
+      if (this.inTurn(session, now)) continue;
       let offer: Offer | null = null;
       try {
         offer = this.delivery.offer(session, { automatic: true }, now);

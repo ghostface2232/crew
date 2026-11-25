@@ -64,6 +64,22 @@ test('failed queue commands back off and keep the news offerable until Codex tak
   assert.deepEqual([jobs[0].news![0].offers, jobs[0].news![0].acked], [2, false]);
 });
 
+test('a session inside a turn is queued no note until the turn ends, and keeps its offer budget', async () => {
+  const jobs = [job('cx-111111', 'thread')];
+  addNews(jobs[0], 'done', 'Done.');
+  const delivery = new Delivery(() => jobs, () => {});
+  delivery.host('thread', 'codex', 0);
+  const queued: string[] = [];
+  let busy = true;
+  const leads = new CodexLeads(delivery, async (_thread, message) => { queued.push(message); }, () => busy);
+  await leads.pass(1);
+  assert.deepEqual(queued, []);
+  assert.equal(jobs[0].news![0].offers, 0);
+  busy = false;
+  await leads.pass(2);
+  assert.equal(queued.length, 1);
+});
+
 test('a note settles every snapshot it named, so none is queued again', async () => {
   const jobs = [job('cx-eeeeee', 'thread')];
   addNews(jobs[0], 'question', 'First.');

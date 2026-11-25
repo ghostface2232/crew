@@ -178,6 +178,13 @@ struct JobDetailView: View {
                 MessageEditor(title: String(localized: "Message to \(agentName(job.agent))"), text: Binding(get: { store.drafts[key] ?? "" }, set: { store.drafts[key] = $0 }), prompt: String(localized: "Write a message…"))
                 HStack {
                     Spacer(minLength: 0)
+                    // A job stopped by a usage limit, a budget or a restart only needs telling to go on, as in the board.
+                    if job.state == "failed" {
+                        Button("Resume", systemImage: "play") { Task { await store.resume(job) } }
+                            .pillButton()
+                            .help(String(localized: "Sends “\(CrewStore.resumeMessage)”"))
+                            .disabled(!store.connected || store.actions[key]?.locked == true)
+                    }
                     Button("Send", systemImage: "arrow.up") { Task { await store.followUp(job) } }
                         .glassPillButton()
                         .disabled(!store.connected || store.actions[key]?.locked == true || (store.drafts[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

@@ -128,7 +128,7 @@ final class CrewStore {
     }
     var project: String { selection?.hasPrefix("project:") == true ? String(selection!.dropFirst(8)) : "" }
     var now: Double { displayTime + clockSkew }
-    var projects: [String] { Array(Set(state.projects + (project.isEmpty ? [] : [project]))).sorted() }
+    var projects: [String] { Array(Set(state.projectPaths + (project.isEmpty ? [] : [project]))).sorted() }
     func persistSelection() { defaults.set(selection, forKey: "selection") }
     /// The detail panel's width as the user last dragged it, kept across launches.
     var panelWidth: CGFloat = WorkspaceStyle.panelWidth
@@ -291,6 +291,50 @@ final class CrewStore {
         await run(Self.peerRatingsKey) {
             let saved: Saved = try await api.post("/api/peer-ratings", Change(enabled: enabled))
             state.peerRatings = saved.peerRatings
+        }
+    }
+    static func projectSwitchKey(_ project: String) -> String { "project-settings:\(project)" }
+    /// One of a project's switches, saved as it is flipped, as in the board.
+    func setProjectSwitch(_ project: String, _ key: String, on: Bool) async {
+        struct Change: Encodable, Sendable { var project: String; var changes: [String: Bool] }
+        struct Saved: Decodable, Sendable { var projects: [String: ProjectSettings] }
+        await run(Self.projectSwitchKey(project)) {
+            let saved: Saved = try await api.post("/api/project-settings", Change(project: project, changes: [key: on]))
+            state.projects = saved.projects
+        }
+    }
+    /// Drops a decision the user no longer wants later jobs of the mission to follow.
+    func forget(_ entry: MissionMemory, in mission: Mission) async {
+        struct Forget: Encodable, Sendable { var forget: [String] }
+        await run(mission.actionKey) {
+            let updated: Mission = try await api.post("/api/missions/\(mission.id)", Forget(forget: [entry.key]))
+            upsert(&state.missions, updated)
+        }
+    }
+    /// What Resume sends a stopped worker; workers read English, whatever language the app is in.
+    static let resumeMessage = "Continue where you stopped."
+    func resume(_ job: Job) async {
+        await run("followup:\(job.id)") {
+            let version = jobVersion(job.id)
+            let updated: Job = try await api.post("/api/jobs/\(job.id)/reply", Reply(message: Self.resumeMessage))
+            applyJob(updated, since: version)
+        }
+    }
+    /// Each project's issue suggestions as last read; the daemon keeps each answer ten minutes.
+    var issues: [String: IssueList] = [:]
+    func loadIssues(_ project: String) async {
+        var components = URLComponents()
+        components.path = "/api/issues"
+        components.queryItems = [URLQueryItem(name: "project", value: project)]
+        // URLQueryItem leaves "+" as it is, which the daemon would read as a space in the path.
+        components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        if let found: IssueList = try? await api.request(components.string!) { issues[project] = found }
+    }
+    func dismissIssue(_ url: String, project: String) async {
+        struct Dismiss: Encodable, Sendable { var url: String }
+        await run("issue:\(url)", once: true) {
+            let _: EmptyReply = try await api.post("/api/issues/dismiss", Dismiss(url: url))
+            issues[project]?.issues.removeAll { $0.url == url }
         }
     }
     static let languageKey = "language"

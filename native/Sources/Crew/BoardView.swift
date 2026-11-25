@@ -50,6 +50,7 @@ struct BoardView: View {
                 if !store.connected { connectionBanner }
                 heading
                 if store.connected && store.project.isEmpty && (store.selection == "overview" || store.selection == nil) { SetupCard(api: store.api) }
+                if store.connected && !store.project.isEmpty { IssueSuggestionsCard(store: store, project: store.project) }
                 if store.state.pendingCount > 0 && store.selection != "needs" && !store.project.isEmpty { attentionBanner.transition(.card) }
                 if store.selection == "needs" { NeedsYouView(store: store) }
                 else if store.selection == "activity" { activity }
@@ -451,6 +452,7 @@ struct MissionPanel: View {
                     }
                     // As far from the title above as from what follows below.
                     MissionTrack(mission: mission).padding(.vertical, Space.l)
+                    decisions
                     let shown = mission.stops.indices.filter { index in
                         jobs.contains { mission.jobStep($0) == index } || (index == mission.step && leadRow != nil)
                     }
@@ -542,6 +544,30 @@ struct MissionPanel: View {
             default: mission.outcome
             }
             Text(outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
+        }
+        // The lead's wrap-up of finished work: what changed, what was verified, what is left for the user.
+        if mission.state == "done", let summary = mission.summary, !summary.isEmpty {
+            ReportText(report: summary).padding(.leading, WorkspaceStyle.rowTitleInset)
+                .accessibilityLabel(String(localized: "Wrap-up"))
+        }
+    }
+    /// Decisions the user made in this mission, each one theirs to drop, as in the board.
+    @ViewBuilder private var decisions: some View {
+        if mission.state == "active", let memory = mission.memory, !memory.isEmpty {
+            VStack(alignment: .leading, spacing: Space.s) {
+                Text("Decisions").font(Typeface.captionStrong).foregroundStyle(.secondary)
+                ForEach(memory, id: \.key) { entry in
+                    HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+                        Text(entry.text).font(Typeface.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                        Button { Task { await store.forget(entry, in: mission) } } label: {
+                            Image(systemName: "xmark").font(Symbol.control)
+                        }
+                        .iconButton().disabled(locked)
+                        .accessibilityLabel(String(localized: "Forget “\(entry.text)”"))
+                        .help("Forget this decision. Jobs started after this no longer get it.")
+                    }
+                }
+            }.padding(.leading, WorkspaceStyle.rowTitleInset)
         }
     }
     /// Animated from here rather than inside the card, so the cards below move with it instead of jumping.

@@ -316,7 +316,28 @@ struct CrewSettingsView: View {
             }.settingsFootnote()
         }
     }
+    /// What each of a project's switches lets Crew do there without asking, as in the board.
+    private static let projectSwitches: [(key: String, label: LocalizedStringKey, note: LocalizedStringKey, value: KeyPath<ProjectSettings, Bool?>)] = [
+        ("autonomy", "Push and open pull requests", "Only after the work is reviewed and its checks pass. Crew never merges, closes, or deploys.", \.autonomy),
+        ("watchAway", "Watch pull requests while away", "Read every 10 minutes while the lead session is closed; news waits until it is back.", \.watchAway),
+        ("autoResume", "Resume after a usage limit", "A job stopped by a usage limit carries on once usage resets, unless its mission was finished or dismissed.", \.autoResume),
+    ]
     @ViewBuilder private func instructions(_ pane: SettingsPane) -> some View {
+        if case .project(let path) = pane, let projects = store.state.projects {
+            Section {
+                ForEach(Self.projectSwitches, id: \.key) { item in
+                    Toggle(isOn: Binding(
+                        get: { projects[path]?[keyPath: item.value] == true },
+                        set: { on in Task { await store.setProjectSwitch(path, item.key, on: on) } }
+                    )) {
+                        Text(item.label)
+                        Text(item.note)
+                    }
+                }
+            } footer: {
+                if let error = store.actions[CrewStore.projectSwitchKey(path)]?.error { ErrorLabel(message: error).settingsFootnote() }
+            }
+        }
         Section {
             TextEditor(text: $model.text).font(Typeface.code)
                 .scrollContentBackground(.hidden)

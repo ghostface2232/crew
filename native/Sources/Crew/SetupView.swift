@@ -89,3 +89,53 @@ func withCode(_ text: String) -> AttributedString {
     }
     return result
 }
+
+/// Open issues of the project's repository that are the user's to start: assigned to them, or to no one. Each can be
+/// copied as a run command or dismissed for good. Says nothing when there are none or gh cannot list them, as in the board.
+struct IssueSuggestionsCard: View {
+    let store: CrewStore
+    let project: String
+    /// How many show at once; the next one takes the place of one the user dismisses.
+    private static let shown = 3
+    var body: some View {
+        Group {
+            if let found = store.issues[project], !found.issues.isEmpty {
+                ContentPanel(title: String(localized: "Start from an issue"), symbol: "checklist") {
+                    VStack(alignment: .leading, spacing: Space.s) {
+                        ForEach(found.issues.prefix(Self.shown)) { issue in
+                            HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+                                Link(destination: URL(string: issue.url) ?? URL(fileURLWithPath: "/")) {
+                                    Text(verbatim: "#\(issue.number) ").foregroundStyle(.secondary) + Text(verbatim: issue.title)
+                                }
+                                .font(Typeface.callout).lineLimit(1).truncationMode(.tail).help(issue.title)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                if !issue.labels.isEmpty {
+                                    Text(verbatim: issue.labels.prefix(3).joined(separator: " · ")).font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                CopyButton(title: String(localized: "Command"), text: "\(command) \(issue.url)")
+                                Button { Task { await store.dismissIssue(issue.url, project: project) } } label: {
+                                    Image(systemName: "xmark").font(Symbol.control)
+                                }
+                                .iconButton()
+                                .disabled(store.actions["issue:\(issue.url)"]?.locked == true)
+                                .accessibilityLabel(String(localized: "Dismiss #\(issue.number)"))
+                                .help("Dismiss. This issue is not suggested again.")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // The daemon keeps each answer ten minutes, so asking more often only reads its cache.
+        .task(id: project) {
+            while !Task.isCancelled {
+                await store.loadIssues(project)
+                try? await Task.sleep(for: .seconds(600))
+            }
+        }
+    }
+    /// Codex names a plugin skill with $, so the command is copied in the form the project's latest lead takes.
+    private var command: String {
+        store.state.claude.filter { $0.projectPath == project }.max { $0.activeAt < $1.activeAt }?.host == "codex" ? "$crew:run" : "/crew:run"
+    }
+}

@@ -98,9 +98,9 @@ export interface DesktopBridge {
   };
 }
 
-/** What Crew needs and whether each is in place (`GET /api/setup`). Only the plugin and `crew` command can be repaired here. */
+/** What Crew needs and whether each is in place (`GET /api/setup`). The plugins, `crew` command and Codex hooks can be installed here, and Crew's Codex hooks trusted. */
 export interface SetupState {
-  items: { id: string; label: string; ok: boolean; detail: string; summary?: string; repairable?: boolean }[];
+  items: { id: string; label: string; ok: boolean; detail: string; summary?: string; repairable?: boolean; trustable?: boolean }[];
   /** A desktop app's built copy, which registers its own plugin. */
   packaged: boolean;
   registering: boolean;

@@ -7,7 +7,7 @@
   },
   "skills": "./skills/",
   "mcpServers": "./codex.mcp.json",
-  "hooks": "./hooks/codex.json",
+  "hooks": "./hooks/codex-plugin.json",
   "interface": {
     "displayName": "Crew",
     "shortDescription": "Lead background coding agents from this session"

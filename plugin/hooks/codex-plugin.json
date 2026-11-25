@@ -1,0 +1,4 @@
+{
+  "description": "The Codex plugin's own hooks: none. Crew's Codex hooks (codex.json) go in the user's Codex hooks file, which Codex does not ask the user to trust again after each update (plugin/bridge/codex-plugin.ts). Without this file Codex would read Claude Code's hooks/hooks.json.",
+  "hooks": {}
+}

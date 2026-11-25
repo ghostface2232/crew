@@ -1,5 +1,5 @@
 {
-  "description": "Reports a Codex lead session's activity to the Crew status board, gives it the user's shared crew instructions and Crew's pending news, and offers news at the end of each turn. The daemon wakes an idle Codex lead itself.",
+  "description": "Crew installs these in the user's Codex hooks file, each command running its launcher. They report a Codex lead session's activity to the Crew status board, give it the user's shared crew instructions and Crew's pending news, and offer news at the end of each turn. The daemon wakes an idle Codex lead itself.",
   "hooks": {
     "SessionStart": [
       {

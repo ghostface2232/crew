@@ -82,7 +82,7 @@ export const NavList = memo(function NavList({ label, heading, items, current, o
   );
 });
 
-/** Kept in step with the media query in board.css that hides the other tabs' names. */
+/** Kept in step with the media query in board.css that hides the tabs' names. */
 const COMPACT = matchMedia('(max-width: 1000px)');
 const subscribeCompact = (change: () => void) => {
   COMPACT.addEventListener('change', change);
@@ -101,7 +101,7 @@ export const PageTabs = memo(function PageTabs({ label, items, current, onSelect
   const list = useRef<HTMLElement>(null);
   const [thumb, setThumb] = useState<{ left: number; width: number; slide: boolean } | null>(null);
   const shown = useRef('');
-  // Narrow windows show only the current page's name (board.css), so the others name themselves in a tooltip.
+  // Narrow windows show the tabs' icons only (board.css), so each names itself in a tooltip.
   const compact = useSyncExternalStore(subscribeCompact, () => COMPACT.matches);
   useLayoutEffect(() => {
     const element = list.current!;
@@ -136,7 +136,7 @@ export const PageTabs = memo(function PageTabs({ label, items, current, onSelect
           key={item.id}
           className="tab"
           data-tab={item.id}
-          title={compact && current !== item.id ? item.label : undefined}
+          title={compact ? item.label : undefined}
           aria-keyshortcuts={String(index + 1)}
           aria-current={current === item.id ? 'page' : undefined}
           onClick={() => onSelect(item.id)}

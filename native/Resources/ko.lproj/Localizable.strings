@@ -635,3 +635,11 @@
 "Finished" = "완료";
 "Done, all %lld steps passed" = "완료, %lld단계 모두 통과";
 "Step %lld of %lld, %@" = "%2$lld단계 중 %1$lld단계, %3$@";
+"Turn Budget" = "턴 한도";
+"Tokens per Turn" = "턴당 토큰";
+"By Difficulty" = "난이도별";
+"Unlimited" = "무제한";
+"A worker turn stops at %@ tokens for a routine job, %@ for a standard one, and %@ for a hard one." = "워커의 한 턴은 단순한 작업이면 토큰 %1$@, 표준 작업이면 %2$@, 어려운 작업이면 %3$@에서 멈춰요.";
+"A worker turn is never stopped for its tokens, so one that goes in circles keeps spending them until its time runs out." = "토큰 때문에 턴을 멈추지 않아요. 같은 일을 맴도는 턴도 작업 시간 한도에 닿을 때까지 토큰을 계속 써요.";
+"Every worker turn stops at this many tokens, whatever its difficulty." = "난이도와 상관없이 모든 워커 턴이 이 토큰 수에서 멈춰요.";
+"A turn also stops after 2 to 4 hours of work, by difficulty. A stopped job can be resumed." = "턴은 작업 시간으로도 난이도에 따라 2~4시간이 지나면 멈춰요. 멈춘 작업은 재개할 수 있어요.";

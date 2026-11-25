@@ -567,7 +567,8 @@ export function scoreAll(file: NotesFile, options: { ratings?: boolean } = {}): 
   const tenth = (n: number) => Math.round(n * 10) / 10;
   const fitted = buildRates(file);
   const rates = new Map<string, number | null>(models.map((m) => [m.model, fitted.get(m.model) ?? null]));
-  const enough = (model: string, name: RatingItem) => { const given = peer.get(`${model}\0${name}`); return given && given.count >= MIN_RATINGS ? given : undefined; };
+  // Routine ratings count by fractional shares, whose sum can fall a rounding error short of a whole number.
+  const enough = (model: string, name: RatingItem) => { const given = peer.get(`${model}\0${name}`); return given && given.count >= MIN_RATINGS - 1e-9 ? given : undefined; };
   /** An item from 0 to 1: its evidence, moved by its ratings once there are enough; without evidence, its reference moved by them. */
   const item = (model: string, name: RatingItem, observed: number | null): number | null => {
     const shift = enough(model, name)?.shift;

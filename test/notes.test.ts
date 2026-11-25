@@ -174,6 +174,10 @@ test('ratings of routine work together weigh at most two ratings, as its lines d
     polisher: [{}, ...Array.from({ length: n }, (_, i) => ({ job: `cx-r${i}`, difficulty: 'routine' as const, size: 'small' as const, rating: { correctness: 5 } }))] });
   const polisher = scoreAll(alone(20)).find((s) => s.model === 'polisher')!;
   assert.deepEqual([polisher.ratings, polisher.score], [0, polisher.build]);
+  // One standard rating and three routine ones, at two thirds each, reach the minimum despite rounding in the sum.
+  const mixed = (n: number) => notes({ other: Array.from({ length: 6 }, (_, i) => ({ job: `cx-o${i}`, rating: { correctness: 3 } })),
+    polisher: [{ job: 'cx-s', rating: { correctness: 5 } }, ...Array.from({ length: n }, (_, i) => ({ job: `cx-r${i}`, difficulty: 'routine' as const, size: 'small' as const, rating: { correctness: 5 } }))] });
+  assert.equal(scoreAll(mixed(3)).find((s) => s.model === 'polisher')!.ratings, 3);
 });
 
 test('a reviewer\'s ratings of the lead\'s own routine work are capped through the review jobs its lines name', () => {

@@ -154,29 +154,46 @@ function EvidenceSection({ job }: { job: BoardJob }) {
  * it is from, since one from an earlier turn may not show the final state.
  */
 function EvidenceViewer({ job, items, shown, onShown }: { job: BoardJob; items: EvidenceItem[]; shown: string[]; onShown: (files: string[]) => void }) {
-  const [comparing, setComparing] = useState(false);
+  const [compare, setCompare] = useState(false);
+  // With one capture left there is nothing to compare.
+  const comparing = compare && items.length > 1;
   const close = () => onShown([]);
   const caption = (item: EvidenceItem) => evidenceTurn(item, job.turns);
   const strip = orderEvidence(items);
   // `shown` is in the order captures were added, so the last is the one most recently looked at.
   const current = shown.at(-1)!;
   const panes = comparing ? orderEvidence(items.filter((item) => shown.includes(item.file))) : items.filter((item) => item.file === current);
-  const step = (by: number) => {
+  // Moves to the capture beside the one shown; while comparing, the arrows are left alone.
+  const step = useRef<(by: number) => boolean>(() => false);
+  step.current = (by) => {
+    if (comparing) return false;
     const next = strip[strip.findIndex((item) => item.file === current) + by];
     if (next) onShown([next.file]);
+    return true;
   };
+  useEffect(() => {
+    // On the document, like the sheet's Escape, so the arrows still work when focus has fallen out of the sheet.
+    const keydown = (event: KeyboardEvent) => {
+      if ((event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') || event.defaultPrevented) return;
+      if (event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
+      const target = event.target as HTMLElement;
+      // A focused video keeps its arrows for seeking, and a field or another sheet keeps its own.
+      if (target instanceof HTMLVideoElement || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable) return;
+      const owner = target.closest('dialog');
+      if (owner && !owner.classList.contains('evidence-viewer')) return;
+      if (step.current(event.key === 'ArrowLeft' ? -1 : 1)) event.preventDefault();
+    };
+    document.addEventListener('keydown', keydown);
+    return () => document.removeEventListener('keydown', keydown);
+  }, []);
+  const stripRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // The strip follows the arrows when it has more captures than fit.
+    stripRef.current?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [current, comparing]);
   return (
     <Dialog labelId="evidence-viewer-title" className="evidence-viewer" onClose={close}>
-      <div
-        className="sheet-body"
-        onKeyDown={(event) => {
-          // A focused video keeps its arrows for seeking.
-          if (comparing || event.target instanceof HTMLVideoElement || event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
-          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-          event.preventDefault();
-          step(event.key === 'ArrowLeft' ? -1 : 1);
-        }}
-      >
+      <div className="sheet-body">
         <div className="sheet-head">
           <h2 className="title" id="evidence-viewer-title">{t('Evidence')}</h2>
           {items.length > 1 && (
@@ -187,7 +204,7 @@ function EvidenceViewer({ job, items, shown, onShown }: { job: BoardJob; items: 
               onClick={() => {
                 // Leaving keeps only the one most recently added.
                 if (comparing) onShown([current]);
-                setComparing(!comparing);
+                setCompare(!comparing);
               }}
             >
               <Icon icon={ColumnDoubleCompareRegular} />
@@ -212,6 +229,7 @@ function EvidenceViewer({ job, items, shown, onShown }: { job: BoardJob; items: 
         </div>
         {items.length > 1 && (
           <div
+            ref={stripRef}
             className="compare-picker"
             role="group"
             aria-label={comparing ? t('Captures to compare, up to {max}', { max: MAX_COMPARED }) : t('Captures')}

@@ -950,8 +950,10 @@ private struct EvidenceViewer: View {
     let turns: Int
     /// In the order captures were added, so the last is the one most recently looked at.
     @Binding var shown: [String]
-    @State private var comparing = false
+    @State private var compare = false
     @FocusState private var focused: Bool
+    /// With one capture left there is nothing to compare.
+    private var comparing: Bool { compare && items.count > 1 }
     private var strip: [Evidence] { Evidence.ordered(items) }
     /// `shown` without captures the worker has since deleted.
     private var open: [String] { shown.filter { file in items.contains { $0.file == file } } }
@@ -971,7 +973,7 @@ private struct EvidenceViewer: View {
                     Button {
                         // Leaving keeps only the one most recently added.
                         if comparing { shown = current.map { [$0] } ?? [] }
-                        comparing.toggle()
+                        compare = !comparing
                     } label: {
                         Label("Compare", systemImage: "rectangle.split.2x1")
                     }
@@ -999,9 +1001,10 @@ private struct EvidenceViewer: View {
         // A capture the worker has since deleted leaves the viewer, and the last one closes it.
         .onChange(of: panes.isEmpty) { _, empty in if empty { shown = [] } }
     }
-    /// Moves to the capture beside the one shown; while comparing, the arrows do nothing.
+    /// Moves to the capture beside the one shown; while comparing, the arrows do nothing. Either way the key is taken,
+    /// so an arrow past the ends does not sound the alert.
     private func step(_ by: Int) -> KeyPress.Result {
-        guard !comparing else { return .ignored }
+        guard !comparing else { return .handled }
         if let index = strip.firstIndex(where: { $0.file == current }), strip.indices.contains(index + by) {
             shown = [strip[index + by].file]
         }
@@ -1009,25 +1012,29 @@ private struct EvidenceViewer: View {
     }
     private var picker: some View {
         let open = open
-        return ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: Space.m) {
-                ForEach(strip, id: \.file) { item in
-                    let on = comparing ? open.contains(item.file) : item.file == current
-                    Button {
-                        if !comparing { shown = [item.file] } else { shown = on ? open.filter { $0 != item.file } : open + [item.file] }
-                    } label: {
-                        EvidenceChoice(item: item, turns: turns, on: on)
+        return ScrollViewReader { reader in
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: Space.m) {
+                    ForEach(strip, id: \.file) { item in
+                        let on = comparing ? open.contains(item.file) : item.file == current
+                        Button {
+                            if !comparing { shown = [item.file] } else { shown = on ? open.filter { $0 != item.file } : open + [item.file] }
+                        } label: {
+                            EvidenceChoice(item: item, turns: turns, on: on)
+                        }
+                        .buttonStyle(.plain)
+                        // While comparing, the last one stays, and a fifth has no room.
+                        .disabled(comparing && (on ? open.count == 1 : open.count >= Evidence.maxCompared))
+                        .help(item.file)
+                        .accessibilityLabel("\(item.turnLabel(of: turns)), \(item.file)")
+                        .accessibilityAddTraits(on ? .isSelected : [])
                     }
-                    .buttonStyle(.plain)
-                    // While comparing, the last one stays, and a fifth has no room.
-                    .disabled(comparing && (on ? open.count == 1 : open.count >= Evidence.maxCompared))
-                    .help(item.file)
-                    .accessibilityLabel("\(item.turnLabel(of: turns)), \(item.file)")
-                    .accessibilityAddTraits(on ? .isSelected : [])
-                }
-            }.padding(1)
+                }.padding(1)
+            }
+            .scrollIndicators(.never)
+            // The strip follows the arrows when it has more captures than fit.
+            .onChange(of: current) { _, file in if let file, !comparing { reader.scrollTo(file) } }
         }
-        .scrollIndicators(.never)
         .accessibilityLabel(comparing ? Text("Captures to compare, up to \(Evidence.maxCompared)") : Text("Captures"))
     }
 }

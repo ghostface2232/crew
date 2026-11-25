@@ -662,7 +662,8 @@ dialog.sheet.evidence-viewer { width: min(1320px, calc(100vw - 32px)); }
 .compare figcaption a { min-width: 0; }
 .compare-picker { display: flex; gap: 8px; padding: 2px; overflow-x: auto; }
 .compare-picker button { flex: none; display: grid; justify-items: start; gap: 2px; width: 112px; min-height: 0; padding: 6px; border-radius: var(--row-radius); background: none; text-align: left; font-weight: 450; }
-.compare-toggle[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); box-shadow: var(--shadow-accent); }
+button.compare-toggle[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); box-shadow: var(--shadow-accent); }
+@media (hover: hover) { button.compare-toggle[aria-pressed="true"]:not(:disabled):hover { background: color-mix(in srgb, var(--ink), var(--canvas) 14%); } }
 .compare-picker button[aria-pressed="true"], .compare-picker button[aria-current="true"] { background: var(--fill); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .compare-picker img, .compare-video { display: grid; place-items: center; width: 100%; aspect-ratio: 4 / 3; margin-bottom: 4px; object-fit: contain; background: var(--fill); border-radius: calc(var(--row-radius) - 2px); color: var(--secondary); }
 .compare-picker .caption { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

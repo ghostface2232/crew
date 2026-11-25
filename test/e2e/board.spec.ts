@@ -509,6 +509,10 @@ test('a capture opens by itself, the strip switches between captures, and Compar
   // Without Compare, the strip and the arrow keys switch the one capture shown.
   const strip = sheet.getByRole('group', { name: 'Captures', exact: true });
   await expect(strip.getByRole('button', { name: /hero-after\.png/ })).toHaveAttribute('aria-current', 'true');
+  // The arrows work wherever focus is, as after a click on the image.
+  await panes.locator('img').click();
+  await page.keyboard.press('ArrowLeft');
+  await expect(panes.getByRole('link')).toHaveText(['nav.png']);
   await strip.getByRole('button', { name: /hero-before\.png/ }).click();
   await expect(panes.getByRole('link')).toHaveText(['hero-before.png']);
   await page.keyboard.press('ArrowRight');
@@ -523,6 +527,8 @@ test('a capture opens by itself, the strip switches between captures, and Compar
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  // Under the pointer that pressed it, it keeps its opaque fill behind its light label.
+  await expect.poll(() => toggle.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toMatch(/rgba|\/ 0?\.\d/);
   const picker = sheet.getByRole('group', { name: /Captures to compare/ });
   await expect(picker.getByRole('button', { name: /hero-after\.png/ })).toBeDisabled();
   const nav = picker.getByRole('button', { name: /nav\.png/ });

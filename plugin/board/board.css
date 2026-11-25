@@ -912,6 +912,8 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 /* One pill holds the pages, search and New Job. Its controls sit flat on it and rise only for the current page and under
    the pointer, as the sidebar's items rise. */
 .topbar-bar {
+  /* Its own width decides when its controls fold to icons, so the Windows app's caption buttons and the sidebar count. */
+  container: topbar-bar / inline-size;
   flex: 1;
   min-width: 0;
   display: flex;
@@ -1519,14 +1521,16 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
 .sign-in { display: grid; justify-items: center; gap: 12px; max-width: 420px; margin: 20vh auto; padding: 0 16px; text-align: center; animation: rise 520ms var(--ease-out) backwards; }
 .sign-in-mark { display: grid; place-items: center; color: var(--secondary); }
 
-/* Narrower windows keep the top bar on one row: search and every tab fold to their icons together, so no page is
-   named while the others are not. Narrow ones also fold the sidebar away, to float out over the page. */
-@media (max-width: 1000px) {
+/* A bar too narrow for every name keeps one row: search and every tab fold to their icons together, so no page is
+   named while the others are not. 754px is inside the 760px bar beside the sidebar in a 1000px browser window; the
+   Windows app's caption buttons take about 150px more of the window. */
+@container topbar-bar (max-width: 754px) {
   .topbar .search-pill { flex: none; width: 30px; padding: 0; justify-content: center; }
   .search-pill > span, .search-pill > kbd { display: none; }
   .tab { --inset: 9px; padding-inline-end: 9px; }
   .tab > .tab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
+/* Narrow windows fold the sidebar away, to float out over the page. */
 @media (max-width: 760px) {
   .app { grid-template-columns: minmax(0, 1fr); }
   .sidebar {

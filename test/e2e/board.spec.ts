@@ -1278,6 +1278,14 @@ test('the top bar keeps its controls on one row at every width', async ({ page }
     if (overlap || rows.some((row) => Math.abs(row - rows[0]) > 2) || await bar.evaluate((element) => element.scrollWidth > element.clientWidth)) split.push(width);
   }
   expect(split, 'widths where the top bar splits or overflows').toEqual([]);
+  // The bar's own width decides when the tabs fold, so the Windows app's caption buttons (about 150px) fold them in a
+  // window that would show their names in a browser.
+  const named = () => page.locator('.tab-label').first().evaluate((element) => element.getBoundingClientRect().width > 1);
+  await page.setViewportSize({ width: 1100, height: 800 });
+  expect(await named()).toBe(true);
+  await bar.evaluate((element) => { element.style.paddingInlineEnd = '158px'; });
+  await expect.poll(named).toBe(false);
+  await expect(page.locator('.tab').first()).toHaveAttribute('title', 'Overview');
 });
 
 test('320px sheets keep controls within the viewport and support reduced motion', async ({ page }) => {

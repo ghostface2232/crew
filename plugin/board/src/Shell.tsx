@@ -1,4 +1,4 @@
-import { memo, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { memo, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { AlertBadgeRegular, FlagRegular, SpinnerIosRegular } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
@@ -82,12 +82,6 @@ export const NavList = memo(function NavList({ label, heading, items, current, o
   );
 });
 
-/** Kept in step with the media query in board.css that hides the tabs' names. */
-const COMPACT = matchMedia('(max-width: 1000px)');
-const subscribeCompact = (change: () => void) => {
-  COMPACT.addEventListener('change', change);
-  return () => COMPACT.removeEventListener('change', change);
-};
 /**
  * The pages, as a segmented control in the top bar, as the app's toolbar has them. A raised thumb slides to the page
  * you are on; it snaps when the tabs only change width (a count, the language, the window).
@@ -101,14 +95,17 @@ export const PageTabs = memo(function PageTabs({ label, items, current, onSelect
   const list = useRef<HTMLElement>(null);
   const [thumb, setThumb] = useState<{ left: number; width: number; slide: boolean } | null>(null);
   const shown = useRef('');
-  // Narrow windows show the tabs' icons only (board.css), so each names itself in a tooltip.
-  const compact = useSyncExternalStore(subscribeCompact, () => COMPACT.matches);
+  // A narrow bar shows the tabs' icons only (board.css), so each then names itself in a tooltip. Read from the label,
+  // since the bar's width, not the window's, decides.
+  const [compact, setCompact] = useState(false);
   useLayoutEffect(() => {
     const element = list.current!;
     let placed = '';
     const measure = () => {
       const tab = element.querySelector<HTMLElement>(`[data-tab="${CSS.escape(current)}"]`);
-      if (!tab || placed === `${tab.offsetLeft}:${tab.offsetWidth}`) return;
+      if (!tab) return;
+      setCompact((tab.querySelector<HTMLElement>('.tab-label')?.offsetWidth ?? 0) <= 1);
+      if (placed === `${tab.offsetLeft}:${tab.offsetWidth}`) return;
       placed = `${tab.offsetLeft}:${tab.offsetWidth}`;
       setThumb({ left: tab.offsetLeft, width: tab.offsetWidth, slide: shown.current !== '' && shown.current !== current });
       shown.current = current;

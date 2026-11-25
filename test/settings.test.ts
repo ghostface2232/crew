@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { canonicalPath, effectiveRole, PRESETS, projectSettings, resolveConfig } from '../plugin/bridge/config.ts';
 import { sharedInstructions } from '../plugin/bridge/instructions.ts';
-import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, savePreset, saveProjectSettings, saveRoles, writeInstructions } from '../plugin/bridge/settings.ts';
+import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, savePreset, saveProjectSettings, saveRoles, saveTurnTokenBudget, writeInstructions } from '../plugin/bridge/settings.ts';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-settings-'));
 
@@ -305,6 +305,26 @@ test('peer ratings are on unless the file says false, and turning them back on r
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false, peerRatings: false });
   assert.throws(() => savePeerRatings(home, 'off'), /true or false/);
   assert.deepEqual(savePeerRatings(home, true), { peerRatings: true });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false });
+});
+
+test('the turn token budget follows job difficulty unless set to one of its choices or unlimited', () => {
+  const home = tempDir();
+  const file = path.join(home, 'config.json');
+  assert.equal(resolveConfig({}).turnTokenBudget, null);
+  for (const bad of [0, -10_000_000, 2_000_000, 40_000_000, 150_000_000, '50000000', 'none', false]) {
+    assert.throws(() => resolveConfig({ turnTokenBudget: bad as never }), /turnTokenBudget is .*one of 1000000, 5000000/, String(bad));
+  }
+  for (const good of [1_000_000, 5_000_000, 100_000_000]) assert.equal(resolveConfig({ turnTokenBudget: good }).turnTokenBudget, good);
+  assert.equal(resolveConfig({ turnTokenBudget: 'unlimited' }).turnTokenBudget, 'unlimited');
+  fs.writeFileSync(file, JSON.stringify({ notify: false }));
+  assert.deepEqual(saveTurnTokenBudget(home, 50_000_000), { turnTokenBudget: 50_000_000 });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false, turnTokenBudget: 50_000_000 });
+  assert.throws(() => saveTurnTokenBudget(home, 25_000_000), /one of 1000000/);
+  assert.throws(() => saveTurnTokenBudget(home, undefined), /one of 1000000/);
+  assert.deepEqual(saveTurnTokenBudget(home, 'unlimited'), { turnTokenBudget: 'unlimited' });
+  // Back to following difficulty is the default, so the key leaves the file.
+  assert.deepEqual(saveTurnTokenBudget(home, null), { turnTokenBudget: null });
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false });
 });
 

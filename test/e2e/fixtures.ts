@@ -126,6 +126,7 @@ export function fixture(): BoardState {
       { model: 'claude-opus-5-5', agent: 'claude', score: null, build: null, fix: 7.6, samples: 2, buildSamples: 0, difficulty: { hard: 0, standard: 0, routine: 0 }, fixSamples: 2, reviewSamples: 0, items: { correctness: null, brief: null, report: null, findings: null }, ratings: 0, status: 'too few samples', summary: '', lastAt: NOW, consolidate: false, adoption: null },
       { model: 'gpt-6.2-astra', agent: 'codex', score: null, build: null, fix: null, samples: 2, buildSamples: 0, difficulty: { hard: 0, standard: 0, routine: 0 }, fixSamples: 0, reviewSamples: 2, items: { correctness: null, brief: null, report: null, findings: 6.4 }, ratings: 0, status: 'too few samples', summary: '', lastAt: NOW, consolidate: false, adoption: null },
     ],
+    turnTokenBudget: null,
     preset: 'balanced',
     presets: {
       economy: { codex: { model: 'small', effort: 'low' }, antigravity: { model: 'flash' }, subagentModel: 'haiku' },

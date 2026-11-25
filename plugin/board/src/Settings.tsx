@@ -5,7 +5,7 @@ import {
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { AppUpdate, Preset, PresetName, ProjectSettings, Snapshot } from './types.ts';
-import type { AgentSettings, Holder, JobKind, Role, RoleAssignment, RoleInfo, RoleSettings, WorkerAgent } from '../../bridge/config.ts';
+import type { AgentSettings, Holder, JobKind, Role, RoleAssignment, RoleInfo, RoleSettings, TurnTokenBudget, WorkerAgent } from '../../bridge/config.ts';
 import { formatDate, timeOfDay } from './dates.ts';
 import { request } from './api.ts';
 import { board } from './store.ts';
@@ -13,7 +13,7 @@ import { agentSettings, HOLDERS, knownProjects, NAMES, projectNames, resolveDraf
 import { AgentMark, ask, CloseButton, Dialog, Icon, Select, useFade } from './ui.tsx';
 import { Scores } from './Scores.tsx';
 import { desktop } from './desktop.ts';
-import { t, translated } from './i18n.ts';
+import { language as interfaceLanguage, t, translated } from './i18n.ts';
 import type { Language } from './i18n.ts';
 import appIcon from './icons/CrewAppIcon.png';
 import styles from './Settings.module.css';
@@ -129,11 +129,17 @@ function sameRoles(a: RoleSettings, b: RoleSettings) {
   return canonical(a) === canonical(b);
 }
 
+/** A token count as the interface's language says it briefly: 80M, or 8000만. */
+const tokenCount = (tokens: number) => new Intl.NumberFormat(interfaceLanguage, { notation: 'compact', maximumFractionDigits: 1 }).format(tokens);
+/** The daemon's TURN_TOKEN_CHOICES; the board takes only types from the bridge, whose modules need Node. */
+const TOKEN_CHOICES = [1_000_000, 5_000_000, 10_000_000, 20_000_000, 30_000_000, 50_000_000, 100_000_000];
+
 /**
  * A setting stored as it is changed, with no save step. One request runs at a time, and a change made meanwhile goes
  * out when it returns, so the last one made is the one stored. A change that cannot be stored is undone, and the
  * reason kept to show.
  */
+
 function useStored<T>(initial: () => T, same: (a: T, b: T) => boolean, store: (value: T) => Promise<T>) {
   const [value, setValue] = useState(initial);
   const [error, setError] = useState('');
@@ -251,6 +257,17 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     storedPreset.adopt(state.preset ?? null);
   }, [state.preset, storedPreset.busy]);
   const preset = storedPreset.value;
+  // Saved as it changes, like the preset, and guarded the same way against a reply that arrives after a newer value.
+  const storedBudget = useStored<TurnTokenBudget>(() => state.turnTokenBudget ?? null, Object.is, async (submitted) => {
+    const revision = board.getBudgetRevision();
+    const saved = (await request<{ turnTokenBudget: TurnTokenBudget }>('/api/turn-token-budget', { budget: submitted })).turnTokenBudget;
+    if (board.getBudgetRevision() === revision) board.receive('turnTokenBudget', saved);
+    return saved;
+  });
+  useEffect(() => {
+    if (state.turnTokenBudget !== undefined) storedBudget.adopt(state.turnTokenBudget);
+  }, [state.turnTokenBudget, storedBudget.busy]);
+  const budget = storedBudget.value;
   const selectedPreset = preset ? state.presets?.[preset] : undefined;
   const [scope, setScope] = useState('');
   // Whose instructions the editor holds; until a newly chosen set arrives, it still holds the previous one.
@@ -327,7 +344,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     (document.activeElement as HTMLElement | null)?.blur();
     // A change still being stored is waited for. One that cannot be stored keeps Settings open, where it says so:
     // closed, the change would be undone with nothing left to show why.
-    if (!(await storedRoles.settled()) || !(await storedPreset.settled())) return;
+    if (!(await storedRoles.settled()) || !(await storedPreset.settled()) || !(await storedBudget.settled())) return;
     if (unsaved.current && !await ask(t('Close without saving your changes?'), t('Close'))) return;
     if (shownInstallError.current) void desktop?.update.seen?.();
     close();
@@ -673,6 +690,41 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                     )}
                     <p className={styles.footnote}>{preset ? PRESET_SUMMARY()[preset] : t("Uses each agent's own model and effort settings.")}</p>
                   </section>
+                  {state.turnTokenBudget !== undefined && (
+                    <section className={styles.group}>
+                      <header className={styles.groupHead}><h3 className={styles.groupTitle}>{t('Turn Budget')}</h3></header>
+                      <div className={styles.rows}>
+                        <label className={styles.row}>
+                          <span>{t('Tokens per Turn')}</span>
+                          {/* Keyed as text, since the select's values are strings; null is By Difficulty. */}
+                          <Select<string>
+                            label={t('Tokens per Turn')}
+                            value={budget === null ? 'difficulty' : String(budget)}
+                            options={[
+                              ['difficulty', t('By Difficulty')],
+                              ...TOKEN_CHOICES.map((tokens) => [String(tokens), tokenCount(tokens)] as [string, string]),
+                              ['unlimited', t('Unlimited')],
+                            ]}
+                            onChange={(next) => storedBudget.change(next === 'difficulty' ? null : next === 'unlimited' ? 'unlimited' : Number(next))}
+                          />
+                        </label>
+                      </div>
+                      {storedBudget.error && (
+                        <p className={`${styles.footnote} ${styles.note} error`} role="alert">
+                          <Icon icon={ErrorCircle16Regular} />
+                          {t('Not saved: {error}', { error: storedBudget.error })}
+                        </p>
+                      )}
+                      <p className={styles.footnote}>
+                        {budget === null
+                          ? t('A worker turn stops at {routine} tokens for a routine job, {standard} for a standard one, and {hard} for a hard one.', { routine: tokenCount(60_000_000), standard: tokenCount(80_000_000), hard: tokenCount(120_000_000) })
+                          : budget === 'unlimited'
+                            ? t('A worker turn is never stopped for its tokens, so one that goes in circles keeps spending them until its time runs out.')
+                            : t('Every worker turn stops at this many tokens, whatever its difficulty.')}
+                        {' '}{t('A turn also stops after 2 to 4 hours of work, by difficulty. A stopped job can be resumed.')}
+                      </p>
+                    </section>
+                  )}
                   <section className={styles.group}>
                     <header className={styles.groupHead}><h3 className={styles.groupTitle}>{t('Priority')}</h3></header>
                     <div className={styles.rows}>

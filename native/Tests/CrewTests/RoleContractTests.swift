@@ -334,7 +334,7 @@ import Testing
         #expect(agentRole("claude", store: store) == "Lead · \(delegate) · \(release)")
         #expect(agentRole("codex", store: store) == "\(delegate) · \(release)")
         store.state.claude = [codex]
-        store.selection = "project:/elsewhere"
+        store.project = "/elsewhere"
         #expect(agentRole("codex", store: store) == "\(delegate) · \(release)")
     }
 }

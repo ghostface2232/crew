@@ -127,9 +127,6 @@ struct CrewSettingsView: View {
     @ViewBuilder private func content(_ pane: SettingsPane) -> some View {
         if let group = pane.group {
             ForEach(model.roleInfo.filter { $0.group == group }) { roleSection($0) }
-            Section {} footer: {
-                Text("The lead picks an agent for each job, preferring other agents over its own. When a role is assigned to the lead's agent, the lead does the work itself.").settingsFootnote()
-            }
         } else if pane == .about {
             about
         } else if pane == .presets {
@@ -215,8 +212,6 @@ struct CrewSettingsView: View {
             LabeledContent(String(localized: "Mission preset"), value: String(localized: "Overrides default for new jobs"))
         } header: {
             Text("Priority")
-        } footer: {
-            Text("Change a mission's preset from its menu, or name one in your prompt.").settingsFootnote()
         }
     }
     /// Laid out like Software Update: the state and the installed version beside the app's icon, with the check on
@@ -246,12 +241,15 @@ struct CrewSettingsView: View {
             VStack(alignment: .leading, spacing: Space.ml) {
                 if let error = updater.error ?? updater.installError { ErrorLabel(message: error).settingsFootnote() }
                 // The note and the action share one line, so the action is not left between the list and a note.
-                HStack(spacing: Space.l) {
-                    Text(updater.phase == .unsupported
-                        ? String(localized: "This copy of Crew is not running from an app bundle, so it cannot update itself.")
-                        : String(localized: "Updates install after running jobs finish."))
-                        .settingsFootnote().frame(maxWidth: .infinity, alignment: .leading)
-                    updateAction
+                // Said only where it explains what the user sees: no updates at all, or one waiting on jobs. With neither a
+                // note nor an action, the line is left out rather than leaving its spacing under the list.
+                let note = updater.phase == .unsupported ? String(localized: "This copy of Crew is not running from an app bundle, so it cannot update itself.")
+                    : updater.phase == .ready ? String(localized: "Updates install after running jobs finish.") : nil
+                if note != nil || [.ready, .installing, .available].contains(updater.phase) {
+                    HStack(spacing: Space.l) {
+                        if let note { Text(note).settingsFootnote().frame(maxWidth: .infinity, alignment: .leading) } else { Spacer(minLength: 0) }
+                        updateAction
+                    }
                 }
             }
         }
@@ -295,18 +293,11 @@ struct CrewSettingsView: View {
                 ForEach(reviewers) { ModelScoreRow(rank: nil, score: $0) }
             }
         }
-        Section {} footer: {
-            Text("Scores weigh review findings against build size, with fixes scored separately. Models are ranked after three reviewed builds, and reviews by the same agent count half as much.")
-                .settingsFootnote()
-        }
         if let peerRatings = store.state.peerRatings {
             Section {
                 Toggle("Peer ratings", isOn: Binding(get: { peerRatings }, set: { enabled in Task { await store.setPeerRatings(enabled) } }))
             } footer: {
-                VStack(alignment: .leading, spacing: Space.s) {
-                    if let error = store.actions[CrewStore.peerRatingsKey]?.error { ErrorLabel(message: error) }
-                    Text("The lead and workers rate each other's work, and those ratings make up half of each score. When off, scores come from review findings alone, and existing ratings are kept.")
-                }.settingsFootnote()
+                if let error = store.actions[CrewStore.peerRatingsKey]?.error { ErrorLabel(message: error).settingsFootnote() }
             }
         }
     }
@@ -321,7 +312,7 @@ struct CrewSettingsView: View {
         } footer: {
             VStack(alignment: .leading, spacing: Space.s) {
                 if let error = store.actions[CrewStore.languageKey]?.error { ErrorLabel(message: error) }
-                Text("For the board and the Crew app on this computer. The app switches the next time it opens.")
+                Text("Applies the next time the app opens.")
             }.settingsFootnote()
         }
     }
@@ -333,14 +324,14 @@ struct CrewSettingsView: View {
                 .frame(minHeight: Self.editorHeight)
                 .accessibilityLabel("Shared instructions").disabled(!model.loaded || model.scope != pane.scope)
         } header: {
-            Text(pane == .instructions ? String(localized: "Given to every agent with its next job, in every project, and to lead sessions when they start.")
-                 : String(localized: "Given to every agent working in this project, after the instructions for every project."))
+            Text(pane == .instructions ? String(localized: "Shared with every agent in every project.")
+                 : String(localized: "Shared with every agent in this project."))
                 .settingsFootnote().textCase(nil)
         } footer: {
             VStack(alignment: .leading, spacing: Space.s) {
                 saveRow
                 if model.text.count > 9000 {
-                    Label("Over 9,000 characters, so lead sessions are pointed to them rather than given the full text.", systemImage: "info.circle").settingsFootnote()
+                    Label("Too long to give lead sessions in full.", systemImage: "info.circle").settingsFootnote()
                 }
             }
         }

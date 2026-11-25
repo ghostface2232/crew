@@ -360,6 +360,9 @@
 "Edit" = "편집";
 "Implementation" = "구현";
 "Builds separable pieces of a change." = "변경 사항에서 독립적으로 진행할 수 있는 부분을 구현해요.";
+"Prepares a release without publishing it." = "릴리스를 준비해요. 게시하지는 않아요.";
+"Challenges the lead on hard decisions." = "어려운 결정에서 리드의 입장에 반론을 제기해요.";
+"Fixes accepted review findings." = "받아들인 리뷰 지적 사항을 수정해요.";
 "Read-only review" = "읽기 전용 리뷰";
 "Reviews a change without modifying it." = "변경 사항을 수정하지 않고 리뷰해요.";
 "Wording polish" = "문구 다듬기";
@@ -387,11 +390,8 @@
 "Wording" = "문구 다듬기";
 "Cross-review" = "교차 리뷰";
 "Restructures code without changing what it does." = "동작을 유지하면서 코드 구조를 바꿔요.";
-"Prepares a release: version, changelog, build, and the steps to publish. It does not publish or deploy." = "버전, 변경 로그, 빌드, 게시 절차까지 릴리스를 준비해요. 직접 게시하거나 배포하지는 않아요.";
-"Tests the lead's position on a hard decision, read-only." = "판단하기 어려운 문제에서 리드의 입장을 읽기 전용으로 검토해요.";
 "Reviews a change by reading it and running checks." = "변경 사항을 읽고 검사를 실행해 리뷰해요.";
 "Reviews a change by starting the app in a snapshot of it." = "변경 사항의 스냅샷에서 앱을 실행해 리뷰해요.";
-"Fixes the review findings the lead accepted, in the lead's own code or a merged result." = "리드가 받아들인 리뷰 지적 사항을 리드의 코드나 병합 결과에서 수정해요.";
 "Economy" = "절약";
 "Balanced" = "균형";
 "Best" = "최고";
@@ -451,16 +451,6 @@
 "%lld reviews" = "리뷰 %lld건";
 "1 build" = "구현 1건";
 "%lld builds" = "구현 %lld건";
-"1 fix" = "수정 1건";
-"%lld fixes" = "수정 %lld건";
-"Brief" = "작업 지시";
-"Findings" = "지적 사항";
-"Merged %lld of %lld as is" = "%2$lld건 중 %1$lld건 그대로 병합";
-"%lld after a reply" = "후속 요청 후 병합 %lld건";
-"%lld in part" = "일부 병합 %lld건";
-"%lld rejected" = "거절 %lld건";
-"1 follow-up" = "후속 요청 1회";
-"%lld follow-ups" = "후속 요청 %lld회";
 "Settled" = "평가 확정";
 "On trial" = "평가 중";
 "Too few reviews" = "리뷰 부족";
@@ -476,7 +466,6 @@
 "About Crew" = "Crew 정보";
 "Model Presets" = "모델 프리셋";
 "Model Scores" = "모델 점수";
-"The lead picks an agent for each job, preferring other agents over its own. When a role is assigned to the lead's agent, the lead does the work itself." = "리드는 작업마다 자신보다 다른 에이전트를 먼저 선택해요. 리드와 같은 에이전트에 배정된 역할은 리드가 직접 진행해요.";
 "Same as %@" = "%@ 설정 따르기";
 "Not saved: %@" = "저장하지 못했어요: %@";
 "None" = "없음";
@@ -486,7 +475,6 @@
 "Mission preset" = "미션 프리셋";
 "Overrides default for new jobs" = "새 작업에서 기본값보다 우선 적용";
 "Priority" = "우선순위";
-"Change a mission's preset from its menu, or name one in your prompt." = "미션 메뉴에서 프리셋을 바꾸거나 프롬프트에서 프리셋을 지정할 수 있어요.";
 "Download progress" = "다운로드 진행률";
 "Check for Updates" = "업데이트 확인";
 "Release notes" = "릴리스 노트";
@@ -498,16 +486,10 @@
 "No reviews noted yet." = "아직 기록된 리뷰가 없어요.";
 "Too early to rank" = "순위 산정 전";
 "Reviewers" = "리뷰어";
-"Scores weigh review findings against build size, with fixes scored separately. Models are ranked after three reviewed builds, and reviews by the same agent count half as much." = "구현 규모 대비 리뷰 지적 사항으로 점수를 매기고, 수정은 따로 평가해요. 리뷰를 거친 구현이 3건 이상이면 순위에 오르고, 같은 에이전트가 한 리뷰는 절반만 반영해요.";
 "Peer ratings" = "상호 평가";
-"The lead and workers rate each other's work, and those ratings make up half of each score. When off, scores come from review findings alone, and existing ratings are kept." = "리드와 워커가 서로의 작업을 평가하고, 그 결과가 점수의 절반을 차지해요. 끄면 리뷰 지적 사항만으로 점수를 매기고, 기존 평가는 그대로 유지돼요.";
 "Language" = "언어";
 "Match System" = "시스템 설정과 같게";
-"For the board and the Crew app on this computer. The app switches the next time it opens." = "이 컴퓨터의 보드와 Crew 앱에 적용돼요. 앱은 다음에 열 때 바뀌어요.";
 "Shared instructions" = "공유 지침";
-"Given to every agent with its next job, in every project, and to lead sessions when they start." = "모든 프로젝트에서 각 에이전트의 다음 작업부터 전달되고, 리드 세션에는 시작할 때 전달돼요.";
-"Given to every agent working in this project, after the instructions for every project." = "이 프로젝트에서 작업하는 모든 에이전트에게 모든 프로젝트 지침 다음에 전달돼요.";
-"Over 9,000 characters, so lead sessions are pointed to them rather than given the full text." = "9,000자를 넘어 리드 세션에는 전체 내용 대신 파일 경로만 전달해요.";
 "Unsaved changes" = "저장하지 않은 변경 사항";
 "Retry Loading" = "다시 불러오기";
 "Saving…" = "저장 중…";
@@ -516,6 +498,10 @@
 "Update ready" = "업데이트 준비 완료";
 "Your changes have not been saved." = "변경 사항을 아직 저장하지 않았어요.";
 "Discard Changes" = "변경 사항 폐기";
+"Shared with every agent in every project." = "모든 프로젝트의 모든 에이전트와 공유해요.";
+"Shared with every agent in this project." = "이 프로젝트의 모든 에이전트와 공유해요.";
+"Too long to give lead sessions in full." = "너무 길어서 리드 세션에는 전문을 보내지 않아요.";
+"Applies the next time the app opens." = "앱을 다시 열면 적용돼요.";
 
 /* SetupView.swift */
 "Set up Crew" = "Crew 초기 설정";

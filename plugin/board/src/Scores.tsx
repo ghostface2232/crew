@@ -3,7 +3,7 @@ import { TrophyRegular } from '@fluentui/react-icons';
 import type { ModelScore } from './types.ts';
 import { NAMES } from './model.ts';
 import { AgentMark, Icon, RollingNumber } from './ui.tsx';
-import { t, translated } from './i18n.ts';
+import { t } from './i18n.ts';
 import styles from './Scores.module.css';
 
 const shown = (value: number | null) => (value === null ? '—' : value.toFixed(1));
@@ -18,46 +18,23 @@ function band(score: ModelScore): { word: string; tone: string } | null {
 }
 const toneOf = (score: ModelScore) => band(score)?.tone ?? 'var(--tertiary)';
 const statusText = (score: ModelScore) => (score.status === 'settled' ? t('Settled') : score.status === 'on trial' ? t('On trial') : t('Too few reviews'));
-/** The counts beside a model's status: its builds, fixes, and reviews when it has any. */
-const samplesText = ({ buildSamples: builds, fixSamples: fixes, reviewSamples: reviews }: ModelScore) => [
-  builds === 1 ? t('1 build') : t('{n} builds', { n: builds }),
-  fixes === 1 ? t('1 fix') : t('{n} fixes', { n: fixes }),
-  ...(reviews ? [reviews === 1 ? t('1 review') : t('{n} reviews', { n: reviews })] : []),
-].join(' · ');
-/** How the lead took a model's delegated work; an older daemon, or a model never delegated to, has none. */
-const adoptionText = ({ adoption: a }: ModelScore) => a && [
-  t('Merged {merged} of {judged} as is', { merged: a.asIs, judged: a.judged }),
-  t('{n} after a reply', { n: a.afterReply }),
-  ...(a.partly ? [t('{n} in part', { n: a.partly })] : []),
-  ...(a.rejected ? [t('{n} rejected', { n: a.rejected })] : []),
-  a.rounds === 1 ? t('1 follow-up') : t('{n} follow-ups', { n: a.rounds }),
-].join(' · ');
+/** The count beside a model's status: its builds, or its reviews for a model that only reviewed. */
+const samplesText = ({ score, buildSamples: builds, reviewSamples: reviews }: ModelScore) => (score === null && reviews
+  ? (reviews === 1 ? t('1 review') : t('{n} reviews', { n: reviews }))
+  : (builds === 1 ? t('1 build') : t('{n} builds', { n: builds })));
+/** What a row's ring shows: the score, or for a model that only reviewed, how its findings held up. */
+const ringValue = (score: ModelScore) => score.score ?? score.items?.findings ?? null;
 
 /** The score as a ring filling out of 10, with the number in its middle. */
 function Ring({ score, size = 52 }: { score: ModelScore; size?: number }) {
-  const value = score.score ?? 0;
+  const value = ringValue(score);
   return (
-    <span className={styles.ring} style={{ '--tone': toneOf(score), '--size': `${size}px` } as CSSProperties} role="img" aria-label={t('{score} out of 10', { score: shown(score.score) })}>
+    <span className={styles.ring} style={{ '--tone': toneOf(score), '--size': `${size}px` } as CSSProperties} role="img" aria-label={t('{score} out of 10', { score: shown(value) })}>
       <svg viewBox="0 0 36 36" aria-hidden="true">
         <circle className={styles.track} cx="18" cy="18" r="15.5" pathLength="100" />
-        {score.score !== null && <circle className={styles.arc} cx="18" cy="18" r="15.5" pathLength="100" style={{ '--value': value * 10 } as CSSProperties} />}
+        {value !== null && <circle className={styles.arc} cx="18" cy="18" r="15.5" pathLength="100" style={{ '--value': value * 10 } as CSSProperties} />}
       </svg>
-      <span className={styles.ringValue} aria-hidden="true">{shown(score.score)}</span>
-    </span>
-  );
-}
-
-/** The items beside correctness, which the ring shows; an older daemon sends none, and an item with nothing behind it is left out. */
-const ITEMS = translated(() => [['brief', t('Brief')], ['report', t('Report')], ['findings', t('Findings')]] as const);
-const itemBars = (score: ModelScore) => ITEMS().filter(([item]) => score.items?.[item] != null);
-
-/** A build or fix score, or an item, as a short bar out of 10. */
-function Bar({ label, value }: { label: string; value: number | null }) {
-  return (
-    <span className={styles.bar} data-empty={value === null || undefined}>
-      <span className={styles.barLabel}>{label}</span>
-      <span className={styles.barTrack} aria-hidden="true"><i style={{ '--value': (value ?? 0) / 10 } as CSSProperties} /></span>
-      <span className={styles.barValue}>{shown(value)}</span>
+      <span className={styles.ringValue} aria-hidden="true">{shown(value)}</span>
     </span>
   );
 }
@@ -93,7 +70,7 @@ function Podium({ top }: { top: ModelScore[] }) {
   );
 }
 
-/** One model's standing: its ring, its build and fix bars, and the lead's summary. A model not yet ranked shows no rank. */
+/** One model's standing: its ring and its status. A model not yet ranked shows no rank. */
 function Row({ score, rank, index }: { score: ModelScore; rank?: number; index: number }) {
   const word = band(score);
   return (
@@ -106,13 +83,6 @@ function Row({ score, rank, index }: { score: ModelScore; rank?: number; index: 
           {word && <span className={styles.word} style={{ '--tone': word.tone } as CSSProperties}>{word.word}</span>}
         </div>
         <span className={styles.meta}>{statusText(score)} · {samplesText(score)}</span>
-        {adoptionText(score) && <span className={styles.meta}>{adoptionText(score)}</span>}
-        <div className={styles.bars}>
-          <Bar label={t('Build')} value={score.build} />
-          <Bar label={t('Fix')} value={score.fix} />
-          {itemBars(score).map(([item, label]) => <Bar key={item} label={label} value={score.items[item]} />)}
-        </div>
-        {score.summary && <p className={styles.summary} title={score.summary}>{score.summary}</p>}
       </div>
       <Ring score={score} />
     </article>

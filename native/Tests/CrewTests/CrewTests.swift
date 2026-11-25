@@ -773,10 +773,12 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         try store.receive(event("modelScores", scores))
         #expect(store.state.modelScores == scores)
         // Items and the peer ratings switch come from a daemon that has them; an older one sends neither.
-        #expect(scores[0].itemBars.isEmpty && store.state.peerRatings == nil)
+        #expect(store.state.peerRatings == nil)
         let rated = try JSONDecoder().decode([ModelScore].self, from: Data(#"[{"model":"gpt-x","agent":"codex","score":8.1,"build":8.6,"fix":null,"samples":3,"buildSamples":1,"fixSamples":0,"reviewSamples":2,"items":{"correctness":8.1,"brief":7.5,"report":null,"findings":6.4},"status":"settled","summary":""}]"#.utf8))
-        #expect(rated[0].itemBars.map(\.label) == ["Brief", "Findings"])
-        #expect(rated[0].countsText.hasSuffix("0 fixes · 2 reviews"))
+        // A row shows its status and build count; a model that only reviewed shows its reviews and its findings item.
+        #expect(rated[0].countsText == "Settled · 1 build")
+        let reviewer = try JSONDecoder().decode([ModelScore].self, from: Data(#"[{"model":"gpt-r","agent":"codex","score":null,"build":null,"fix":null,"samples":2,"buildSamples":0,"fixSamples":0,"reviewSamples":2,"items":{"correctness":null,"brief":null,"report":null,"findings":6.4},"status":"too few samples","summary":""}]"#.utf8))
+        #expect(reviewer[0].countsText == "Too few reviews · 2 reviews" && reviewer[0].ringValue == 6.4)
         try store.receive(event("peerRatings", false))
         #expect(store.state.peerRatings == false)
         #expect(RoleInfo(role: "fix", kind: "delegate", label: "Fix", summary: "").group == "Review")

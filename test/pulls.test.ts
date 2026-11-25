@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { PULL_FIELDS, Pulls, observe } from '../plugin/bridge/pulls.ts';
+import { AWAY_MS, PULL_FIELDS, Pulls, observe } from '../plugin/bridge/pulls.ts';
 import type { PullCheck, PullDeps, PullView, PullWatch } from '../plugin/bridge/pulls.ts';
 
 const URL = 'https://github.com/octo/crew/pull/12';
@@ -468,4 +468,30 @@ test('an in-flight observation cannot update a watch whose mission has ended tra
     assert.equal(watch.news, undefined);
     assert.deepEqual(h.changes, [watch.id, watch.id]);
   }
+});
+
+test('a project whose user allows it keeps its pull requests read every ten minutes while the lead is away', async () => {
+  const h = harness();
+  const away = new Set<string>();
+  h.deps.away = (root) => away.has(root);
+  await h.pulls.link('one', URL);
+  h.calls.length = 0;
+  h.setPresent(false);
+  h.advance(AWAY_MS);
+  await h.pulls.tick();
+  assert.equal(h.calls.length, 0, 'not without the switch');
+  away.add('/project');
+  await h.pulls.tick();
+  assert.deepEqual(h.calls.splice(0).map((call) => call.args[2]), [URL]);
+  h.advance(AWAY_MS - 1);
+  await h.pulls.tick();
+  assert.equal(h.calls.length, 0, 'not before ten minutes since the last reading');
+  h.advance(1);
+  await h.pulls.tick();
+  assert.deepEqual(h.calls.map((call) => call.args[2]), [URL]);
+  // News found while away waits for the session, as any news does.
+  h.responses.set(URL, view({ statusCheckRollup: [run('build')] }));
+  h.advance(AWAY_MS);
+  await h.pulls.tick();
+  assert.equal(h.pulls.list()[0].news?.filter((item) => !item.acked).length, 1);
 });

@@ -16,12 +16,12 @@ import { stopChecks } from './check.ts';
 import { clientJson } from './text.ts';
 import { ClaudeSessions } from './claude.ts';
 import type { ClaudeSession } from './claude.ts';
-import { agentCommand, agentEnv, canonicalPath, HOME, installed, isRole, JOB_ID, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, PORTS, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
+import { agentCommand, agentEnv, canonicalPath, HOME, installed, isRole, JOB_ID, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, PORTS, projectSettings, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
 import type { Config, Holder } from './config.ts';
 import { evidenceType, openEvidence } from './evidence.ts';
 import { projectRoot } from './git.ts';
 import { followUps, isTerminal, Jobs, UnreadableLedger } from './jobs.ts';
-import { missionPreset, Missions } from './missions.ts';
+import { memoryFor, missionPreset, Missions } from './missions.ts';
 import type { Mission } from './missions.ts';
 import { Pulls } from './pulls.ts';
 import { execTimed } from './rpc.ts';
@@ -307,13 +307,14 @@ function pullView(watch: PullWatch) {
 
 /**
  * The pull requests linked to missions. Each is read with `gh` only while it is open, its mission has not been
- * dropped, and the lead session its news goes to is open in Claude Code: a closed session costs no polling, and
- * opening it again reads its pull requests at once.
+ * dropped, and the lead session its news goes to is open in Claude Code, or the user lets the project's pull
+ * requests be read while it is away: otherwise a closed session costs no polling. Opening it again reads them at once.
  */
 const pulls: Pulls = new Pulls({
   gh,
   mission: (id) => missions.list().find((mission) => mission.id === id),
   present: (session) => jobs.delivery.present(session),
+  away: (root) => projectSettings(liveConfig(), root).watchAway === true,
   save: () => jobs.flush(),
   changed: (watch) => {
     broadcast('pull', pullView(watch));
@@ -581,7 +582,7 @@ const BOARD_POSTS = [
  * Parts of those requests that only the lead sends: they speak for the user or the lead, or have the daemon read a
  * file or run a command. Unlike the routes, a field is the board's unless it is listed here.
  */
-const LEAD_FIELDS = ['approved_by_user', 'lead_session', 'lead', 'by', 'check', 'attachments'];
+const LEAD_FIELDS = ['approved_by_user', 'lead_session', 'lead', 'by', 'check', 'attachments', 'remember', 'summary'];
 /** A body read to check it before its route runs, kept for the route to read again. */
 const bodies = new WeakMap<http.IncomingMessage, unknown>();
 
@@ -852,10 +853,10 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     const body = await readJson(req);
     const id = missionRoute[1];
     if (body.done && body.abandoned) throw new HttpError(400, 'pass done or abandoned, not both');
-    if (body.done || body.abandoned) return missions.finish(id, { outcome: text(body.outcome, 'outcome'), record: text(body.record, 'record'), abandoned: Boolean(body.abandoned), reopen: body.reopen === true, byLead: body.by === 'lead' });
+    if (body.done || body.abandoned) return missions.finish(id, { outcome: text(body.outcome, 'outcome'), record: text(body.record, 'record'), summary: text(body.summary, 'summary'), abandoned: Boolean(body.abandoned), reopen: body.reopen === true, byLead: body.by === 'lead' });
     if (body.note !== undefined) return missions.note(id, text(body.note, 'note') ?? '');
     if (body.difficulty !== undefined) throw new HttpError(400, 'difficulty is set only when a mission starts, so its review cannot change it.');
-    const updated = missions.update(id, { stage: stage(body.stage), stages: body.stages, title: text(body.title, 'title'), preset: body.preset, tasks: body.tasks });
+    const updated = missions.update(id, { stage: stage(body.stage), stages: body.stages, title: text(body.title, 'title'), preset: body.preset, tasks: body.tasks, remember: body.remember, forget: body.forget });
     if (typeof body.lead === 'string') claude.focus(body.lead, updated.id);
     return updated;
   }
@@ -934,6 +935,9 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
         }
       }
       if (mission?.state === 'active' && mission.stages) spec.missionStep = mission.stageIndex ?? mission.stages.indexOf(mission.stage);
+      // What the user already decided in this mission goes with the brief, so the lead need not restate it for each job.
+      const decided = mission?.state === 'active' && typeof spec.task === 'string' ? memoryFor(mission, spec.taskId) : [];
+      if (decided.length) spec.task = `${spec.task}\n\n# Decisions the user made in this mission\nFollow these; they come from the user, through the lead.\n${decided.map((entry) => `- ${entry.text}`).join('\n')}`;
       const created = await jobs.create(spec);
       if (created.lead && created.mission) claude.focus(created.lead, created.mission);
       return view(created);

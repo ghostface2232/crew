@@ -95,6 +95,8 @@ export interface PullDeps {
   mission(id: string): { state: 'active' | 'done' | 'abandoned'; owner?: string; root: string } | undefined;
   /** Whether that lead session is open in Claude Code now. A closed session's pull requests are not polled. */
   present(session: string): boolean;
+  /** Whether the user lets this project's pull requests be read while its lead session is away (`watchAway`). */
+  away?(root: string): boolean;
   /** Writes the snapshot that holds the watches, their news and the receipts; throws when it cannot. */
   save(): void;
   /** A watch gained news, or changed in what is shown of it. */
@@ -104,6 +106,8 @@ export interface PullDeps {
   now?(): number;
 }
 
+/** How often a pull request is read while its lead session is away, for a project whose user allows it. */
+export const AWAY_MS = 10 * 60_000;
 const PR_URL = /^https:\/\/[a-z0-9.-]+(?::\d+)?\/([a-z0-9_.-]+\/[a-z0-9_.-]+)\/pull\/[1-9]\d*\/?$/i;
 const WARNING = 'Do not merge, close or deploy from this news.';
 const firstLine = (value: string) => value.split(/\r\n|\r|\n/, 1)[0];
@@ -418,8 +422,11 @@ export class Pulls {
           this.changed(watch, now);
           continue;
         }
-        if (!watch.lead || !this.deps.present(watch.lead)) continue;
-        const interval = session === watch.lead ? 15_000 : watch.checks === 'pending' ? 60_000 : 300_000;
+        if (!watch.lead) continue;
+        const present = this.deps.present(watch.lead);
+        if (!present && !this.deps.away?.(mission.root)) continue;
+        // Nobody reads the news before the session is back, so while it is away a reading every few minutes is enough.
+        const interval = !present ? AWAY_MS : session === watch.lead ? 15_000 : watch.checks === 'pending' ? 60_000 : 300_000;
         if (now - watch.checkedAt < interval) continue;
 
         let view: PullView | undefined;

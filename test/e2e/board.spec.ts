@@ -569,6 +569,37 @@ test('a capture opens by itself, the strip switches between captures, and Compar
   await expect(section).toBeVisible();
 });
 
+test('captures deleted while the viewer is open stay out of it when their names come back', async ({ page, request }) => {
+  const data = fixture();
+  const shot = (file: string) => ({ file, path: `/x/${file}`, turn: 1, from: 'worker' as const, bytes: 10, modified: 1 });
+  const push = (files: string[]) => {
+    data.jobs[0].evidence = files.map(shot);
+    return request.post('/__push', { data: { type: 'state', data } });
+  };
+  await push(['a.png', 'b.png']);
+  await page.locator(`button[data-job="${data.jobs[0].id}"]`).click();
+  const section = page.getByRole('dialog').getByRole('region', { name: 'Evidence' });
+  await section.getByRole('img', { name: 'b.png' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Evidence' });
+  const toggle = sheet.getByRole('button', { name: 'Compare', exact: true });
+  await toggle.click();
+  await sheet.getByRole('group', { name: /Captures to compare/ }).getByRole('button', { name: /a\.png/ }).click();
+  await expect(sheet.locator('.compare figure')).toHaveCount(2);
+  // With one capture left Compare ends, and a new capture does not turn it back on or bring b.png back.
+  await push(['a.png']);
+  await expect(toggle).toHaveCount(0);
+  await expect(sheet.locator('.compare figure').getByRole('link')).toHaveText(['a.png']);
+  await push(['a.png', 'b.png']);
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(sheet.locator('.compare figure').getByRole('link')).toHaveText(['a.png']);
+  // The capture shown leaving closes the viewer, which stays closed when it comes back.
+  await push(['b.png']);
+  await expect(sheet).toHaveCount(0);
+  await push(['a.png', 'b.png']);
+  await expect(section.getByRole('img', { name: 'a.png' })).toBeVisible();
+  await expect(sheet).toHaveCount(0);
+});
+
 test('the detail panel shows what verified the result and nothing for jobs without receipts', async ({ page, request }) => {
   const data = fixture();
   const check = { command: 'npm test', exit: 0, timedOut: false, output: 'ok 12 tests', ms: 4200, sandboxed: true };

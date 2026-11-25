@@ -108,9 +108,11 @@ function LiveDiffSection({ job }: { job: BoardJob }) {
 function EvidenceSection({ job }: { job: BoardJob }) {
   const items = (job.evidence ?? []).toSorted((a, b) => b.turn - a.turn);
   const [picked, setPicked] = useState<string[]>([]);
-  if (!items.length) return null;
-  // A capture the worker has since deleted leaves the viewer.
+  // A capture the worker has since deleted leaves the viewer for good, so one coming back under its name does not
+  // reopen it or rejoin a comparison.
   const shown = picked.filter((file) => items.some((item) => item.file === file));
+  if (shown.length !== picked.length) setPicked(shown);
+  if (!items.length) return null;
   return (
     <Section title={t('Evidence')} icon={ImageMultipleRegular}>
       <div className="evidence">
@@ -154,9 +156,9 @@ function EvidenceSection({ job }: { job: BoardJob }) {
  * it is from, since one from an earlier turn may not show the final state.
  */
 function EvidenceViewer({ job, items, shown, onShown }: { job: BoardJob; items: EvidenceItem[]; shown: string[]; onShown: (files: string[]) => void }) {
-  const [compare, setCompare] = useState(false);
-  // With one capture left there is nothing to compare.
-  const comparing = compare && items.length > 1;
+  const [comparing, setComparing] = useState(false);
+  // With one capture left there is nothing to compare, and Compare does not come back on its own with the next.
+  if (comparing && items.length < 2) setComparing(false);
   const close = () => onShown([]);
   const caption = (item: EvidenceItem) => evidenceTurn(item, job.turns);
   const strip = orderEvidence(items);
@@ -188,8 +190,15 @@ function EvidenceViewer({ job, items, shown, onShown }: { job: BoardJob; items: 
   }, []);
   const stripRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    // The strip follows the arrows when it has more captures than fit.
-    stripRef.current?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    // The strip follows the arrows when it has more captures than fit. Only the strip scrolls: `scrollIntoView` would
+    // also scroll the sheet when it is taller than the window, taking its head out of view.
+    const strip = stripRef.current;
+    const button = strip?.querySelector('[aria-current="true"]');
+    if (!strip || !button) return;
+    const box = button.getBoundingClientRect();
+    const view = strip.getBoundingClientRect();
+    if (box.left < view.left) strip.scrollLeft += box.left - view.left;
+    else if (box.right > view.right) strip.scrollLeft += box.right - view.right;
   }, [current, comparing]);
   return (
     <Dialog labelId="evidence-viewer-title" className="evidence-viewer" onClose={close}>
@@ -204,7 +213,7 @@ function EvidenceViewer({ job, items, shown, onShown }: { job: BoardJob; items: 
               onClick={() => {
                 // Leaving keeps only the one most recently added.
                 if (comparing) onShown([current]);
-                setCompare(!comparing);
+                setComparing(!comparing);
               }}
             >
               <Icon icon={ColumnDoubleCompareRegular} />

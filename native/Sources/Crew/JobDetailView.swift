@@ -998,8 +998,11 @@ private struct EvidenceViewer: View {
         .onAppear { focused = true }
         .onKeyPress(.leftArrow) { step(-1) }
         .onKeyPress(.rightArrow) { step(1) }
-        // A capture the worker has since deleted leaves the viewer, and the last one closes it.
-        .onChange(of: panes.isEmpty) { _, empty in if empty { shown = [] } }
+        // A capture the worker has since deleted leaves the viewer for good, so one coming back under its name does
+        // not rejoin a comparison; the last one closes it.
+        .onChange(of: open) { _, files in if files != shown { shown = files } }
+        // Compare does not come back on its own when a capture arrives after it ended for want of a second.
+        .onChange(of: items.count) { _, count in if count < 2 { compare = false } }
     }
     /// Moves to the capture beside the one shown; while comparing, the arrows do nothing. Either way the key is taken,
     /// so an arrow past the ends does not sound the alert.
@@ -1032,8 +1035,11 @@ private struct EvidenceViewer: View {
                 }.padding(1)
             }
             .scrollIndicators(.never)
-            // The strip follows the arrows when it has more captures than fit.
+            // The strip shows the capture on screen when it has more than fit: on opening, after the arrows, and on
+            // leaving Compare.
+            .onAppear { if let current { reader.scrollTo(current) } }
             .onChange(of: current) { _, file in if let file, !comparing { reader.scrollTo(file) } }
+            .onChange(of: comparing) { _, on in if !on, let current { reader.scrollTo(current) } }
         }
         .accessibilityLabel(comparing ? Text("Captures to compare, up to \(Evidence.maxCompared)") : Text("Captures"))
     }

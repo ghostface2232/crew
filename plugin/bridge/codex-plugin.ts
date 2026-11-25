@@ -95,14 +95,14 @@ export function hookKeys(hooks: HooksFile, file: string): string[] {
   );
 }
 
-/** Whether Codex runs the Crew hooks: every one trusted, some changed since they were trusted, or some never trusted. */
-export type HookTrust = 'trusted' | 'modified' | 'untrusted';
+/** Whether every Crew hook runs in Codex, or what the user still needs to do. */
+export type HookTrust = 'trusted' | 'modified' | 'untrusted' | 'disabled';
 
 /**
  * The Crew hooks' trust as app-server `hooks/list` reports it, for the hooks named by `keys`. Codex trusts a hook against
  * its definition and a hash of its copy of the plugin folder, so after an update that changes the plugin's files every
- * hook is `modified` while its trust records stay in config.toml: only Codex can tell. A hook it does not list, or one
- * turned off in `/hooks`, counts as untrusted, since Codex does not run it either.
+ * hook is `modified` while its trust records stay in config.toml: only Codex can tell. Missing hooks count as untrusted.
+ * Once all enabled hooks are trusted, report disabled hooks so the checklist can tell the user to turn them on.
  */
 export function hookTrust(listed: unknown, keys: string[]): HookTrust {
   const data = (listed as { data?: unknown } | null)?.data;
@@ -112,8 +112,9 @@ export function hookTrust(listed: unknown, keys: string[]): HookTrust {
     for (const hook of entry?.hooks ?? []) if (typeof hook?.key === 'string') status.set(hook.key, hook.enabled === false ? 'disabled' : hook.trustStatus);
   }
   const states = keys.map((key) => status.get(key));
-  if (states.some((state) => state !== 'trusted' && state !== 'modified')) return 'untrusted';
-  return states.includes('modified') ? 'modified' : 'trusted';
+  if (states.some((state) => state !== 'trusted' && state !== 'modified' && state !== 'disabled')) return 'untrusted';
+  if (states.includes('modified')) return 'modified';
+  return states.includes('disabled') ? 'disabled' : 'trusted';
 }
 
 /** The plugin folder's relative path for a manifest pointer such as `./hooks/codex.json`. */

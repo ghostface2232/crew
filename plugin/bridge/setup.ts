@@ -217,10 +217,10 @@ async function registerCodex(root: string): Promise<HostRegistration | null> {
   if (!added.ok) return { ok: false, current: false, detail: `Could not register the marketplace with Codex: ${lastLine(added.out)}` };
   const plugin = await run(bin, ['plugin', 'add', CODEX_PLUGIN], 60_000);
   if (!plugin.ok) return { ok: false, current: false, detail: `Could not install the plugin in Codex: ${lastLine(plugin.out)}` };
-  return { ok: true, current: true, detail: `Installed in Codex. ${CODEX_TRUST}` };
+  return { ok: true, current: true, detail: `Installed in Codex. If Crew's hooks need review, ${CODEX_TRUST}` };
 }
 
-const CODEX_TRUST = 'Codex runs its hooks only once trusted: open `/hooks` in a Codex session, press `t` to trust the Crew hooks, then start a new session. When Codex first asks to run a Crew tool, choose Always allow.';
+const CODEX_TRUST = 'open Settings → Hooks → Crew in Codex and choose Trust all. Enable any Crew hooks that are off. In the CLI, review Crew under `/hooks`. Then start a new Codex chat or CLI session.';
 
 /** Codex's marketplaces by name, from `codex plugin marketplace list`: a header row, then name and root folder. */
 async function codexMarketplaces(bin: string): Promise<Map<string, string>> {
@@ -298,7 +298,15 @@ function linkCommand(root: string): void {
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 
-export type SetupItem = { id: string; label: string; ok: boolean; detail: string; repairable?: boolean };
+export type SetupItem = {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+  /** A short, translatable message for the checklist. The detail is available for troubleshooting. */
+  summary?: string;
+  repairable?: boolean;
+};
 
 /**
  * The checklist's answer, kept for a while: a check starts five CLIs, and the board and the app each ask every
@@ -358,14 +366,11 @@ export function ledgerItem(home = HOME): SetupItem | null {
     label: 'Job ledger',
     ok: false,
     detail: `Crew could not read its job ledger and set it aside as ${file}. The jobs, delivery receipts and pull request watches it held are not in the current ledger. To bring them back, quit Crew, repair the file and put it back as jobs.json; otherwise delete it.`,
+    summary: 'Crew could not read the job ledger. Run `crew doctor` for the recovery steps.',
   };
 }
 
-/**
- * What a Codex session needs to lead: the plugin installed in Codex, and its hooks trusted. Trusting runs code outside
- * Codex's sandbox, so it is left to the user, and it is asked for only once Codex has led a crew: most users lead from
- * Claude Code and need not trust hooks they never run.
- */
+/** Checks what a Codex session needs to lead so the user can set it up before starting their first Crew job. */
 async function codexLeadItems(bin: string): Promise<SetupItem[]> {
   // Only Crew's marketplace: the whole list includes remote marketplaces, which can take a minute and megabytes.
   const list = await run(bin, ['plugin', 'list', '--marketplace', 'crew'], 60_000);
@@ -378,9 +383,12 @@ async function codexLeadItems(bin: string): Promise<SetupItem[]> {
   const expected = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, '.codex-plugin', 'plugin.json'), 'utf8')).version;
   const ok = installed && version === expected;
   const detail = !installed ? 'Not installed.' : ok ? `Installed (${version})` : `Installed (${version ?? 'unknown version'}); this copy is ${expected}.`;
-  const items: SetupItem[] = [{ id: 'codex-plugin', label: 'Crew plugin in Codex', ok, detail, repairable: true }];
+  const items: SetupItem[] = [{
+    id: 'codex-plugin', label: 'Crew plugin in Codex', ok, detail, repairable: true,
+    summary: ok ? 'Installed' : 'Select Install to set up the Crew plugin in Codex.',
+  }];
   // Trust is read by this copy's hook keys, so a copy of another version is reinstalled before its hooks are asked about.
-  if (!ok || !ledFromCodex()) return items;
+  if (!ok) return items;
   items.push(await codexHooksItem(bin));
   return items;
 }
@@ -395,11 +403,19 @@ export async function codexHooksItem(bin: string, root = PLUGIN_ROOT, timeout = 
   try {
     trust = await codexHookTrust(bin, keys, timeout);
   } catch (err) {
-    return { ...item, ok: false, detail: `Could not ask Codex whether they are trusted (${(err as Error).message}). If Codex does not run them, trust them in \`/hooks\`.` };
+    return {
+      ...item, ok: false,
+      detail: `Could not ask Codex whether they are trusted (${(err as Error).message}). To check manually, open Settings → Hooks → Crew in Codex or use \`/hooks\` in the CLI.`,
+      summary: 'Could not check hook trust. Select Check Again or open Settings → Hooks → Crew in Codex.',
+    };
   }
-  if (trust === 'trusted') return { ...item, ok: true, detail: 'Trusted.' };
-  if (trust === 'modified') return { ...item, ok: false, detail: `Changed by an update since you trusted them, so Codex skips them until you trust them again. ${CODEX_TRUST}` };
-  return { ...item, ok: false, detail: CODEX_TRUST };
+  if (trust === 'trusted') return { ...item, ok: true, detail: 'Trusted.', summary: 'Complete' };
+  if (trust === 'modified') return {
+    ...item, ok: false, detail: `To trust Crew's updated hooks, ${CODEX_TRUST}`,
+    summary: "Crew hooks were updated. In Settings → Hooks → Crew, select 'Trust all' again.",
+  };
+  if (trust === 'disabled') return { ...item, ok: false, detail: 'In Settings → Hooks → Crew, turn on the disabled Crew hooks.' };
+  return { ...item, ok: false, detail: "In Settings → Hooks → Crew, select 'Trust all'." };
 }
 
 const HOOK_LIST_TIMEOUT_MS = 10_000;
@@ -419,19 +435,8 @@ async function codexHookTrust(bin: string, keys: string[], timeout: number): Pro
     // Plugin hooks are listed for any folder; the home folder needs no project trust.
     return hookTrust(await peer.request('hooks/list', { cwds: [os.homedir()] }, timeout), keys);
   } finally {
+    child.stdin.end();
     peer.close();
-  }
-}
-
-/**
- * Whether a Codex session has led a crew, as the ledger's delivery state records Codex-hosted leads. The ledger is
- * large and this runs with every checklist, so the text is searched rather than parsed.
- */
-function ledFromCodex(): boolean {
-  try {
-    return /"hosts":\{[^}]*:"codex"/.test(fs.readFileSync(path.join(HOME, 'jobs.json'), 'utf8'));
-  } catch {
-    return false;
   }
 }
 
@@ -445,7 +450,11 @@ export async function checks(): Promise<SetupItem[]> {
     run(config.antigravity.bin, ['--version']),
   ]);
   const items: SetupItem[] = [
-    { id: 'claude', label: 'Claude Code', ok: claude.ok, detail: claude.ok ? claude.out : 'Not found. Install Claude Code from claude.com/code.' },
+    {
+      id: 'claude', label: 'Claude Code', ok: claude.ok,
+      detail: claude.ok ? claude.out : 'Not found. Install Claude Code from claude.com/code.',
+      summary: claude.ok ? 'Installed' : 'Install Claude Code from claude.com/code.',
+    },
   ];
   const plugin = plugins?.find((entry) => entry.id === 'crew@crew');
   const here = plugin?.readFromFolder && samePath(plugin.readFromFolder, path.join(registeredRoot(), 'plugin'));
@@ -454,16 +463,32 @@ export async function checks(): Promise<SetupItem[]> {
     label: 'Crew plugin',
     ok: Boolean(plugin),
     detail: !claude.ok ? 'Needs Claude Code.' : !plugin ? 'Not installed.' : here ? `Installed (${plugin.version})` : `Installed from ${plugin.readFromFolder ?? 'another copy'} (${plugin.version})`,
+    summary: plugin ? 'Installed' : claude.ok ? 'Select Install to add the Crew plugin.' : 'Install Claude Code first.',
     repairable: claude.ok,
   });
   const command = fs.existsSync(COMMAND) || fs.existsSync(`${COMMAND}.cmd`);
-  items.push({ id: 'command', label: '`crew` command', ok: command, detail: command ? COMMAND : 'Not installed.', repairable: true });
+  items.push({
+    id: 'command', label: '`crew` command', ok: command, detail: command ? COMMAND : 'Not installed.', repairable: true,
+    summary: command ? 'Installed' : 'Select Install to add the `crew` command.',
+  });
   const codexLogin = codex.ok ? await run(config.codex.bin, ['login', 'status']) : null;
-  items.push({ id: 'codex', label: 'Codex CLI', ok: codex.ok, detail: codex.ok ? codex.out : 'Not found. Install Codex, then run `codex login`.' });
-  if (codexLogin) items.push({ id: 'codex-login', label: 'Codex sign-in', ok: codexLogin.ok, detail: codexLogin.ok ? lastLine(codexLogin.out) : 'Run `codex login` in a terminal.' });
+  items.push({
+    id: 'codex', label: 'Codex CLI', ok: codex.ok,
+    detail: codex.ok ? codex.out : 'Not found. Install Codex, then run `codex login`.',
+    summary: codex.ok ? 'Installed' : 'Install the Codex CLI.',
+  });
+  if (codexLogin) items.push({
+    id: 'codex-login', label: 'Codex sign-in', ok: codexLogin.ok,
+    detail: codexLogin.ok ? lastLine(codexLogin.out) : 'Run `codex login` in a terminal.',
+    summary: codexLogin.ok ? 'Complete' : 'Run `codex login` to sign in.',
+  });
   if (codex.ok) items.push(...(await codexLeadItems(config.codex.bin)));
   if (config.antigravity.enabled) {
-    items.push({ id: 'antigravity', label: 'Antigravity CLI', ok: agy.ok, detail: agy.ok ? agy.out : 'Not found. Install it, then run `agy` once to sign in.' });
+    items.push({
+      id: 'antigravity', label: 'Antigravity CLI', ok: agy.ok,
+      detail: agy.ok ? agy.out : 'Not found. Install it, then run `agy` once to sign in.',
+      summary: agy.ok ? 'Installed' : 'Install the Antigravity CLI, then run `agy` to sign in.',
+    });
   }
   const ledger = ledgerItem();
   if (ledger) items.push(ledger);

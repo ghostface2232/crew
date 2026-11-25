@@ -9,6 +9,7 @@ struct SetupState: Decodable, Sendable {
         var label: String
         var ok: Bool
         var detail: String
+        var summary: String?
         var repairable: Bool?
     }
     struct Registration: Decodable, Sendable { var ok: Bool; var detail: String }
@@ -34,8 +35,10 @@ struct SetupCard: View {
                             HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                                 Image(systemName: item.ok ? "checkmark.circle" : "exclamationmark.circle")
                                     .font(Typeface.callout).foregroundStyle(item.ok ? .secondary : Palette.warning).frame(width: Symbol.controlFrame)
-                                Text(withCode(item.label)).font(Typeface.callout)
-                                Text(withCode(item.detail)).font(Typeface.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                                Text(withCode(localizedCrewLabel(item.label))).font(Typeface.callout)
+                                Text(withCode(localizedCrewLabel(item.summary ?? item.detail)))
+                                    .font(Typeface.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                                    .help(item.summary == nil ? "" : item.detail)
                             }
                         }
                     }

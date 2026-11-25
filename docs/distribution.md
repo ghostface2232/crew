@@ -19,7 +19,7 @@ The Start menu shortcut gives the Windows app an AppUserModelID (`dev.crew.deskt
 
 ## The app installs the plugin
 
-`crew install` registers the marketplace, installs `crew@crew`, and writes a `crew` shim in `~/.local/bin`. From a source checkout with Codex installed, it also runs `codex plugin marketplace add <checkout>` and `codex plugin add crew@crew` (`registerCodex` in `setup.ts`), so a Codex session can lead. Codex copies the plugin into its own cache, so run `crew install` again after changing it. The user then trusts the Crew hooks in `/hooks` in a Codex session; Crew never writes that trust itself. A built app registers with Codex too, through a marketplace of its own (**Codex** below). Packaged apps automate this via `plugin/bridge/setup.ts`:
+`crew install` registers the marketplace, installs `crew@crew`, and writes a `crew` shim in `~/.local/bin`. From a source checkout with Codex installed, it also runs `codex plugin marketplace add <checkout>` and `codex plugin add crew@crew` (`registerCodex` in `setup.ts`), so a Codex session can lead. Codex copies the plugin into its own cache, so run `crew install` again after changing it. Hook review is part of the [first-run checklist](#first-run-checklist). A built app registers with Codex too, through a marketplace of its own (**Codex** below). Packaged apps automate this via `plugin/bridge/setup.ts`:
 
 1. **Each app carries a built plugin.** Registering the GitHub repository would miss the built board (`plugin/board/dist` is not committed) and let plugin and app code drift. On macOS, the packaged daemon registers the copy inside `Crew.app` (`/Applications/Crew.app/Contents/Resources/bridge`). On Windows, `setup.ts` copies the plugin and `runtime/node.exe` to `~/.crew/plugins/<version>-<build>` and registers that copy so installer updates do not replace files beneath running Claude Code sessions.
 2. **The plugin runs on the app's runtime.** macOS bundles standalone Node (`Contents/Resources/runtime/node`, `scripts/build-desktop.mjs`); Windows bundles `runtime/node.exe` (`scripts/build-electron.mjs`) because a hook command cannot set `ELECTRON_RUN_AS_NODE`. `linkCommand` in `setup.ts` points `~/.local/bin/crew` (and `.cmd`/`.mjs` shims on Windows) at that runtime.
@@ -37,17 +37,23 @@ With `CREW_HOME` unset, a packaged daemon checks `~/.crew/setup.json` (`register
 
 Both apps show a **Set up Crew** card at the top of the unfiltered Overview page (`SetupView.swift`, `Overview.tsx`), backed by `GET /api/setup` and `POST /api/setup/repair` (matching `crew doctor`). It hides automatically once every item passes. Both apps poll every minute while open and each check starts five CLIs, so the daemon keeps the answer (`SetupCache` in `setup.ts`): for one minute while an item is missing or a check fails, and for ten minutes once every item passes; it always runs a new check on **Check Again**, after a repair, or after a registration. If the setup breaks while the card is hidden, the card therefore reappears within about ten minutes.
 
+Each item confirms what is ready or says what to do next in the app's language. Hover over the message for details such as the installed version, command path, or error. `crew doctor` also prints these details.
+
 | Item | What the app does |
 | --- | --- |
 | Crew plugin and `crew` command | Registers and writes shims automatically; exposes an **Install** repair button when missing |
 | Claude Code (`claude` on `PATH`) | Checks `claude --version`; if missing, tells the user to install from `claude.com/code` |
 | Codex CLI and sign-in | Checks `codex --version` and `codex login status`; installing and signing in are left to the user |
 | Crew plugin in Codex | With Codex installed, checks `codex plugin list --marketplace crew` (the whole list also reads remote marketplaces, which can take a minute) for `crew@crew` installed and enabled at this copy's version; **Install** registers it |
-| Crew hooks in Codex | Shown once a Codex session has led a crew, as the ledger's delivery hosts record, and the plugin item passes: the keys come from this copy, so a copy of another version is reinstalled first. Asks a short-lived `codex app-server` for `hooks/list` and reads each Crew hook's `trustStatus` by its key, `crew@crew:hooks/codex.json:<event>:<group>:<index>` (`codexHooksItem` in `setup.ts`). It passes only when every Crew hook is `trusted` and on; one turned off in `/hooks` counts as untrusted. `modified`, a hook changed by an update since it was trusted, says Codex skips it until it is trusted again (seen on Codex 0.172, 2026-11-25). If Codex cannot be asked (missing, refusing, or not answering a request within 10 seconds), the item fails and says so rather than passing. The config's trust records are not read: they stay after the hook they trusted has changed. Hooks run outside Codex's sandbox, so trusting them is left to the user: open `/hooks` in a Codex session and press `t`, then start a new session. Most users lead from Claude Code, so the item is not shown before a Codex session has led. Windows records the same key with a forward slash, `hooks/codex.json` (Codex 0.172, 2026-11-24) |
+| Crew hooks in Codex | Checked as soon as the Codex plugin item passes, so users can enable hooks before running their first Crew job. It asks a short-lived `codex app-server` for `hooks/list` (`codexHooksItem` in `setup.ts`). It passes when every Crew hook is trusted and enabled. The instruction matches the hook state and asks the user to trust, re-trust, or enable hooks. If the request fails or exceeds 10 seconds, the item points to a fresh check or manual review. |
 | Antigravity CLI | Checks `agy --version` when `antigravity.enabled` is true; installing and running `agy` to sign in are left to the user |
-| Job ledger | Shown only while a `jobs.json.unreadable-*` file is in the Crew home ([architecture.md](architecture.md#bridge-and-state)): names the file the daemon set aside; repairing or deleting it is left to the user |
+| Job ledger | Shown only while a `jobs.json.unreadable-*` file is in the Crew home ([architecture.md](architecture.md#bridge-and-state)). The item points to `crew doctor` for the backup path and recovery instructions. |
 
 Signing in to user accounts is never automated.
+
+In the Codex app, open **Settings → Hooks → Crew**, review the commands, and choose **Trust all** in the Crew panel. In the Codex CLI, open `/hooks` to review and trust the Crew hooks. Turn on any Crew hooks that are off, then start a new chat or CLI session. **Check Again** refreshes the checklist. Codex requires the user to review plugin hooks before running them. [Codex hooks guide](https://learn.chatgpt.com/docs/hooks)
+
+The checklist reads `trustStatus` using each key in this copy's hook file. Codex 0.172 uses the same key format on macOS and Windows as of 2026-11-25, `crew@crew:hooks/codex.json:<event>:<group>:<index>`. Codex skips modified hooks even when their previous trust records are still in its config. The checklist uses Codex's live report to detect changes.
 
 ## Release housekeeping
 
@@ -63,3 +69,7 @@ Signing in to user accounts is never automated.
 3. **Installers and auto-update.** *Shipped:* `electron-builder` NSIS installer + `desktop/updater.ts` on Windows; `.dmg`/`.zip` packaging + `native/Sources/Crew/Updater.swift` on macOS.
 4. **GitHub Actions release workflow.** *Shipped:* `.github/workflows/release.yml` calls `.github/workflows/ci.yml`, builds macOS (self-hosted ARM64 Mac with Xcode 27 for `assets/crew.icon`) and Windows (hosted runner with smoke test), and publishes with `.github/release-notes.md`. Pull requests also run `.github/workflows/ci.yml`, except a pull request that changes only docs (`docs/`, `research/`, `README.md`, `AGENTS.md`) or a push that adds only docs on top of a head whose CI passed; pushes to `main` are not re-checked.
 5. **Signing.** *Remaining:* Windows code signing certificate and Apple Developer Program membership (Developer ID + notarization) when public distribution calls for them.
+
+## History
+
+- 2026-11-25. The hook check moved from after the first Codex-led Crew job to the first-run checklist. The `SessionEnd` and `Interrupt` hooks now use Codex's three-second maximum to avoid loading warnings. [Codex hooks guide](https://learn.chatgpt.com/docs/hooks)

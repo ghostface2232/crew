@@ -215,6 +215,8 @@ struct CrewSettingsView: View {
                         Text(verbatim: choice.label).tag(choice)
                     }
                 }
+                // Its save drops a pick made while another is being stored, as the project switches' does.
+                .disabled(!store.connected || store.actions[CrewStore.turnTokenBudgetKey]?.pending == true)
             } header: {
                 Text("Turn Budget")
             } footer: {

@@ -1723,3 +1723,32 @@ for (const worker of ['recovers', 'repeats'] as const) test(`a role refusal that
     assert.equal(refusals, 3);
   }
 });
+
+test('Antigravity keeps a completed report when its final usage reaches the budget', async (t) => {
+  const totalTokens = 200_000_000;
+  const h = harness(t, server({ usage: { totalTokens, inputTokens: totalTokens } }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'edit' }));
+  assert.deepEqual([job.state, job.error, job.report, job.tokens], ['done', null, 'report', totalTokens]);
+  assert.deepEqual(job.result?.files, []);
+  assert.equal(h.sent('session/cancel').length, 0);
+});
+
+for (const stopReason of ['end_turn', 'cancelled']) {
+  test(`Antigravity respects ${stopReason} while a budget interrupt is in flight`, async (t) => {
+    const h = await heldSession(t);
+    const prompt = await h.call('prompt');
+    h.update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'report' } });
+    const total = 200_000_000;
+    (h.jobs as any).ctl(h.job).tokens(total, { input: total, cachedInput: 0, output: 0 });
+    await h.call('cancel');
+    prompt.resolve({ stopReason });
+    await h.ended(h.job);
+    if (stopReason === 'end_turn') {
+      assert.deepEqual([h.job.state, h.job.report, h.job.error], ['done', 'report', null]);
+    } else {
+      assert.equal(h.job.state, 'failed');
+      assert.equal(h.job.error?.budget, true);
+    }
+    (await h.call('close')).resolve({});
+  });
+}

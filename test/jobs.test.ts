@@ -131,6 +131,44 @@ test("the user's turn token budget replaces the difficulty's cap within one swee
   assert.match(job.error!.message, /token cap of 1000000 reached \(500000000 tokens observed\)/);
 });
 
+for (const raised of [5_000_000, 'unlimited'] as const) {
+  test(`a pending budget stop is dropped when the token cap becomes ${raised}`, async (t) => {
+    let worker!: JobCtl;
+    let budget: Config['turnTokenBudget'] = 1_000_000;
+    const h = harness((ctl) => { worker = ctl; }, () => ({ ...config, turnTokenBudget: budget }));
+    t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+    const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'edit' });
+    h.adapter.cancel = async () => { h.calls.push('cancel'); throw new Error('interrupt unconfirmed'); };
+    worker.tokens(2_000_000, { input: 2_000_000, cachedInput: 0, output: 0 });
+    await new Promise((resolve) => setImmediate(resolve));
+    budget = raised;
+    (h.jobs as any).checkStalls();
+    assert.deepEqual(h.calls, ['cancel']);
+    assert.equal((h.jobs as any).budgetStops.has(job.id), false);
+    assert.equal(job.state, 'running');
+  });
+}
+
+test('a long gap between sweeps pauses the wall-clock budget', async (t) => {
+  const h = harness(() => {});
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'edit' });
+  let now = job.createdAt;
+  t.mock.method(Date, 'now', () => now);
+  job.turnStartedAt = now - 179 * 60_000;
+  (h.jobs as any).checkStalls();
+  now += 12 * 60 * 60_000;
+  (h.jobs as any).checkStalls();
+  assert.deepEqual(h.calls, []);
+  for (let i = 0; i < 3; i++) {
+    now += 15_000;
+    (h.jobs as any).checkStalls();
+  }
+  await settled(h.jobs, job);
+  assert.equal(job.error?.budget, true);
+  assert.match(job.error!.message, /10800 seconds observed/);
+});
+
 test('the turn budget pauses for user decisions and resumes with the remaining running time', async (t) => {
   let worker!: JobCtl;
   const h = harness((ctl) => { worker = ctl; });
@@ -139,7 +177,11 @@ test('the turn budget pauses for user decisions and resumes with the remaining r
   let now = job.createdAt;
   t.mock.method(Date, 'now', () => now);
   const minute = 60_000;
-  now += 30 * minute;
+  for (let elapsed = 0; elapsed < 30 * minute; elapsed += 15_000) {
+    now += 15_000;
+    worker.activity();
+    (h.jobs as any).checkStalls();
+  }
   worker.waiting('approval', 'Run the check?');
   const approval = job.waiting!.id;
   now += 12 * 60 * minute;
@@ -153,9 +195,12 @@ test('the turn budget pauses for user decisions and resumes with the remaining r
   now += 10 * minute;
   h.adapter.answer = async (ctl) => ctl.resumed();
   await h.jobs.reply(job.id, { request_id: job.waiting!.id, message: 'app.js' });
-  now += 150 * minute - 1;
-  worker.activity();
   (h.jobs as any).checkStalls();
+  for (let elapsed = 0; elapsed < 150 * minute - 1; elapsed += 15_000) {
+    now += Math.min(15_000, 150 * minute - 1 - elapsed);
+    worker.activity();
+    (h.jobs as any).checkStalls();
+  }
   assert.deepEqual(h.calls, []);
   assert.equal(job.state, 'running');
 
@@ -277,13 +322,17 @@ test('bridge compares checks on detached bases and sends at most one automatic f
       assert.equal(codex, config.codex.bin);
       if (command === 'unavailable') throw new Error('test sandbox unavailable');
     }
-    return { command, exit: broken || command === 'always fails' ? 1 : 0, timedOut: false, ms: 15, output: 'failed assertion', sandboxed: true };
+    return { command, exit: broken || command === 'always fails' ? 1 : 0, timedOut: false, ms: 15, output: broken ? 'job assertion' : 'base assertion', sandboxed: true };
   };
   const create = (check: string) => h.jobs.create({ kind: 'delegate', cwd: repo, check, task: 'edit' }).then((job) => settled(h.jobs, job));
   const inherited = await create('always fails');
   assert.equal(inherited.turns, 1);
   assert.equal(inherited.receipts![0].base!.exit, 1);
-  assert.match(describe(inherited), /also fails on the base commit/);
+  assert.equal(inherited.receipts![0].base!.output, 'base assertion');
+  assert.match(describe(inherited), /also fails on the base commit \(exit 1\)\. Compare the failures\./);
+  assert.match(describe(inherited), /base check output \(end\):\n  base assertion/);
+  assert.match(describe(inherited), /check output \(end\):\n  job assertion/);
+  assert.doesNotMatch(describe(inherited), /predates/);
   assert.match(inherited.notes.join('\n'), /node_modules.*\.worktreeinclude/);
   refuse = true;
   const declined = await create('regression');
@@ -308,13 +357,27 @@ test('bridge compares checks on detached bases and sends at most one automatic f
   assert.match(fix.news![0].reason, /automatic fix turn 2/i);
   assert.equal(h.jobs.eventsFor(fix.id, 0).find((e) => e.kind === 'done')!.detail, fix.news![0].reason);
   assert.equal(h.calls.length, 1);
-  assert.match(h.calls[0], /without weakening the check[^]*regression[^]*failed assertion/);
+  assert.match(h.calls[0], /without weakening the check[^]*regression[^]*job assertion/);
   const unavailable = await create('unavailable');
   assert.equal(unavailable.turns, 1);
   assert.match(describe(unavailable), /Base check unavailable: test sandbox unavailable/);
   assert.equal(bases.length, 6);
   for (const cwd of bases) assert.ok(!fs.existsSync(cwd));
   assert.doesNotMatch(execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8' }), /detached/);
+});
+
+test('a fresh usage window cannot resume a job stopped by a spend cap', async (t) => {
+  const repo = tempRepo();
+  const h = harness((ctl) => ctl.fail('project spend cap', { limit: true, fixedLimit: true }),
+    () => ({ ...config, projects: { [canonicalPath(repo)]: { autoResume: true } } }));
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const job = await h.jobs.create({ kind: 'delegate', cwd: repo, mission: 'm', task: 'edit' });
+  await h.jobs.resumeLimited({ generatedAt: Date.now(), source: 'agentgauge', providers: [
+    { agent: job.agent, reason: '', capturedAt: job.endedAt! + 1, status: 'ok', plan: null, windows: [] },
+  ] }, () => true);
+  await settled(h.jobs, job);
+  assert.deepEqual([job.state, job.turns, job.error?.limit, job.error?.fixedLimit], ['failed', 1, true, true]);
+  assert.deepEqual(h.calls, []);
 });
 
 test('a fresh usage reading resumes only a limited job in an opted-in active mission', async (t) => {

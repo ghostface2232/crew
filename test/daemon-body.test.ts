@@ -1,16 +1,27 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import vm from 'node:vm';
+import { canonicalPath, projectSettings, resolveConfig } from '../plugin/bridge/config.ts';
+import { projectRoot } from '../plugin/bridge/git.ts';
+import { autoResumesLeft, Jobs } from '../plugin/bridge/jobs.ts';
+import type { Adapter, Job } from '../plugin/bridge/jobs.ts';
+import { memoryFor, missionPreset } from '../plugin/bridge/missions.ts';
+import { saveProjectSettings } from '../plugin/bridge/settings.ts';
+import { parseCache } from '../plugin/bridge/usage.ts';
 import { clientJson } from '../plugin/bridge/text.ts';
 
-function reader() {
-  const source = fs.readFileSync(new URL('../plugin/bridge/daemon.ts', import.meta.url), 'utf8');
+const source = fs.readFileSync(new URL('../plugin/bridge/daemon.ts', import.meta.url), 'utf8');
+
+function reader(overrides: Record<string, unknown> = {}) {
   const start = source.indexOf('function readJson(');
   let parses = 0;
   const context = vm.createContext({
@@ -22,11 +33,19 @@ function reader() {
       status: number;
       constructor(status: number, message: string) { super(message); this.status = status; }
     },
+    ...overrides,
   });
   const readJson = vm.runInContext(stripTypeScriptTypes(source.slice(start, source.indexOf('\n/**', start))) + '; readJson', context) as (req: EventEmitter) => Promise<unknown>;
   const routes = source.slice(source.indexOf('function isOpen('), source.indexOf('\nlet stopping = false;'));
   const route = vm.runInContext(stripTypeScriptTypes(routes) + '; route', context) as (req: EventEmitter, res: object) => Promise<unknown>;
-  return { readJson, route, parses: () => parses };
+  const post = (url: string, body: object) => {
+    const req = Object.assign(new EventEmitter(), { method: 'POST', url });
+    const result = route(req, {});
+    req.emit('data', Buffer.from(JSON.stringify(body)));
+    req.emit('end');
+    return result;
+  };
+  return { readJson, route, post, parses: () => parses };
 }
 
 test('oversized JSON stops reading chunks and never parses at end', async (t) => {
@@ -150,4 +169,82 @@ test('an event stream whose reader has stopped is dropped once it is behind at t
   const closed = new Promise((resolve) => stalled.once('close', resolve));
   stalled.resume();
   await closed;
+});
+
+test('an auto-resume promise requires an AgentGauge window reading for that agent', (t) => {
+  const gaugeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-gauge-'));
+  t.after(() => fs.rmSync(gaugeDir, { recursive: true, force: true }));
+  const job = {
+    state: 'failed', error: { limit: true }, mission: 'mission', sessionId: 'thread',
+    worktree: {}, project: gaugeDir, agent: 'codex',
+  } as Job;
+  const config = resolveConfig({ projects: { [canonicalPath(gaugeDir)]: { autoResume: true } } });
+  const resumes = vm.runInNewContext(stripTypeScriptTypes(source.slice(source.indexOf('function resumesAfterLimit('),
+    source.indexOf('/** For display only'))) + '; resumesAfterLimit', {
+    gaugeDir, fs, path, parseCache, projectSettings, autoResumesLeft,
+    liveConfig: () => config, missions: { list: () => [{ id: 'mission', state: 'active' }] },
+    // The app-server supplement can supply a reading even with an empty AgentGauge cache.
+    usage: { current: () => ({ source: 'agentgauge', providers: [{ agent: 'codex', capturedAt: Date.now(), status: 'exhausted' }] }) },
+  }) as (job: Job) => boolean;
+  assert.equal(resumes(job), false);
+  const writeReading = (tool: string) => fs.writeFileSync(path.join(gaugeDir, 'usage-cache.json'), JSON.stringify({
+    version: 1, snapshots: [{ tool, capturedAt: new Date().toISOString(), windows: [{ type: 'weekly', usedRatio: 1 }] }],
+  }));
+  writeReading('claude');
+  assert.equal(resumes(job), false);
+  writeReading('codex');
+  assert.equal(resumes(job), true);
+  job.error!.fixedLimit = true;
+  assert.equal(resumes(job), false);
+});
+
+test('mission decisions reach a bodyless polish and a bodyless standard review', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-decisions-'));
+  const config = resolveConfig({ roles: { polish: { agents: ['codex'] }, review: { agents: ['codex'] } } });
+  const prompts: string[] = [];
+  const adapter: Adapter = {
+    start: async (ctl) => { prompts.push(ctl.job.prompt); ctl.done('finished'); },
+    reply: async () => {}, answer: async () => {}, cancel: async () => {}, shutdown: () => {},
+  };
+  const jobs = new Jobs(home, () => config, { codex: adapter, antigravity: adapter },
+    { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); });
+  const mission = { id: 'mission', state: 'active', memory: [{ key: 'style', text: 'Use sentence case.' }] };
+  const h = reader({ jobs, signedIn: () => ({}), memoryFor, missionPreset, liveConfig: () => config,
+    missions: { list: () => [mission] }, view: (job: Job) => job });
+  const common = { cwd: home, mission: mission.id };
+  const polish = await h.post('/api/jobs', { ...common, kind: 'polish', isolation: 'in_place', targets: ['app.js'] }) as Job;
+  assert.match(prompts[0], /Decisions the user made in this mission[\s\S]*- Use sentence case\./);
+  const review = await h.post('/api/jobs', { ...common, kind: 'review', review: { mode: 'standard', target: { type: 'uncommittedChanges' } } }) as Job;
+  assert.equal(polish.title, 'app.js');
+  assert.equal(review.nativeReview, null);
+  assert.equal(prompts.length, 2);
+  for (const prompt of prompts) assert.match(prompt, /Decisions the user made in this mission[\s\S]*- Use sentence case\./);
+});
+
+test('first session events use the canonical cwd until the session root is known', () => {
+  const start = source.indexOf('const claude = new ClaudeSessions(');
+  const hook = vm.runInNewContext(stripTypeScriptTypes(source.slice(start, source.indexOf('// Codex lead sessions', start)))
+    + '; claude.onEvent', {
+    config: {},
+    ClaudeSessions: class { constructor(_seconds: unknown, hooks: object) { Object.assign(this, hooks); } },
+    jobs: { record: (...args: unknown[]) => args[5] },
+    canonicalPath: (cwd: string) => canonicalPath(cwd, 'win32'),
+  }) as (session: { cwd: string; id: string; root?: string }, kind: string, detail: string) => string;
+  assert.equal(hook({ id: 's', cwd: 'c:/repo/sub' }, 'done', 'finished'), 'C:\\repo\\sub');
+  assert.equal(hook({ id: 's', cwd: 'c:/repo/sub', root: 'C:\\repo' }, 'done', 'finished'), 'C:\\repo');
+});
+
+test('a project setting sent from a session subfolder is saved at its repository root', async (t) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-project-settings-')));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const repo = path.join(home, 'repo');
+  const sub = path.join(repo, 'sub');
+  fs.mkdirSync(sub, { recursive: true });
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  const h = reader({ signedIn: () => ({}), HOME: home, projectRoot, saveProjectSettings,
+    knownProject: (project: string) => assert.equal(project, sub), broadcast: () => {} });
+  await h.post('/api/project-settings', { project: sub, changes: { autoResume: true } });
+  const saved = JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8'));
+  assert.deepEqual(saved.projects, { [canonicalPath(repo)]: { autoResume: true } });
 });

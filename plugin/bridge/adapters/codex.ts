@@ -42,7 +42,7 @@ interface Run {
   turnId: string | null;
   awaitingTurn: { response: AbortController; timedOut: boolean } | null;
   interrupt: ReturnType<typeof Promise.withResolvers<void>> | null;
-  interruptRequested?: boolean;
+  interruptRequested?: 'manual' | 'budget';
   approvalAbort?: string;
   message: string;
   guardianWarning?: string;
@@ -98,15 +98,16 @@ const LEAN = {
   auto_review: { circuit_break_action: 'strict' },
 };
 
-function classify(info: unknown): { limit?: true; next?: string } {
+function classify(info: unknown): { limit?: true; fixedLimit?: true; next?: string } {
   const kind = info && typeof info === 'object' ? Object.keys(info)[0] : info;
   switch (kind) {
     case 'usageLimitExceeded':
+      return { limit: true };
     case 'sessionBudgetExceeded':
     case 'apiKeySpendLimitExceeded':
     case 'projectSpendLimitExceeded':
     case 'organizationSpendLimitExceeded':
-      return { limit: true };
+      return { limit: true, fixedLimit: true };
     case 'unauthorized':
       return { next: 'Run `codex login`, then reply to resume the job.' };
     case 'contextWindowExceeded':
@@ -283,7 +284,7 @@ export class CodexAdapter implements Adapter {
     this.settleRequest(run, 0, { approve, message, forJob: opts?.forJob, refusedBy });
   }
 
-  async cancel(ctl: JobCtl): Promise<void> {
+  async cancel(ctl: JobCtl, reason?: 'budget'): Promise<void> {
     const threadId = ctl.job.sessionId;
     const run = threadId ? this.runs.get(threadId) : undefined;
     if (!run) return;
@@ -294,7 +295,7 @@ export class CodexAdapter implements Adapter {
     if (run.interrupt) throw new Error('Cancellation is already in progress.');
     const interrupt = Promise.withResolvers<void>();
     run.interrupt = interrupt;
-    run.interruptRequested = true;
+    run.interruptRequested = reason ?? 'manual';
     for (const request of run.pending.splice(0)) request.resolve({ approve: false, cancelled: true });
     run.ctl.resumed();
     try {
@@ -881,7 +882,8 @@ export class CodexAdapter implements Adapter {
     run.reviewFailed = false;
     const turn = p.turn;
     const info = turn.error?.codexErrorInfo;
-    if (run.interrupt || (turn.status === 'interrupted' && run.interruptRequested)) ctl.cancelled();
+    if ((run.interrupt && (run.interruptRequested === 'manual' || turn.status !== 'completed'))
+      || (turn.status === 'interrupted' && run.interruptRequested)) ctl.cancelled();
     else if (turn.status === 'completed') {
       if (reviewFailed) ctl.fail(EMPTY_REVIEW);
       else ctl.done(report);
@@ -895,9 +897,9 @@ export class CodexAdapter implements Adapter {
       const message = errorMessage(turn.error);
       ctl.fail(`Codex ended the turn itself.${message ? `\n${message}` : ''}`);
     } else {
-      const { next, limit } = classify(info);
+      const { next, limit, fixedLimit } = classify(info);
       const message = errorMessage(turn.error, 'turn failed');
-      ctl.fail(next ? `${message}\n${next}` : message, limit ? { limit } : undefined);
+      ctl.fail(next ? `${message}\n${next}` : message, limit ? { limit, ...(fixedLimit ? { fixedLimit } : {}) } : undefined);
     }
     run.interrupt?.resolve();
   }

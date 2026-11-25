@@ -921,7 +921,7 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   border-radius: 999px; corner-shape: round;
   background: var(--fill);
 }
-.tabs { position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; }
+.tabs { position: relative; flex: none; display: flex; align-items: center; gap: 2px; }
 .tabs-thumb {
   position: absolute;
   top: 0;
@@ -944,7 +944,6 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .tab[aria-current="page"] svg { color: var(--accent); }
 @media (hover: hover) { .tab:hover { color: var(--label); } }
 .search-pill {
-  flex: 0 1 260px;
   justify-content: flex-start;
   gap: 8px;
   min-width: 0;
@@ -957,6 +956,8 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   transition: opacity 120ms ease-out, background-color 160ms ease-out, box-shadow 200ms ease-out;
 }
 .search-pill > span { flex: 1; text-align: start; overflow: hidden; text-overflow: ellipsis; }
+/* Shrinks before the tabs would run into it, over `.topbar button`'s `flex: none`. */
+.topbar .search-pill { flex: 0 1 260px; }
 .search-pill svg { color: var(--secondary); }
 .search-pill[data-hidden] { opacity: 0; }
 /* The shortcut shows only where the search is about to be used: under the pointer or with keyboard focus. */
@@ -1521,7 +1522,7 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
 /* Narrower windows keep the top bar on one row: search folds to its icon and only the current page keeps its name.
    Narrow ones also fold the sidebar away, to float out over the page. */
 @media (max-width: 1000px) {
-  .search-pill { flex: none; width: 30px; padding: 0; justify-content: center; }
+  .topbar .search-pill { flex: none; width: 30px; padding: 0; justify-content: center; }
   .search-pill > span, .search-pill > kbd { display: none; }
   .tab:not([aria-current="page"]) { --inset: 9px; padding-inline-end: 9px; }
   .tab:not([aria-current="page"]) > .tab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

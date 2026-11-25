@@ -46,9 +46,10 @@ function storedView(): View {
   try {
     const page = localStorage.getItem('crew.page');
     if (isPage(page)) return { project: localStorage.getItem('crew.scope') ?? '', page };
-    // An earlier board kept one selection: a page, or `project:<path>` for a project's overview.
+    // Earlier boards kept one selection: a page, or `project:<path>` for a project's overview; before that, `crew.project`.
     const old = localStorage.getItem('crew.selection') ?? '';
-    return old.startsWith('project:') ? { project: old.slice(8), page: 'overview' } : { project: '', page: isPage(old) ? old : 'overview' };
+    if (old.startsWith('project:')) return { project: old.slice(8), page: 'overview' };
+    return { project: old ? '' : localStorage.getItem('crew.project') ?? '', page: isPage(old) ? old : 'overview' };
   } catch {
     return { project: '', page: 'overview' };
   }
@@ -135,16 +136,28 @@ export function App() {
   const go = useCallback((next: Partial<View>) => {
     setView((view) => {
       const moved = { ...view, ...next };
-      try {
-        localStorage.setItem('crew.page', moved.page);
-        localStorage.setItem('crew.scope', moved.project);
-      } catch {
-        /* Embedded panes may disable storage. */
-      }
       return moved.project === view.project && moved.page === view.page ? view : moved;
     });
     fold();
   }, [fold]);
+  // Saved from the first render too, so an earlier board's selection is carried over once. The default view needs no
+  // entry, so a board that was never moved off it leaves nothing in the browser.
+  useEffect(() => {
+    try {
+      // An earlier board's keys are read once; left behind, they would bring back an old view once this one is the default.
+      localStorage.removeItem('crew.selection');
+      localStorage.removeItem('crew.project');
+      if (!project && page === 'overview') {
+        localStorage.removeItem('crew.page');
+        localStorage.removeItem('crew.scope');
+      } else {
+        localStorage.setItem('crew.page', page);
+        localStorage.setItem('crew.scope', project);
+      }
+    } catch {
+      /* Embedded panes may disable storage. */
+    }
+  }, [project, page]);
   const selectPage = useCallback((id: string) => go({ page: id as Page }), [go]);
   const show = useCallback((value: string) => {
     setDetail(value);
@@ -165,7 +178,7 @@ export function App() {
   const [shownSettings, settingsLeaving] = useLinger(settings === true ? 'open' : settings || '', SHEET_EXIT_MS);
   /** After New Job, the job's own project, so the new job is in view, as the app goes there. */
   const openNewJob = (id: string, root?: string) => {
-    if (root && project !== root) go({ project: root, page: 'overview' });
+    if (root && (project !== root || page !== 'overview')) go({ project: root, page: 'overview' });
     show(id);
   };
   const newJob = useCallback((origin?: Element | null, draft?: string) => {

@@ -116,14 +116,15 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     }
     for (const [id, title, icon, subtitle] of PAGE_ENTRIES())
       list.push({ id: `page:${id}`, group: 'Pages', title, subtitle, icon, run: () => actions.go({ page: id }), preview: () => ({ eyebrow: t('Page'), lines: [], text: subtitle }) });
-    list.push({ id: 'project:', group: 'Projects', title: t('All projects'), subtitle: t('Overview'), icon: StackRegular, run: () => actions.go({ project: '', page: 'overview' }), preview: () => ({ eyebrow: t('Projects'), lines: [projects.length === 1 ? t('1 project') : t('{count} projects', { count: projects.length })] }) });
+    list.push({ id: 'project:', group: 'Projects', title: t('All projects'), subtitle: projects.length === 1 ? t('1 project') : t('{count} projects', { count: projects.length }), icon: StackRegular, run: () => actions.go({ project: '' }), preview: () => ({ eyebrow: t('Projects'), lines: [projects.length === 1 ? t('1 project') : t('{count} projects', { count: projects.length })] }) });
     for (const dir of projects) {
       const projectJobs = jobs.filter((job) => projectOf(job) === dir);
       const activeJobs = projectJobs.filter((job) => job.endedAt == null).length;
       const activeMissions = missions.filter((mission) => projectOf(mission) === dir && mission.state === 'active').length;
       list.push({
         id: `project:${dir}`, group: 'Projects', title: names.get(dir) ?? dir, subtitle: dir, icon: FolderRegular,
-        run: () => actions.go({ project: dir, page: 'overview' }),
+        // As in the sidebar, the page stays.
+        run: () => actions.go({ project: dir }),
         preview: () => ({
           eyebrow: t('Project'),
           lines: [dir, activeJobs === 1

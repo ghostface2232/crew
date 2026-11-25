@@ -153,11 +153,26 @@ final class CrewStore {
         guard !project.isEmpty else { return events }
         let jobs = Dictionary(state.jobs.map { ($0.id, $0.projectPath) }, uniquingKeysWith: { first, _ in first })
         let sessions = Dictionary(state.claude.map { ($0.id, $0.projectPath) }, uniquingKeysWith: { first, _ in first })
+        let known = Set(jobs.values).union(sessions.values)
+        let nonEmpty = { (path: String?) in path.flatMap { $0.isEmpty ? nil : $0 } }
         return events.filter { event in
-            // A live session may have resolved its root since recording the event.
-            let path = event.job_id.flatMap { jobs[$0] } ?? event.session_id.flatMap { sessions[$0] } ?? event.project
-            return path == project
+            // A live job or session wins: a session may have resolved its root since recording the event.
+            if let live = nonEmpty(event.job_id.flatMap { jobs[$0] }) ?? nonEmpty(event.session_id.flatMap { sessions[$0] }) {
+                return live == project
+            }
+            // A session's first events carry its folder until git names the root, so a recorded folder that is no
+            // project of its own counts for the project it sits in, as on the board (`eventsIn`).
+            let recorded = event.project ?? ""
+            return recorded == project || (!known.contains(recorded) && Self.path(recorded, isInside: project))
         }
+    }
+    /// Whether a path is a project's folder or inside it, in either platform's separators.
+    nonisolated static func path(_ path: String, isInside project: String) -> Bool {
+        var base = Substring(project)
+        while base.last == "/" || base.last == "\\" { base.removeLast() }
+        guard path.hasPrefix(base) else { return false }
+        let rest = path.dropFirst(base.count)
+        return rest.isEmpty || rest.first == "/" || rest.first == "\\"
     }
     func persistSelection() {
         defaults.set(selection, forKey: "selection")

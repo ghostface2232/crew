@@ -1081,16 +1081,20 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
                 {"seq":1,"ts":"","agent":"codex","job_id":"cx-question","session_id":"lead-1","project":"/workspace/Other","kind":"progress","detail":""},
                 {"seq":2,"ts":"","agent":"claude","job_id":"missing","session_id":"lead-2","project":"/workspace/Other","kind":"progress","detail":""},
                 {"seq":3,"ts":"","agent":"claude","session_id":"gone","project":"/workspace/Crew","kind":"progress","detail":""},
-                {"seq":4,"ts":"","agent":"claude","session_id":"gone","kind":"progress","detail":""}
+                {"seq":4,"ts":"","agent":"claude","session_id":"gone","kind":"progress","detail":""},
+                {"seq":5,"ts":"","agent":"claude","session_id":"gone","project":"/workspace/Crew/app","kind":"progress","detail":""},
+                {"seq":6,"ts":"","agent":"claude","session_id":"gone","project":"/workspace/Crewmate","kind":"progress","detail":""}
             ]
             """.utf8))
-        #expect(store.scopedEvents.map(\.id) == [1, 2, 3, 4])
+        #expect(store.scopedEvents.map(\.id) == [1, 2, 3, 4, 5, 6])
 
+        // A session's folder recorded before git named its root counts for the project it sits in.
         store.project = "/workspace/Crew"
-        #expect(store.scopedEvents.map(\.id) == [1, 2, 3])
+        #expect(store.scopedEvents.map(\.id) == [1, 2, 3, 5])
 
         store.state.claude.remove(at: index)
-        #expect(store.scopedEvents.map(\.id) == [1, 3])
+        #expect(store.scopedEvents.map(\.id) == [1, 3, 5])
+        #expect(CrewStore.path("C:\\work\\app", isInside: "C:\\work"))
         store.project = "/workspace/Other"
         #expect(store.scopedEvents.map(\.id) == [2])
     }

@@ -74,6 +74,10 @@ test('a project\'s events follow their job or session, then the project recorded
     event(3, { session_id: 'gone', project: '/a' }),
     event(4, { session_id: 'gone' }),
     event(5, { job_id: 'job-b' }),
+    // A session's first events carry its folder until git names the root; one that is no project counts for its parent.
+    event(6, { session_id: 'gone', project: '/a/sub' }),
+    event(7, { session_id: 'gone', project: '/ab' }),
+    event(8, { session_id: 'gone', project: 'C:\\a\\sub' }),
   ];
   const state = {
     events,
@@ -81,8 +85,11 @@ test('a project\'s events follow their job or session, then the project recorded
     claude: [{ id: 'lead-a', cwd: '/a/sub', root: '/a' }] as ClaudeSession[],
   };
   // A live job or session wins over what was recorded, which may predate the session finding its root.
-  assert.deepEqual(eventsIn('/a', state).map((item) => item.seq), [1, 2, 3]);
+  assert.deepEqual(eventsIn('/a', state).map((item) => item.seq), [1, 2, 3, 6]);
   assert.deepEqual(eventsIn('/b', state).map((item) => item.seq), [5]);
+  assert.deepEqual(eventsIn('C:\\a', state).map((item) => item.seq), [8]);
+  // A folder that is a project of its own keeps its events.
+  assert.deepEqual(eventsIn('/a', { ...state, jobs: [...state.jobs, { id: 'job-c', project: '/a/sub' } as BoardJob] }).map((item) => item.seq), [1, 2, 3]);
   // Every project's events with none chosen, including those that name no project.
   assert.equal(eventsIn('', state), events);
 });

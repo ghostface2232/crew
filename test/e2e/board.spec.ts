@@ -1157,7 +1157,15 @@ test('a project keeps the page, and its pages show only its own work', async ({ 
   // The browser tab's title still counts every project's requests.
   await projects.getByRole('button', { name: 'Other', exact: true }).click();
   await expect(page).toHaveTitle('(1) Crew');
-  // An earlier board's saved selection opens the same project's overview.
+  // A project chosen from the palette keeps the page too.
+  await pages.getByRole('button', { name: 'History' }).click();
+  await page.keyboard.press('/');
+  await page.getByRole('combobox', { name: 'Search work, projects and actions' }).fill('Crew');
+  await page.getByRole('option', { name: /^Crew/ }).first().click();
+  await expect(page.getByRole('heading', { name: 'Crew', level: 1 })).toBeVisible();
+  await expect(pages.getByRole('button', { name: 'History' })).toHaveAttribute('aria-current', 'page');
+  // An earlier board's saved selection opens the same project's overview, and is saved the new way at once.
+  await projects.getByRole('button', { name: 'Other', exact: true }).click();
   await page.evaluate(() => {
     localStorage.removeItem('crew.page');
     localStorage.setItem('crew.selection', 'project:/workspace/Other');
@@ -1165,6 +1173,11 @@ test('a project keeps the page, and its pages show only its own work', async ({ 
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Other', level: 1 })).toBeVisible();
   await expect(pages.getByRole('button', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
+  expect(await page.evaluate(() => [localStorage.getItem('crew.scope'), localStorage.getItem('crew.page'), localStorage.getItem('crew.selection')])).toEqual(['/workspace/Other', 'overview', null]);
+  // Back on the default view, nothing old brings the project back.
+  await projects.getByRole('button', { name: 'All projects' }).click();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
 });
 
 test('a closed slow drawer never opens itself again', async ({ page }) => {
@@ -1253,16 +1266,16 @@ test('Return adds a newline in an answer and the next question gets a fresh draf
 test('the top bar keeps its controls on one row at every width', async ({ page }) => {
   const bar = page.locator('.topbar');
   const split: number[] = [];
-  for (let width = 320; width <= 1000; width += 10) {
+  // Past 1000px every tab names itself and search shows its words, so the widths just above matter as much.
+  for (let width = 320; width <= 1200; width += 10) {
     await page.setViewportSize({ width, height: 800 });
-    const rows = await bar.evaluate((element) => {
-      const middle = (selector: string) => {
-        const box = element.querySelector(selector)!.getBoundingClientRect();
-        return Math.round(box.top + box.height / 2);
-      };
-      return [middle('.search-pill'), middle('.new-job'), middle('.tabs')];
+    const { rows, overlap } = await bar.evaluate((element) => {
+      const box = (selector: string) => element.querySelector(selector)!.getBoundingClientRect();
+      const middle = (selector: string) => Math.round(box(selector).top + box(selector).height / 2);
+      const lastTab = [...element.querySelectorAll('.tab')].at(-1)!.getBoundingClientRect();
+      return { rows: [middle('.search-pill'), middle('.new-job'), middle('.tabs')], overlap: lastTab.right > box('.search-pill').left + 0.5 };
     });
-    if (rows.some((row) => Math.abs(row - rows[0]) > 2) || await bar.evaluate((element) => element.scrollWidth > element.clientWidth)) split.push(width);
+    if (overlap || rows.some((row) => Math.abs(row - rows[0]) > 2) || await bar.evaluate((element) => element.scrollWidth > element.clientWidth)) split.push(width);
   }
   expect(split, 'widths where the top bar splits or overflows').toEqual([]);
 });

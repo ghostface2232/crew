@@ -105,18 +105,18 @@ export const PageTabs = memo(function PageTabs({ label, items, current, onSelect
   const compact = useSyncExternalStore(subscribeCompact, () => COMPACT.matches);
   useLayoutEffect(() => {
     const element = list.current!;
+    let placed = '';
     const measure = () => {
       const tab = element.querySelector<HTMLElement>(`[data-tab="${CSS.escape(current)}"]`);
-      if (!tab) return;
+      if (!tab || placed === `${tab.offsetLeft}:${tab.offsetWidth}`) return;
+      placed = `${tab.offsetLeft}:${tab.offsetWidth}`;
       setThumb({ left: tab.offsetLeft, width: tab.offsetWidth, slide: shown.current !== '' && shown.current !== current });
       shown.current = current;
     };
     measure();
-    // Its first call only reports the sizes just measured; skipping it lets the slide above run.
-    let first = true;
     const observer = new ResizeObserver(() => {
-      if (first) return void (first = false);
-      // Only a change of page slides; a resize puts the thumb where it now belongs at once.
+      // Only a change of page slides; a resize puts the thumb where it now belongs at once. The observer's first call
+      // reports the sizes just measured, which change nothing, so the slide above runs on.
       shown.current = current;
       measure();
     });

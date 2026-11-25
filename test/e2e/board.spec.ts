@@ -492,7 +492,7 @@ test('the detail panel shows the worker\'s evidence and the lead\'s attachments'
   await expect(section.getByText('Attached by the lead · lead-1-design.png')).toBeVisible();
 });
 
-test('a capture opens by itself, and the picker adds others beside it', async ({ page, request }) => {
+test('a capture opens by itself, the strip switches between captures, and Compare puts them side by side', async ({ page, request }) => {
   const data = fixture();
   const shot = (file: string, turn: number, from: 'worker' | 'lead' = 'worker') => ({ file, path: `/x/${file}`, turn, from, bytes: 10, modified: 1 });
   data.jobs[0].turns = 3;
@@ -504,9 +504,31 @@ test('a capture opens by itself, and the picker adds others beside it', async ({
   await section.getByRole('img', { name: 'hero-after.png' }).click();
   const sheet = page.getByRole('dialog', { name: 'Evidence' });
   const panes = sheet.locator('.compare figure');
-  // Only the one pressed, which cannot be taken away.
   await expect(panes.getByRole('link')).toHaveText(['hero-after.png']);
   await expect(panes.locator('b')).toHaveText(['Turn 3 of 3']);
+  // Without Compare, the strip and the arrow keys switch the one capture shown.
+  const strip = sheet.getByRole('group', { name: 'Captures', exact: true });
+  await expect(strip.getByRole('button', { name: /hero-after\.png/ })).toHaveAttribute('aria-current', 'true');
+  // The arrows work wherever focus is, as after a click on the image.
+  await panes.locator('img').click();
+  await page.keyboard.press('ArrowLeft');
+  await expect(panes.getByRole('link')).toHaveText(['nav.png']);
+  await strip.getByRole('button', { name: /hero-before\.png/ }).click();
+  await expect(panes.getByRole('link')).toHaveText(['hero-before.png']);
+  await page.keyboard.press('ArrowRight');
+  await expect(panes.getByRole('link')).toHaveText(['footer.png']);
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await expect(panes.getByRole('link')).toHaveText(['lead-1-design.png']);
+  await strip.getByRole('button', { name: /hero-after\.png/ }).click();
+  // Compare starts from the capture shown, which cannot be taken away.
+  const toggle = sheet.getByRole('button', { name: 'Compare', exact: true });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  // Under the pointer that pressed it, it keeps its opaque fill behind its light label.
+  await expect.poll(() => toggle.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toMatch(/rgba|\/ 0?\.\d/);
   const picker = sheet.getByRole('group', { name: /Captures to compare/ });
   await expect(picker.getByRole('button', { name: /hero-after\.png/ })).toBeDisabled();
   const nav = picker.getByRole('button', { name: /nav\.png/ });
@@ -515,6 +537,9 @@ test('a capture opens by itself, and the picker adds others beside it', async ({
   await picker.getByRole('button', { name: /hero-before\.png/ }).click();
   await expect(panes.locator('b')).toHaveText(['Attached by the lead', 'Turn 1 of 3', 'Turn 3 of 3']);
   await expect(panes.getByRole('link')).toHaveText(['lead-1-design.png', 'hero-before.png', 'hero-after.png']);
+  // The arrow keys leave a comparison alone.
+  await page.keyboard.press('ArrowRight');
+  await expect(panes).toHaveCount(3);
   const rects = () => panes.locator('img').evaluateAll((images) => images.map((image) => image.getBoundingClientRect()));
   let boxes = await rects();
   expect(new Set(boxes.map((box) => Math.round(box.top))).size).toBe(1);
@@ -534,10 +559,45 @@ test('a capture opens by itself, and the picker adds others beside it', async ({
   await expect(panes).toHaveCount(3);
   await nav.click();
   await expect(panes.getByRole('link')).toHaveText(['lead-1-design.png', 'footer.png', 'nav.png', 'hero-after.png']);
+  // Leaving Compare keeps the one added last.
+  await toggle.click();
+  await expect(panes.getByRole('link')).toHaveText(['nav.png']);
+  await expect(strip.getByRole('button', { name: /nav\.png/ })).toHaveAttribute('aria-current', 'true');
   await sheet.getByRole('button', { name: 'Close' }).click();
   await expect(sheet).toHaveCount(0);
   // The panel behind stays open.
   await expect(section).toBeVisible();
+});
+
+test('captures deleted while the viewer is open stay out of it when their names come back', async ({ page, request }) => {
+  const data = fixture();
+  const shot = (file: string) => ({ file, path: `/x/${file}`, turn: 1, from: 'worker' as const, bytes: 10, modified: 1 });
+  const push = (files: string[]) => {
+    data.jobs[0].evidence = files.map(shot);
+    return request.post('/__push', { data: { type: 'state', data } });
+  };
+  await push(['a.png', 'b.png']);
+  await page.locator(`button[data-job="${data.jobs[0].id}"]`).click();
+  const section = page.getByRole('dialog').getByRole('region', { name: 'Evidence' });
+  await section.getByRole('img', { name: 'b.png' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Evidence' });
+  const toggle = sheet.getByRole('button', { name: 'Compare', exact: true });
+  await toggle.click();
+  await sheet.getByRole('group', { name: /Captures to compare/ }).getByRole('button', { name: /a\.png/ }).click();
+  await expect(sheet.locator('.compare figure')).toHaveCount(2);
+  // With one capture left Compare ends, and a new capture does not turn it back on or bring b.png back.
+  await push(['a.png']);
+  await expect(toggle).toHaveCount(0);
+  await expect(sheet.locator('.compare figure').getByRole('link')).toHaveText(['a.png']);
+  await push(['a.png', 'b.png']);
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(sheet.locator('.compare figure').getByRole('link')).toHaveText(['a.png']);
+  // The capture shown leaving closes the viewer, which stays closed when it comes back.
+  await push(['b.png']);
+  await expect(sheet).toHaveCount(0);
+  await push(['a.png', 'b.png']);
+  await expect(section.getByRole('img', { name: 'a.png' })).toBeVisible();
+  await expect(sheet).toHaveCount(0);
 });
 
 test('the detail panel shows what verified the result and nothing for jobs without receipts', async ({ page, request }) => {

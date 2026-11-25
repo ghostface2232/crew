@@ -10,7 +10,7 @@ struct JobDetailView: View {
     @State private var retry = 0
     @State private var scrolled = false
     /// Files of the evidence the sheet shows, starting with the one pressed; empty while it is closed.
-    @State private var compared: [String] = []
+    @State private var viewed: [String] = []
     private var job: Job? {
         guard var current = store.state.jobs.first(where: { $0.id == id }) else { return detail }
         current.prompt = detail?.prompt ?? current.prompt
@@ -110,12 +110,12 @@ struct JobDetailView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: EvidenceTile.minWidth), spacing: Space.l, alignment: .top)], alignment: .leading, spacing: Space.l) {
                     // Newest turn first, as on the web board.
                     ForEach(evidence.sorted { $0.turn > $1.turn }, id: \.file) { item in
-                        EvidenceTile(item: item, turns: job.turns) { compared = [item.file] }
+                        EvidenceTile(item: item, turns: job.turns) { viewed = [item.file] }
                     }
                 }
             }
-            .sheet(isPresented: Binding(get: { !compared.isEmpty }, set: { if !$0 { compared = [] } })) {
-                EvidenceCompareView(items: evidence, turns: job.turns, shown: $compared)
+            .sheet(isPresented: Binding(get: { !viewed.isEmpty }, set: { if !$0 { viewed = [] } })) {
+                EvidenceViewer(items: evidence, turns: job.turns, shown: $viewed)
             }
         }
         if let rounds = job.rounds, !rounds.isEmpty {
@@ -878,13 +878,13 @@ private struct EvidenceTile: View {
     let item: Evidence
     /// How many turns the job has had.
     let turns: Int
-    /// Shows an image inside the app, where others can be added beside it.
-    let compare: () -> Void
+    /// Shows an image inside the app.
+    let open: () -> Void
     @State private var thumbnail: NSImage?
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
             // A recording plays in the system's player: the app decodes images only, and WebM not at all.
-            Button { if item.isVideo { NSWorkspace.shared.open(item.url) } else { compare() } } label: {
+            Button { if item.isVideo { NSWorkspace.shared.open(item.url) } else { open() } } label: {
                 ZStack {
                     RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous).fill(WorkspaceStyle.rowFill)
                     if let thumbnail {
@@ -897,7 +897,7 @@ private struct EvidenceTile: View {
                 .clipShape(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous))
             }
             .buttonStyle(.plain)
-            .help(item.isVideo ? item.path : String(localized: "Compare"))
+            .help(item.isVideo ? item.path : item.file)
             .evidenceFileMenu(item)
             Text("\(item.turnLabel(of: turns)) · \(item.file)")
                 .font(Typeface.caption).foregroundStyle(.secondary).textSelection(.enabled)
@@ -937,10 +937,10 @@ private extension View {
     }
 }
 
-/// A capture inside the app, and the others added beside it from the strip below. A result alone says little: it is
-/// judged against what was there before, or what it was meant to match. Each says which turn it is from, since one
-/// from an earlier turn may not show the final state.
-private struct EvidenceCompareView: View {
+/// One capture at a time, with the others in a strip below to switch to. Compare puts several side by side: a result
+/// alone says little, and is judged against what was there before or what it was meant to match. Each says which turn
+/// it is from, since one from an earlier turn may not show the final state.
+private struct EvidenceViewer: View {
     /// Wide enough for three panes, and no wider than the screen it opens on.
     private static var size: CGSize {
         let screen = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1280, height: 800)
@@ -948,16 +948,38 @@ private struct EvidenceCompareView: View {
     }
     let items: [Evidence]
     let turns: Int
+    /// In the order captures were added, so the last is the one most recently looked at.
     @Binding var shown: [String]
-    private var panes: [Evidence] { Evidence.ordered(items.filter { shown.contains($0.file) }) }
+    @State private var compare = false
+    @FocusState private var focused: Bool
+    /// With one capture left there is nothing to compare.
+    private var comparing: Bool { compare && items.count > 1 }
+    private var strip: [Evidence] { Evidence.ordered(items) }
+    /// `shown` without captures the worker has since deleted.
+    private var open: [String] { shown.filter { file in items.contains { $0.file == file } } }
+    private var current: String? { open.last }
+    private var panes: [Evidence] {
+        comparing ? Evidence.ordered(items.filter { open.contains($0.file) }) : items.filter { $0.file == current }
+    }
     /// Up to three in a row; four in a grid of two by two.
     private var rows: [[Evidence]] { panes.count == 4 ? [Array(panes[..<2]), Array(panes[2...])] : [panes] }
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xl) {
-            HStack {
+            HStack(spacing: Space.m) {
                 Label("Evidence", systemImage: "photo.on.rectangle").font(Typeface.title)
                     .labelStyle(.titleAndIcon).symbolRenderingMode(.hierarchical)
                 Spacer()
+                if items.count > 1 {
+                    Button {
+                        // Leaving keeps only the one most recently added.
+                        if comparing { shown = current.map { [$0] } ?? [] }
+                        compare = !comparing
+                    } label: {
+                        Label("Compare", systemImage: "rectangle.split.2x1")
+                    }
+                    .pillButton(selected: comparing)
+                    .accessibilityAddTraits(comparing ? .isSelected : [])
+                }
                 Button("Close", systemImage: "xmark") { shown = [] }
                     .iconButton().help("Close (Esc)").keyboardShortcut(.cancelAction)
             }
@@ -972,30 +994,54 @@ private struct EvidenceCompareView: View {
         }
         .padding(WorkspaceStyle.panelPadding)
         .frame(width: Self.size.width, height: Self.size.height)
-        // A capture the worker has since deleted leaves the comparison, and the last one closes it.
-        .onChange(of: panes.isEmpty) { _, empty in if empty { shown = [] } }
+        .focusable().focusEffectDisabled().focused($focused)
+        .onAppear { focused = true }
+        .onKeyPress(.leftArrow) { step(-1) }
+        .onKeyPress(.rightArrow) { step(1) }
+        // A capture the worker has since deleted leaves the viewer for good, so one coming back under its name does
+        // not rejoin a comparison; the last one closes it.
+        .onChange(of: open) { _, files in if files != shown { shown = files } }
+        // Compare does not come back on its own when a capture arrives after it ended for want of a second.
+        .onChange(of: items.count) { _, count in if count < 2 { compare = false } }
+    }
+    /// Moves to the capture beside the one shown; while comparing, the arrows do nothing. Either way the key is taken,
+    /// so an arrow past the ends does not sound the alert.
+    private func step(_ by: Int) -> KeyPress.Result {
+        guard !comparing else { return .handled }
+        if let index = strip.firstIndex(where: { $0.file == current }), strip.indices.contains(index + by) {
+            shown = [strip[index + by].file]
+        }
+        return .handled
     }
     private var picker: some View {
-        let open = panes.map(\.file)
-        return ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: Space.m) {
-                ForEach(Evidence.ordered(items), id: \.file) { item in
-                    let on = shown.contains(item.file)
-                    // Counted from what is on screen: a capture the worker has since deleted is still named in `shown`.
-                    Button { shown = on ? open.filter { $0 != item.file } : open + [item.file] } label: {
-                        EvidenceChoice(item: item, turns: turns, on: on)
+        let open = open
+        return ScrollViewReader { reader in
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: Space.m) {
+                    ForEach(strip, id: \.file) { item in
+                        let on = comparing ? open.contains(item.file) : item.file == current
+                        Button {
+                            if !comparing { shown = [item.file] } else { shown = on ? open.filter { $0 != item.file } : open + [item.file] }
+                        } label: {
+                            EvidenceChoice(item: item, turns: turns, on: on)
+                        }
+                        .buttonStyle(.plain)
+                        // While comparing, the last one stays, and a fifth has no room.
+                        .disabled(comparing && (on ? open.count == 1 : open.count >= Evidence.maxCompared))
+                        .help(item.file)
+                        .accessibilityLabel("\(item.turnLabel(of: turns)), \(item.file)")
+                        .accessibilityAddTraits(on ? .isSelected : [])
                     }
-                    .buttonStyle(.plain)
-                    // The last one stays, and a fourth has no room.
-                    .disabled(on ? open.count == 1 : open.count >= Evidence.maxCompared)
-                    .help(item.file)
-                    .accessibilityLabel("\(item.turnLabel(of: turns)), \(item.file)")
-                    .accessibilityAddTraits(on ? .isSelected : [])
-                }
-            }.padding(1)
+                }.padding(1)
+            }
+            .scrollIndicators(.never)
+            // The strip shows the capture on screen when it has more than fit: on opening, after the arrows, and on
+            // leaving Compare.
+            .onAppear { if let current { reader.scrollTo(current) } }
+            .onChange(of: current) { _, file in if let file, !comparing { reader.scrollTo(file) } }
+            .onChange(of: comparing) { _, on in if !on, let current { reader.scrollTo(current) } }
         }
-        .scrollIndicators(.never)
-        .accessibilityLabel("Captures to compare, up to \(Evidence.maxCompared)")
+        .accessibilityLabel(comparing ? Text("Captures to compare, up to \(Evidence.maxCompared)") : Text("Captures"))
     }
 }
 
@@ -1036,7 +1082,7 @@ private struct EvidencePane: View {
     }
 }
 
-/// One capture in the row that picks what is compared.
+/// One capture in the strip that picks what is shown.
 private struct EvidenceChoice: View {
     private static let width: CGFloat = 112
     let item: Evidence

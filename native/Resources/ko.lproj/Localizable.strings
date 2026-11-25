@@ -323,6 +323,7 @@
 "Show in Finder" = "Finder에서 보기";
 "Close" = "닫기";
 "Close (Esc)" = "닫기 (Esc)";
+"Captures" = "캡처";
 "Captures to compare, up to %lld" = "비교할 캡처, 최대 %lld개";
 "Play in Default App" = "기본 앱에서 재생";
 "%@ could not be shown" = "%@ 파일을 표시하지 못했어요.";

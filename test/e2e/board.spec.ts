@@ -138,8 +138,8 @@ test('sidebar and Settings labels update their fade when selection changes', asy
     await other.click();
     await expect(label).not.toHaveAttribute('data-cut');
   };
-  const pages = page.getByRole('navigation', { name: 'Pages' }).filter({ visible: true });
-  await check(pages.getByRole('button', { name: 'History' }), pages.getByRole('button', { name: 'Overview' }));
+  const projects = page.getByRole('navigation', { name: 'Projects' });
+  await check(projects.getByRole('button', { name: 'Crew', exact: true }), projects.getByRole('button', { name: 'All projects' }));
   await openSettings(page);
   const settings = page.getByRole('navigation', { name: 'Settings pages' });
   await check(settings.getByRole('button', { name: 'Review', exact: true }), settings.getByRole('button', { name: 'Build', exact: true }));
@@ -750,10 +750,12 @@ test('the detail panel shows what verified the result and nothing for jobs witho
   await expect(followed.locator('.exchange-entry').nth(2)).toContainText('Lead · turn 2');
 });
 
-test('project filtering keeps global requests visible and New Job follows roles', async ({ page, request }) => {
+test('project filtering scopes requests and New Job follows roles', async ({ page, request }) => {
   await page.getByRole('navigation').getByRole('button', { name: 'Other', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Other', exact: true, level: 1 })).toBeVisible();
-  await expect(page.getByRole('button', { name: /1 request needs your attention/ })).toBeVisible();
+  // The waiting request is Crew's: the sidebar marks Crew, and Other's page has nothing to point to.
+  await expect(page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Crew', exact: true })).toHaveAccessibleDescription('Needs you');
+  await expect(page.getByRole('button', { name: /needs your attention/ })).toHaveCount(0);
   await newJob(page);
   await expect(page.getByRole('textbox', { name: 'Project directory' })).toHaveValue('/workspace/Other');
   await page.getByRole('combobox', { name: 'Role', exact: true }).click();

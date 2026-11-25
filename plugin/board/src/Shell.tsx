@@ -143,7 +143,8 @@ export const PageTabs = memo(function PageTabs({ label, items, current, onSelect
         >
           <Icon icon={item.icon} size={16} filled={current === item.id} />
           <span className="tab-label">{item.label}</span>
-          {item.count ? <span className="nav-count" aria-label={t('{count} waiting', { count: item.count })}>{item.count}</span> : null}
+          {/* Waiting requests are a dot on the icon's shoulder at every width, as the app's bell badge is; the page says how many. */}
+          {item.count ? <span className="tab-dot" role="img" aria-label={t('{count} waiting', { count: item.count })} /> : null}
         </button>
       ))}
     </nav>

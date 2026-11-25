@@ -937,8 +937,9 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   .tabs-thumb[data-slide] { transition: left 340ms var(--ease-out), width 340ms var(--ease-out); }
 }
 /* The same weight in every state, so choosing a page never moves the tabs beside it. */
-.tab { position: relative; min-height: 30px; padding: 0 12px 0 10px; gap: 7px; background: none !important; color: var(--secondary); }
+.tab { --inset: 10px; position: relative; min-height: 30px; padding: 0 12px 0 var(--inset); gap: 7px; background: none !important; color: var(--secondary); }
 .tab svg { width: 16px; height: 16px; }
+.tab-dot { position: absolute; top: 5px; left: calc(var(--inset) + 12px); width: 7px; height: 7px; border-radius: 50%; corner-shape: round; background: var(--orange); box-shadow: var(--shadow-bead); animation: swap 360ms var(--ease-out); }
 .tab[aria-current="page"] { color: var(--label); }
 .tab[aria-current="page"] svg { color: var(--accent); }
 @media (hover: hover) { .tab:hover { color: var(--label); } }
@@ -1522,10 +1523,8 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
 @media (max-width: 1000px) {
   .search-pill { flex: none; width: 30px; padding: 0; justify-content: center; }
   .search-pill > span, .search-pill > kbd { display: none; }
-  .tab:not([aria-current="page"]) { padding: 0 9px; }
+  .tab:not([aria-current="page"]) { --inset: 9px; padding-inline-end: 9px; }
   .tab:not([aria-current="page"]) > .tab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  /* Without its name a tab keeps only its icon, and waiting requests become a dot on the bell's shoulder, as in the app. */
-  .tab:not([aria-current="page"]) > .nav-count { position: absolute; top: 5px; left: 21px; width: 7px; min-width: 0; height: 7px; padding: 0; font-size: 0; }
 }
 @media (max-width: 760px) {
   .app { grid-template-columns: minmax(0, 1fr); }
@@ -1560,8 +1559,7 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
 }
 @media (max-width: 420px) {
   .tab > .tab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .tab { padding: 0 9px; }
-  .tab > .nav-count { position: absolute; top: 5px; left: 21px; width: 7px; min-width: 0; height: 7px; padding: 0; font-size: 0; }
+  .tab { --inset: 9px; padding-inline-end: 9px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; }

@@ -35,7 +35,7 @@ import type { Registration, SetupItem } from './setup.ts';
 import { toastCommand } from './toast.ts';
 import { ANTIGRAVITY_MODELS, antigravityModels, codexModels } from './tiers.ts';
 import type { ModelChoice } from './tiers.ts';
-import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, savePreset, saveRoles, writeInstructions } from './settings.ts';
+import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, savePreset, saveProjectSettings, saveRoles, writeInstructions } from './settings.ts';
 import { agentGaugeDir, fromCodexLimits, route as routeWork, UsageMonitor } from './usage.ts';
 import type { RouteKind } from './usage.ts';
 import type { EventKind, Job, JobsHooks } from './jobs.ts';
@@ -384,6 +384,7 @@ fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {
   // Turning peer ratings off or on changes what the scores are made of.
   broadcast('peerRatings', live.peerRatings);
   broadcast('modelScores', modelScores());
+  broadcast('projects', live.projects);
   usage.setModels(usageModels(live));
 });
 
@@ -419,6 +420,7 @@ function state() {
     presets: live.presets,
     peerRatings: live.peerRatings,
     language: live.language,
+    projects: live.projects,
     modelScores: modelScores(),
     events: jobs.recent.slice(-200),
   };
@@ -464,18 +466,26 @@ function locate(session: ClaudeSession | undefined): void {
 }
 
 /**
- * The instructions file for a project the board may edit, or the global one for no project.
- * Only projects the daemon already knows from a job or a session are accepted, so the board
- * cannot be made to write a `.crew` folder into an arbitrary directory.
+ * Refuses a project the daemon does not already know from a job, a session, or a mission, so the board cannot be
+ * made to write a `.crew` folder into, or keep settings for, an arbitrary directory.
  */
-async function sharedFile(project: string | null): Promise<string> {
-  if (!project) return instructionsFile(HOME, null);
+function knownProject(project: string): void {
   const known = [
     ...jobs.list().flatMap((job) => [job.project, job.root]),
     ...[...claude.sessions.values()].flatMap((s) => [s.cwd, s.root]),
     ...missions.list().flatMap((mission) => [mission.project, mission.root]),
   ];
   if (!known.includes(project)) throw new HttpError(400, 'unknown project');
+}
+
+/**
+ * The instructions file for a project the board may edit, or the global one for no project.
+ * Only projects the daemon already knows from a job or a session are accepted, so the board
+ * cannot be made to write a `.crew` folder into an arbitrary directory.
+ */
+async function sharedFile(project: string | null): Promise<string> {
+  if (!project) return instructionsFile(HOME, null);
+  knownProject(project);
   // The same lookup a job uses, so the board edits the file the agents are given.
   return instructionsFile(HOME, (await projectRoot(project)) ?? project);
 }
@@ -565,7 +575,7 @@ const BOARD_POSTS = [
   /^\/api\/jobs$/,
   /^\/api\/jobs\/[\w-]+\/(?:reply|cancel|rounds\/\d+)$/,
   /^\/api\/missions\/[\w-]+$/,
-  /^\/api\/(?:instructions|setup\/repair|setup\/trust-hooks|peer-ratings|preset|language|roles)$/,
+  /^\/api\/(?:instructions|setup\/repair|setup\/trust-hooks|peer-ratings|preset|language|roles|project-settings)$/,
 ];
 /**
  * Parts of those requests that only the lead sends: they speak for the user or the lead, or have the daemon read a
@@ -1117,6 +1127,14 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       const saved = savePeerRatings(HOME, (await readJson(req)).enabled);
       broadcast('peerRatings', saved.peerRatings);
       broadcast('modelScores', modelScores());
+      return saved;
+    }
+    if (pathname === '/api/project-settings') {
+      const { project, changes } = await readJson(req);
+      if (typeof project !== 'string') throw new HttpError(400, 'project is required');
+      knownProject(project);
+      const saved = saveProjectSettings(HOME, project, changes);
+      broadcast('projects', saved.projects);
       return saved;
     }
     if (pathname === '/api/preset') {

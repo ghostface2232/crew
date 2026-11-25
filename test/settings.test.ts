@@ -3,9 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { canonicalPath, effectiveRole, PRESETS, resolveConfig } from '../plugin/bridge/config.ts';
+import { canonicalPath, effectiveRole, PRESETS, projectSettings, resolveConfig } from '../plugin/bridge/config.ts';
 import { sharedInstructions } from '../plugin/bridge/instructions.ts';
-import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, savePreset, saveRoles, writeInstructions } from '../plugin/bridge/settings.ts';
+import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, savePreset, saveProjectSettings, saveRoles, writeInstructions } from '../plugin/bridge/settings.ts';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-settings-'));
 
@@ -307,3 +307,26 @@ test('peer ratings are on unless the file says false, and turning them back on r
   assert.deepEqual(savePeerRatings(home, true), { peerRatings: true });
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false });
 });
+
+test('project switches are off unless turned on, and a project left with none is removed from the file', () => {
+  const home = tempDir();
+  const file = path.join(home, 'config.json');
+  const project = path.resolve(home, 'repo');
+  const key = canonicalPath(project);
+  assert.deepEqual(projectSettings(resolveConfig({}), project), {});
+  assert.throws(() => resolveConfig({ projects: { [project]: { autonomy: 'true' } } } as never), /autonomy must be true or false/);
+  assert.throws(() => resolveConfig({ projects: { [project]: { merge: true } } } as never), /merge is not a setting/);
+  assert.throws(() => resolveConfig({ projects: { 'relative/repo': { autonomy: true } } } as never), /absolute path/);
+  fs.writeFileSync(file, JSON.stringify({ notify: false }));
+  assert.deepEqual(saveProjectSettings(home, project, { autonomy: true, watchAway: true }), { projects: { [key]: { autonomy: true, watchAway: true } } });
+  // Git spells a Windows folder with forward slashes; it is the same project.
+  assert.deepEqual(projectSettings(loadConfigFrom(file), project.replaceAll('\\', '/')), { autonomy: true, watchAway: true });
+  // Only the switches named move.
+  assert.deepEqual(saveProjectSettings(home, project, { autonomy: false }), { projects: { [key]: { watchAway: true } } });
+  assert.throws(() => saveProjectSettings(home, project, { watchAway: 'off' }), /true or false/);
+  assert.throws(() => saveProjectSettings(home, project, { deploy: true }), /not a project setting/);
+  assert.deepEqual(saveProjectSettings(home, project, { watchAway: false }), { projects: {} });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false });
+});
+
+const loadConfigFrom = (file: string) => resolveConfig(JSON.parse(fs.readFileSync(file, 'utf8')));

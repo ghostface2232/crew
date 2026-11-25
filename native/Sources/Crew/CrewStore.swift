@@ -78,6 +78,13 @@ final class CrewStore {
     var search = ""
     var searchRequest = 0
     var showingDispatch = false
+    /// A task New Job opens with once, such as an issue the user chose to start from.
+    var dispatchDraft: String?
+    /// Opens New Job on the issue's project with the issue as its task, for the user to check and send.
+    func startWork(on issue: IssueList.Issue) {
+        dispatchDraft = "Work on issue #\(issue.number): \(issue.title)\n\n\(issue.url)"
+        showingDispatch = true
+    }
     /// The first-run guide (`WelcomeView`): owed once after a first install (`welcomePending`), or opened from Help.
     var showingWelcome = false
     static let welcomePending = "welcomePending"

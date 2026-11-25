@@ -38,8 +38,15 @@ struct DispatchView: View {
     @State private var error = ""
     @State private var confirmingDiscard = false
     private let initialDirectory: String
-    init(store: CrewStore) { self.store = store; initialDirectory = store.project; _directory = State(initialValue: store.project) }
-    private var dirty: Bool { intent != "command" || destination != "project" || !task.isEmpty || !targets.isEmpty || role != "delegate" || directory != initialDirectory || pickedAgent != nil }
+    private let initialTask: String
+    init(store: CrewStore) {
+        self.store = store
+        initialDirectory = store.project
+        initialTask = store.dispatchDraft ?? ""
+        _directory = State(initialValue: store.project)
+        _task = State(initialValue: initialTask)
+    }
+    private var dirty: Bool { intent != "command" || destination != "project" || task != initialTask || !targets.isEmpty || role != "delegate" || directory != initialDirectory || pickedAgent != nil }
     private var dispatch: JobDispatch {
         let role = intent == "question" ? "delegate" : role
         return JobDispatch(assignment: store.state.roles[role], workers: store.state.agents,

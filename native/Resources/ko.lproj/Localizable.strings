@@ -548,10 +548,13 @@
 "Installing…" = "설치 중…";
 "Install" = "설치";
 "Start from an issue" = "이슈에서 시작하기";
+"Open Issue" = "이슈 열기";
+"Start Work" = "작업 시작";
+"Opens New Job with this issue as the task." = "이 이슈를 작업 내용으로 채워 새 작업을 열어요.";
+"Open issue #%lld" = "이슈 #%lld 열기";
+"Start work on #%lld" = "#%lld 작업 시작";
 "Dismiss #%lld" = "#%lld 추천에서 빼기";
 "Dismiss. This issue is not suggested again." = "빼면 이 이슈는 다시 추천하지 않아요.";
-"Copy the command that starts work on this issue" = "이 이슈로 작업을 시작하는 명령을 복사해요.";
-"Copy the command for #%lld" = "#%lld 명령 복사";
 
 /* Transport.swift */
 "Invalid UTF-8 from the daemon." = "데몬이 올바르지 않은 UTF-8을 보냈어요.";

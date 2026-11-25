@@ -87,7 +87,7 @@ Work roles open their report with `## Outcome` (`done`, `partial`, or `blocked`;
 
 The finished review view shows the reviewer's verdict and finding counts by severity and evidence. It warns if an approval has a blocker or a cross-review lacks a verdict. Standard Codex reviews use priority tags, which Crew shows as blocker (P0), major (P1), and minor (P2 and P3). Report text, including paginated reports, is labeled as the worker's own words for the lead to weigh as evidence.
 
-When the finished job view offers a squash merge, Crew checks the branch against the originating checkout's current `HEAD`. It reports a clean merge or lists conflicting paths. Git may write merge objects during the check. The index, worktree, and refs are untouched. If Git cannot determine the result, the view omits the check line.
+When the finished job view offers a squash merge, Crew checks the branch against the originating checkout's committed `HEAD`. It reports a clean merge or lists conflicting paths. Uncommitted changes can still block the squash merge. Git may write merge objects during the check. The index, worktree, and refs are untouched. If Git cannot determine the result, the view omits the check line.
 
 If the bridge cannot collect a finished turn's result (the transport commit or the diff fails), the job fails with `could not collect the result: …` and still keeps the worker's report, so the lead reads what the worker did beside the failure; when an earlier turn's result is on record, the message says the listed changes are that turn's. A turn that was cancelled and followed by another cannot fail its successor: a start or send that fails after the job has moved on is dropped.
 

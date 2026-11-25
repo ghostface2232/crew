@@ -12,7 +12,8 @@ import { withUserApps } from '../prompts.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer } from '../rpc.ts';
 import { clip } from '../text.ts';
 
-type Answer = { approve: boolean; message?: string; cancelled?: boolean; forJob?: boolean };
+type RefusedBy = 'the user' | 'the lead' | 'Crew';
+type Answer = { approve: boolean; message?: string; cancelled?: boolean; forJob?: boolean; refusedBy?: RefusedBy };
 /** A plugin tool approval the user may allow for the rest of the job: `key` matches later requests, `label` names what it covers. */
 interface Grant { key: string; label: string }
 interface Pending {
@@ -41,6 +42,8 @@ interface Run {
   turnId: string | null;
   awaitingTurn: { response: AbortController; timedOut: boolean } | null;
   interrupt: ReturnType<typeof Promise.withResolvers<void>> | null;
+  interruptRequested?: boolean;
+  approvalAbort?: string;
   message: string;
   guardianWarning?: string;
   retrying?: { since: number; cause: string };
@@ -276,7 +279,8 @@ export class CodexAdapter implements Adapter {
         } else undelivered(peer ? 'no confirmed turn to steer' : 'the Codex connection is closed');
       } else ctl.note(`The user declined an action: ${request.reason}\nDo it another way within the job permissions, or report what could not be verified.`, { declined: true });
     }
-    this.settleRequest(run, 0, { approve, message, forJob: opts?.forJob });
+    const refusedBy = approve ? undefined : opts?.by === 'lead' ? 'the lead' : 'the user';
+    this.settleRequest(run, 0, { approve, message, forJob: opts?.forJob, refusedBy });
   }
 
   async cancel(ctl: JobCtl): Promise<void> {
@@ -290,6 +294,7 @@ export class CodexAdapter implements Adapter {
     if (run.interrupt) throw new Error('Cancellation is already in progress.');
     const interrupt = Promise.withResolvers<void>();
     run.interrupt = interrupt;
+    run.interruptRequested = true;
     for (const request of run.pending.splice(0)) request.resolve({ approve: false, cancelled: true });
     run.ctl.resumed();
     try {
@@ -558,6 +563,8 @@ export class CodexAdapter implements Adapter {
     run.message = '';
     run.guardianWarning = undefined;
     run.retrying = undefined;
+    run.interruptRequested = undefined;
+    run.approvalAbort = undefined;
     run.reviewFailed = false;
     run.items.clear();
     const start = { response: new AbortController(), timedOut: false };
@@ -874,10 +881,12 @@ export class CodexAdapter implements Adapter {
     run.reviewFailed = false;
     const turn = p.turn;
     const info = turn.error?.codexErrorInfo;
-    if (run.interrupt) ctl.cancelled();
+    if (run.interrupt || (turn.status === 'interrupted' && run.interruptRequested)) ctl.cancelled();
     else if (turn.status === 'completed') {
       if (reviewFailed) ctl.fail(EMPTY_REVIEW);
       else ctl.done(report);
+    } else if (turn.status === 'interrupted' && run.approvalAbort) {
+      ctl.fail(run.approvalAbort);
     } else if (info === 'tooManyDenials' || (turn.status === 'interrupted' && warning)) {
       const listed = ctl.job.refusals?.some((refusal) => refusal.turn === ctl.job.turns);
       const message = errorMessage(turn.error, warning ?? '');
@@ -996,17 +1005,29 @@ export class CodexAdapter implements Adapter {
         const network = p.networkApprovalContext ? `Network access: ${detail(p.networkApprovalContext.host ?? '(target missing)')} (${detail(p.networkApprovalContext.protocol ?? 'protocol missing')})` : '';
         const permissions = p.additionalPermissions ? `Additional permissions:\n${permissionText(p.additionalPermissions)}` : '';
         const description = detail([command, network, permissions].filter(Boolean).join('\n') + why, 8000);
+        const abortApproval = (by: RefusedBy = 'Crew') => {
+          // A child approval can abort its own turn without stopping the job's turn.
+          if (run && this.runs.get(threadId) === run) {
+            const terminalInput = p.kind === 'writeStdin';
+            const action = terminalInput ? 'terminal input' : 'a command approval';
+            const cause = terminalInput ? 'Codex ends the turn when terminal input is refused.' : 'Codex offered no way to decline and continue the turn.';
+            run.approvalAbort ??= `The turn ended because ${by} refused ${action}. ${cause}\n${description.trim() || 'Exact action unavailable (input missing).'}`;
+          }
+          return { decision: 'cancel' };
+        };
         if (p.availableDecisions && !p.availableDecisions.includes('accept')) {
           run?.ctl.note(`The bridge declined a command approval that offered no acceptance: ${command || network ? description : `exact action unavailable (input missing)${description ? `\n${description}` : ''}`}. Do it another way or report what could not be verified.`, { declined: true });
-          return { decision: p.availableDecisions.includes('decline') ? 'decline' : 'cancel' };
+          return p.availableDecisions.includes('decline') ? { decision: 'decline' } : abortApproval();
         }
         if (!command && !network) {
           run?.ctl.note(`The bridge declined a command approval that omitted the command (exact action unavailable; input missing).${description ? `\n${description}` : ''} Send a request naming the command, or do it another way.`, { declined: true });
-          return { decision: deny };
+          return deny === 'cancel' ? abortApproval() : { decision: deny };
         }
         const answer = await ask('approval', description);
         if (!answer) return;
-        return { decision: answer.cancelled ? 'cancel' : answer.approve ? 'accept' : deny };
+        if (answer.cancelled) return { decision: 'cancel' };
+        if (answer.approve) return { decision: 'accept' };
+        return deny === 'cancel' ? abortApproval(answer.refusedBy) : { decision: deny };
       }
       case 'item/fileChange/requestApproval': {
         const answer = await ask('approval', `write files: ${item?.files ?? fileList(p.files)}${p.grantRoot ? `\nGrant root: ${detail(p.grantRoot)}` : ''}${why}`);

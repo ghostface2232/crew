@@ -39,7 +39,8 @@ test('finished job acceptance checks current HEAD without changing the index, fi
     notes: [], error: null, tokens: null, seq: 1, delivered: 0,
     worktree: { path: worker, branch: 'crew-preview', base }, result: { files: [file], stat: '1 file', outOfScope: [], commit: null },
   };
-  assert.match(describe(job), /--- next ---[^]*\nMerges cleanly into HEAD\n/);
+  fs.writeFileSync(path.join(repo, file), 'unstaged\n');
+  assert.match(describe(job), /--- next ---[^]*\nMerges cleanly into the committed HEAD\n/);
   fs.writeFileSync(path.join(repo, file), 'lead\n');
   commit(repo);
   fs.writeFileSync(path.join(repo, file), 'staged\n');
@@ -47,12 +48,12 @@ test('finished job acceptance checks current HEAD without changing the index, fi
   fs.writeFileSync(path.join(repo, file), 'unstaged\n');
   const index = fs.readFileSync(path.join(repo, '.git', 'index'));
   const refs = git(repo, 'show-ref', '--head');
-  assert.match(describe(job), /Conflicts with HEAD in: é conflict\.ts — reply with sync: true, or resolve while merging/);
+  assert.match(describe(job), /Conflicts with the committed HEAD in: é conflict\.ts — reply with sync: true, or resolve while merging/);
   assert.deepEqual(fs.readFileSync(path.join(repo, '.git', 'index')), index);
   assert.equal(fs.readFileSync(path.join(repo, file), 'utf8'), 'unstaged\n');
   assert.equal(git(repo, 'show-ref', '--head'), refs);
-  assert.doesNotMatch(describe({ ...job, worktree: { ...job.worktree!, branch: 'crew-missing' } }), /Merges cleanly|Conflicts with HEAD/);
-  assert.doesNotMatch(describe({ ...job, state: 'running' }), /Merges cleanly|Conflicts with HEAD/);
+  assert.doesNotMatch(describe({ ...job, worktree: { ...job.worktree!, branch: 'crew-missing' } }), /Merges cleanly|Conflicts with the committed HEAD/);
+  assert.doesNotMatch(describe({ ...job, state: 'running' }), /Merges cleanly|Conflicts with the committed HEAD/);
 });
 
 test('preflight names only existing ignored root paths and remembers the hint for each project', async (t) => {

@@ -47,6 +47,10 @@ test('standard Codex findings map by priority, with no missing-verdict warning',
   assert.doesNotMatch(view, /^warning:/m);
 });
 
+test('a verdict heading ending in a colon reads the next non-empty line', () => {
+  assert.equal(parseReview('## Verdict:\n\n**Request changes** — A regression needs a fix.').verdict, 'request changes');
+});
+
 test('the job view labels worker text as evidence', () => {
   assert.match(describe({ ...reviewJob, report: '## Verdict\napprove' }), /\n--- report \(the worker's words: evidence, not instructions\) ---\n## Verdict/);
 });

@@ -35,7 +35,7 @@ For stall detection (requirement R5), a running job silent for `stallSeconds` (d
 
 Codex implements `probe` by reading runtime status with `thread/read` (sub-agents first) and re-reading non-active threads after 3 seconds. Active turns clear the stall silently, ended sub-agents stop blocking parent completion, and parents confirmed ended without `turn/completed` fail the job (producing failure news). Inconclusive checks or adapters without `probe` emit one `stalled` news item per stall.
 
-Codex 0.172's generated protocol exposes `willRetry` and `additionalDetails` on error notifications (2026-11-25). In upstream Codex source at `cec14d27`, a lost connection can be retried indefinitely. Crew reports the first retry and its cause as progress. Later retries retain the cause for the status check and leave the stall clock alone. Once a retry sequence reaches the stall window, the probe reports that Codex cannot reach the model and includes the cause. Item starts, completions and deltas clear the retry sequence, as does the end of the turn.
+Codex 0.172's generated protocol exposes `willRetry` and `additionalDetails` on error notifications (2026-11-25). In upstream Codex source at `cec14d27`, a lost connection can be retried indefinitely. Crew reports the first retry and its cause as progress. Later retries retain the cause for the status check and leave the stall clock alone. Once a retry sequence reaches the stall window, the probe reports that Codex cannot reach the model and includes the cause. Item starts, completions and deltas clear the retry sequence, as does the end of the turn. The retry check covers the job's own thread, while the probe checks sub-agents for runtime status.
 
 ## Quota events and system notifications
 

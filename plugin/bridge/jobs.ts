@@ -503,7 +503,7 @@ export function parseReview(report: string): NonNullable<Job['review']> {
       const verdict = heading[1] === '##' && /^Verdict(?::[ \t]*(.*))?$/i.exec(title);
       if (verdict && !sawVerdict) {
         sawVerdict = true;
-        declared = verdict[1];
+        declared = verdict[1] || undefined;
       }
       continue;
     }

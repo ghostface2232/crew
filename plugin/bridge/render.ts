@@ -203,7 +203,7 @@ export function describe(job: JobView, waitingHint?: string): string {
     );
     if (conflicts) {
       const paths = conflicts.map((file) => /[\r\n\t]/.test(file) ? JSON.stringify(file) : file);
-      lines.push(paths.length ? `Conflicts with HEAD in: ${paths.join(', ')} — reply with sync: true, or resolve while merging` : 'Merges cleanly into HEAD');
+      lines.push(paths.length ? `Conflicts with the committed HEAD in: ${paths.join(', ')} — reply with sync: true, or resolve while merging` : 'Merges cleanly into the committed HEAD');
     }
     lines.push(
       `Fix:     reply with a message describing what to change`,

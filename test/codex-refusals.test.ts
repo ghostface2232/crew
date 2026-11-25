@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -377,6 +378,52 @@ test('Deny declines a command or network request and reserves cancel for stdin',
     await h.adapter.answer(h.ctl as any, false);
     assert.deepEqual(await answer, { decision });
   }
+});
+
+test('an interruption after a cancelled Codex approval names who refused the action', async () => {
+  for (const [actor, request] of [
+    ['the user', { command: 'example input', kind: 'writeStdin' }],
+    ['the lead', { command: 'example input', kind: 'writeStdin' }],
+    ['Crew', { command: 'example input', kind: 'writeStdin' }],
+    ['Crew', { command: 'echo example', availableDecisions: ['cancel'] }],
+    ['Crew', { kind: 'writeStdin' }],
+  ] as const) {
+    const h = harness();
+    const failures: string[] = [];
+    Object.assign(h.ctl, { fail: (message: string) => failures.push(message) });
+    if (actor === 'Crew') h.job.sandbox = 'read-only';
+    const reply = h.request('item/commandExecution/requestApproval', { availableDecisions: ['accept', 'cancel'], ...request });
+    if (actor !== 'Crew') await h.adapter.answer(h.ctl as any, false, 'Outside the task', actor === 'the lead' ? { by: 'lead' } : undefined);
+    assert.deepEqual(await reply, { decision: 'cancel' });
+    h.notify('turn/completed', { turn: { id: 'turn', status: 'interrupted' } });
+    assert.equal(failures.length, 1);
+    assert.ok(failures[0].includes(`${actor} refused`), failures[0]);
+    assert.ok(failures[0].includes('command' in request ? request.command : 'terminal input'), failures[0]);
+  }
+});
+
+test('a Codex interrupt confirmed after the cancellation timeout still cancels the turn', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.timers.reset();
+    syncBuiltinESMExports();
+  });
+  const h = harness();
+  const outcomes: string[] = [];
+  Object.assign(h.ctl, { cancelled: () => outcomes.push('cancelled'), fail: (message: string) => outcomes.push(message) });
+  h.internal.peer = {
+    request: async (method: string, params: unknown) => {
+      assert.equal(method, 'turn/interrupt');
+      assert.deepEqual(params, { threadId: 'parent', turnId: 'turn' });
+    },
+  };
+  const cancellation = h.adapter.cancel(h.ctl as any);
+  t.mock.timers.tick(5_001);
+  await assert.rejects(cancellation, /Codex did not confirm cancellation/);
+  assert.deepEqual(outcomes, []);
+  h.notify('turn/completed', { turn: { id: 'turn', status: 'interrupted' } });
+  assert.deepEqual(outcomes, ['cancelled']);
 });
 
 test('only the first Codex retry refreshes activity until progress or a new turn', async (t) => {

@@ -468,7 +468,8 @@ struct JobRow: View {
                 Image(systemName: "chevron.right").font(Typeface.micro).foregroundStyle(.tertiary)
             }
             .padding(WorkspaceStyle.rowInsets).contentShape(Rectangle())
-            .background(selected ? Palette.selection : job.state == "waiting" ? Palette.attention(Palette.warning) : WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+            // A request is marked by its status icon alone, as a failure is: a tinted row read as louder than either.
+            .background(selected ? Palette.selection : WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
         }.buttonStyle(WorkspacePressStyle())
         .accessibilityElement(children: .combine)
         // The mark is decorative to VoiceOver, so the agent it shows is read here.
@@ -507,7 +508,8 @@ struct SessionRow: View {
                 Image(systemName: "chevron.right").font(Typeface.micro).foregroundStyle(.tertiary)
             }
             .padding(WorkspaceStyle.rowInsets).contentShape(Rectangle())
-            .background(selected ? Palette.selection : session.state == "waiting" ? Palette.attention(Palette.warning) : WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+            // A request is marked by its status icon alone, as a failure is: a tinted row read as louder than either.
+            .background(selected ? Palette.selection : WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
         }.buttonStyle(WorkspacePressStyle())
         .accessibilityElement(children: .combine)
         .accessibilityValue(agentName(session.agent))

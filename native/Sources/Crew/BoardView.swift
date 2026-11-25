@@ -40,7 +40,7 @@ struct BoardView: View {
             scroll.scrollTo(edge: .top)
         }
         .onExitCommand { store.closeDetail() }
-        .sheet(isPresented: $store.showingDispatch) { DispatchView(store: store) }
+        .sheet(isPresented: $store.showingDispatch, onDismiss: { store.dispatchDraft = nil }) { DispatchView(store: store) }
         .sheet(isPresented: $store.showingWelcome, onDismiss: store.markWelcomed) { WelcomeView(store: store) }
     }
     private var page: some View {
@@ -50,7 +50,6 @@ struct BoardView: View {
                 if !store.connected { connectionBanner }
                 heading
                 if store.connected && store.project.isEmpty && (store.selection == "overview" || store.selection == nil) { SetupCard(api: store.api) }
-                if store.connected && !store.project.isEmpty { IssueSuggestionsCard(store: store, project: store.project) }
                 if store.state.pendingCount > 0 && store.selection != "needs" && !store.project.isEmpty { attentionBanner.transition(.card) }
                 if store.selection == "needs" { NeedsYouView(store: store) }
                 else if store.selection == "activity" { activity }
@@ -201,7 +200,13 @@ struct BoardView: View {
         }
     }
     @ViewBuilder private var workspace: some View {
-        if store.selection != "history" && store.search.isEmpty { AgentOverview(store: store) }
+        if store.selection != "history" && store.search.isEmpty {
+            // The page already puts cardGap between its items; the rest makes up a section's gap.
+            AgentOverview(store: store).padding(.bottom, WorkspaceStyle.sectionGap - WorkspaceStyle.cardGap)
+            if store.connected && !store.project.isEmpty {
+                IssueSuggestions(store: store, project: store.project).padding(.bottom, WorkspaceStyle.sectionGap - WorkspaceStyle.cardGap)
+            }
+        }
         // Lists are derived once per body: these filters ran per mission before and dominated redraw cost.
         let history = store.selection == "history"
         let inScope = store.state.jobs.filter { store.project.isEmpty || $0.projectPath == store.project }
@@ -430,7 +435,9 @@ struct MissionPanel: View {
                 // Status and the controls sit on the middle of the title and its meta line together.
                 HStack(alignment: .center, spacing: Space.m) {
                     // The lead's mark sits before the title and meta together, the same for every lead.
-                    if let leadAgent { AgentMark(agent: leadAgent, size: MarkSize.list) }
+                    // The header starts as far in as the stop names, decisions and outcomes below, which take the same inset
+                    // beside their rows: the mark when there is one, else the title.
+                    if let leadAgent { AgentMark(agent: leadAgent, size: MarkSize.list).padding(.leading, WorkspaceStyle.rowTitleInset) }
                     VStack(alignment: .leading, spacing: Space.xs) {
                         // One line each, so cards side by side keep the same height whatever their titles.
                         Text(mission.title).font(Typeface.title).fadeTruncated().help(mission.title)
@@ -440,6 +447,7 @@ struct MissionPanel: View {
                             Text(" · " + meta)
                         }.font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fadeTruncated().help(mission.root)
                     }
+                    .padding(.leading, leadAgent == nil ? WorkspaceStyle.rowTitleInset : 0)
                     Spacer(minLength: WorkspaceStyle.rowSpacer)
                     StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: localizedCrewLabel(mission.state.capitalized), spins: mission.state == "active")
                     if mission.state != "done" { missionMenu }

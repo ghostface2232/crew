@@ -1076,6 +1076,26 @@ test('the live Overview has no endless animations during active work', async ({ 
     .map((animation) => (animation as CSSAnimation).animationName))).toEqual([]);
 });
 
+test('New Job and Welcome settle out when they close, as Settings does', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const leaves = async (open: () => Promise<void>, name: string) => {
+    await open();
+    const sheet = page.getByRole('dialog', { name });
+    await expect(sheet).toBeVisible();
+    await settle(page);
+    await page.keyboard.press('Escape');
+    // Still there, leaving, before it is gone.
+    await expect.poll(() => sheet.evaluate((dialog) => (dialog as HTMLElement).inert && dialog.getAnimations().some((animation) => animation.playState === 'running'))).toBe(true);
+    await expect(sheet).toHaveCount(0);
+  };
+  await leaves(() => page.getByRole('button', { name: 'New Job', exact: true }).click(), 'New Job');
+  await leaves(async () => {
+    await page.getByRole('button', { name: 'Search', exact: false }).first().click();
+    await page.keyboard.type('Welcome');
+    await page.keyboard.press('Enter');
+  }, 'Welcome to Crew');
+});
+
 test('entrances let go once played, so a mission\'s menu opens above the cards after it', async ({ page, request }) => {
   const data = fixture();
   data.missions.push({ ...data.missions[0], id: 'mission-2', title: 'Ship the next one', state: 'done', endedAt: NOW - 1000 });

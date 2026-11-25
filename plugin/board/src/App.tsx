@@ -67,7 +67,8 @@ export function App() {
   const [settings, setSettings] = useState<boolean | 'about'>(false);
   const update = useAppUpdate();
   /** Where a sheet grows from: the control that opened it, or nothing for a keyboard shortcut. */
-  const [dispatching, setDispatching] = useState<{ origin?: DOMRect; draft?: string } | null>(null);
+  const [dispatching, setDispatching] = useState<{ id: number; origin?: DOMRect; draft?: string } | null>(null);
+  const dispatches = useRef(0);
   const [palette, setPalette] = useState<{ origin?: DOMRect } | null>(null);
   const [welcome, setWelcome] = useState(false);
   const [detail, setDetail] = useState(detailFromHash);
@@ -176,13 +177,18 @@ export function App() {
   const [panel, panelLeaving] = useLinger(detail, PANEL_EXIT_MS);
   // Settings stay up while they settle out, as the panel does.
   const [shownSettings, settingsLeaving] = useLinger(settings === true ? 'open' : settings || '', SHEET_EXIT_MS);
+  // New Job and the welcome sheet too. Each New Job is its own sheet, so one opened while the last settles out is fresh.
+  const [shownDispatch, dispatchLeaving] = useLinger(dispatching ? String(dispatching.id) : '', SHEET_EXIT_MS);
+  const [keptDispatch, setKeptDispatch] = useState(dispatching);
+  if (dispatching && dispatching !== keptDispatch) setKeptDispatch(dispatching);
+  const [shownWelcome, welcomeLeaving] = useLinger(welcome ? 'open' : '', SHEET_EXIT_MS);
   /** After New Job, the job's own project, so the new job is in view, as the app goes there. */
   const openNewJob = (id: string, root?: string) => {
     if (root && (project !== root || page !== 'overview')) go({ project: root, page: 'overview' });
     show(id);
   };
   const newJob = useCallback((origin?: Element | null, draft?: string) => {
-    if (live) setDispatching({ origin: origin?.getBoundingClientRect(), draft });
+    if (live) setDispatching({ id: ++dispatches.current, origin: origin?.getBoundingClientRect(), draft });
   }, [live]);
   const openPalette = () => setPalette({ origin: searchButton.current?.getBoundingClientRect() });
   const openSettings = useCallback(() => {
@@ -379,10 +385,14 @@ export function App() {
             )}
           </main>
         </div>
-        {dispatching && (
-          <Dispatch state={state} project={project} origin={dispatching.origin} draft={dispatching.draft} openJob={openNewJob} close={() => setDispatching(null)} />
-        )}
-        {welcome && <Onboarding close={() => setWelcome(false)} />}
+        <LeavingContext value={dispatchLeaving}>
+          {shownDispatch && keptDispatch && (
+            <Dispatch key={shownDispatch} state={state} project={project} origin={keptDispatch.origin} draft={keptDispatch.draft} openJob={openNewJob} close={() => setDispatching(null)} />
+          )}
+        </LeavingContext>
+        <LeavingContext value={welcomeLeaving}>
+          {shownWelcome && <Onboarding close={() => setWelcome(false)} />}
+        </LeavingContext>
         {palette && (
           <Palette
             state={state}

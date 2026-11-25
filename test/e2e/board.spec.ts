@@ -292,6 +292,16 @@ test('choosing a language switches the board in place, so a browser tab stays si
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
 });
 
+test('a language change from another board preserves the open new job draft and its focus', async ({ page, request }) => {
+  await newJob(page);
+  const draft = page.getByRole('dialog').locator('textarea').first();
+  await draft.fill('Keep the open draft');
+  await request.post('/api/language', { data: { language: 'ko' } });
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ko');
+  await expect(draft).toHaveValue('Keep the open draft');
+  await expect(draft).toBeFocused();
+});
+
 test('repeated stops keep jobs on their original round while the remaining plan changes', async ({ page, request }) => {
   const data = fixture();
   data.missions[0].stages = ['implement', 'self-review', 'fix', 'cross-review', 'fix', 'polish', 'final'];
@@ -1327,6 +1337,72 @@ test('a preset is stored as it is picked, describes its models, and permits none
   await pick(select, 'None');
   await expect(page.getByText("Uses each agent's own model and effort settings.")).toBeVisible();
   await lastBody(request, '/api/preset').toEqual({ preset: null });
+});
+
+test('an open preset selector adopts changes made from another client', async ({ page, request }) => {
+  await openSettings(page, 'Model Presets');
+  const select = page.getByRole('combobox', { name: 'Model preset' });
+  await expect(select).toHaveText('Balanced');
+  await request.post('/api/preset', { data: { preset: 'economy' } });
+  await expect(select).toHaveText('Economy');
+  await pick(select, 'Balanced');
+  await lastBody(request, '/api/preset').toEqual({ preset: 'balanced' });
+});
+
+test('a delayed preset save response cannot replace a newer streamed preset', async ({ page, request }) => {
+  await openSettings(page, 'Model Presets');
+  const saved = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  await page.route('**/api/preset', async (route) => {
+    const response = await route.fetch();
+    saved.resolve();
+    await release.promise;
+    await route.fulfill({ response });
+  });
+  const select = page.getByRole('combobox', { name: 'Model preset' });
+  try {
+    await pick(select, 'Economy');
+    await saved.promise;
+    await request.post('/api/preset', { data: { preset: 'best' } });
+    // The following event on the same stream shows the newer preset arrived before the held response.
+    await request.post('/api/language', { data: { language: 'ko' } });
+    await expect(page.locator('html')).toHaveAttribute('lang', 'ko');
+    await request.post('/api/language', { data: { language: 'en' } });
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  } finally {
+    release.resolve();
+  }
+  await expect(select).toHaveText('Best');
+});
+
+test('an external preset event cannot make Settings skip a queued local selection', async ({ page, request }) => {
+  await openSettings(page, 'Model Presets');
+  const posted = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const submissions: string[] = [];
+  await page.route('**/api/preset', async (route) => {
+    submissions.push(route.request().postDataJSON().preset);
+    if (submissions.length !== 1) return route.continue();
+    posted.resolve();
+    await release.promise;
+    // This successful write is acknowledged before its stream update.
+    await route.fulfill({ json: { preset: 'economy' } });
+  });
+  const select = page.getByRole('combobox', { name: 'Model preset' });
+  try {
+    await pick(select, 'Economy');
+    await posted.promise;
+    await request.post('/api/preset', { data: { preset: 'best' } });
+    await request.post('/api/language', { data: { language: 'ko' } });
+    await expect(page.locator('html')).toHaveAttribute('lang', 'ko');
+    await request.post('/api/language', { data: { language: 'en' } });
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await pick(select, 'Best');
+  } finally {
+    release.resolve();
+  }
+  await expect.poll(() => submissions).toEqual(['economy', 'best']);
+  await expect(select).toHaveText('Best');
 });
 
 test('a preset that cannot be stored is undone, and one picked during a save is stored after it', async ({ page, request }) => {

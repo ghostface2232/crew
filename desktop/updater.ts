@@ -280,7 +280,7 @@ export class Updater {
         fs.writeFileSync(this.manifest, JSON.stringify({ version: release.version, sha256: release.sha256, ...page } satisfies Staged));
         this.set({ state: 'ready', latest: release.version, checkedAt: this.status.checkedAt, ...page });
       } catch (error) {
-        fs.rmSync(partial, { force: true });
+        try { fs.rmSync(partial, { force: true }); } catch { /* The next download retries cleanup. */ }
         this.set({ state: 'available', latest: release.version, checkedAt: this.status.checkedAt, ...page, error: t('Could not download {version}: {error}', { version: release.version, error: (error as Error).message }) });
       } finally {
         clearTimeout(timeout);

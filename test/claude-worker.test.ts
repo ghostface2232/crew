@@ -55,6 +55,7 @@ const fakeClaude = `
     const message = JSON.parse(line);
     if (message.type === 'control_request' && message.request.subtype === 'set_permission_mode') {
       modes.push(message.request.mode);
+      if (fs.existsSync(path.join(cwd, 'mode-silent'))) return;
       if (fs.existsSync(path.join(cwd, 'mode-error')) || (noAuto && message.request.mode === 'auto')) return send({ type: 'control_response', response: { subtype: 'error', request_id: message.request_id, error: 'Unsupported mode' } });
       if (!fs.existsSync(path.join(cwd, 'mode-ignore'))) current = message.request.mode;
       return send({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: { mode: message.request.mode } } });
@@ -311,6 +312,18 @@ test('Claude Code cancel stops an open turn without failure', async (t) => {
   assert.equal(h.events.done, undefined);
 });
 
+test('Claude Code cancellation also fences a reply waiting for the previous process to close', async (t) => {
+  const h = harness(t, 'first');
+  await h.adapter.start(h.ctl);
+  await h.report();
+  const releasing = h.adapter.release!(h.ctl);
+  const replying = h.adapter.reply(h.ctl, 'do not send this');
+  await h.adapter.cancel(h.ctl);
+  await Promise.all([releasing, replying]);
+  assert.equal((await h.adapter.probe!(h.ctl)).verdict, 'ended');
+  assert.equal(h.events.done.length, 1);
+});
+
 test('Claude Code shutdown drains an open process', async (t) => {
   const h = harness(t, 'hold');
   await h.adapter.start(h.ctl);
@@ -390,6 +403,23 @@ test('A turn whose manual mode Claude Code does not confirm never runs', async (
     const [message] = await h.event('fail');
     assert.match(String(message), marker === 'mode-error' ? /could not switch to default permissions: Unsupported mode/ : /started the turn in auto permissions, not default/);
     assert.equal(h.events.done.length, 1);
+  }
+});
+
+test('a silent Claude permission mode request fails without sending the queued turn', async (t) => {
+  const h = harness(t, 'first');
+  await h.adapter.start(h.ctl);
+  await h.report();
+  fs.writeFileSync(path.join(h.cwd, 'mode-silent'), '');
+  h.ctl.job.asksUser = true;
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    await h.adapter.reply(h.ctl, 'follow-up');
+    t.mock.timers.tick(30_001);
+    assert.match(String((await h.event('fail'))[0]), /did not confirm the switch to default permissions/);
+    assert.equal(h.events.done.length, 1);
+  } finally {
+    t.mock.timers.reset();
   }
 });
 

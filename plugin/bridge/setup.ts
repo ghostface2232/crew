@@ -33,20 +33,26 @@ const samePath = (a: string, b: string) => path.relative(a, b) === '';
 /** The marketplace Claude Code runs this build's plugin from. */
 const registeredRoot = () => (COPIED ? path.join(COPIES, `${VERSION}-${installed().build}`) : MARKETPLACE);
 
-export function run(bin: string, args: string[], timeout = 20_000): Promise<{ ok: boolean; out: string }> {
+export function run(bin: string, args: string[], timeout = 20_000): Promise<{ ok: boolean; out: string; missing?: true }> {
   const env = agentEnv();
   const command = agentCommand(bin, args, env);
   return new Promise((resolve) => {
     execTimed(command.bin, command.args ?? [], { env, shell: command.shell, timeout, windowsHide: true }, (err, stdout, stderr) => {
-      resolve({ ok: !err, out: (stdout || stderr || err?.message || '').trim() });
+      resolve({ ok: !err, out: (stdout || stderr || err?.message || '').trim(), ...((err as NodeJS.ErrnoException | null)?.code === 'ENOENT' ? { missing: true } : {}) });
     });
   });
 }
 
-async function claudeJSON<T>(args: string[]): Promise<T | null> {
+async function claudeList<T>(args: string[], key: keyof T): Promise<{ rows: T[] | null; out: string; missing?: true }> {
   const res = await run('claude', [...args, '--json'], 60_000);
-  if (!res.ok) return null;
-  try { return JSON.parse(res.out) as T; } catch { return null; }
+  if (!res.ok) return { ...res, rows: null };
+  try {
+    const rows: unknown = JSON.parse(res.out);
+    if (Array.isArray(rows) && rows.every((row) => row && typeof row[key] === 'string' && row[key].trim())) {
+      return { rows, out: res.out };
+    }
+  } catch { /* Report malformed output as a failed query. */ }
+  return { rows: null, out: 'Claude Code returned an invalid inventory.' };
 }
 
 type Marketplace = { name: string; path?: string };
@@ -150,7 +156,7 @@ export async function register(asked = false): Promise<Registration> {
   // even while another host fails. Complete, and older copies pruned, only once every host runs it: a host left on an
   // older copy still needs it, and the next start tries again.
   const complete = hosts.every((host) => host.ok && host.current);
-  if (PACKAGED && owner.ok && owner.current) {
+  if (PACKAGED && ((owner.ok && owner.current) || registered())) {
     fs.writeFileSync(RECORD, `${JSON.stringify({ root, version: VERSION, build: installed().build, complete }, null, 2)}\n`);
   }
   if (complete && COPIED) prunePlugins();
@@ -163,9 +169,10 @@ type HostRegistration = Registration & { current: boolean };
 
 /** Registers this copy's marketplace with Claude Code and installs or updates the plugin from it; null without Claude Code. */
 async function registerClaude(root: string): Promise<HostRegistration | null> {
-  const marketplaces = await claudeJSON<Marketplace[]>(['plugin', 'marketplace', 'list']);
-  if (!marketplaces) return null;
-  const current = marketplaces.find((entry) => entry.name === 'crew');
+  const marketplaces = await claudeList<Marketplace>(['plugin', 'marketplace', 'list'], 'name');
+  if (marketplaces.missing) return null;
+  if (!marketplaces.rows) return { ok: false, current: false, detail: `Could not list Claude Code marketplaces: ${lastLine(marketplaces.out)}` };
+  const current = marketplaces.rows.find((entry) => entry.name === 'crew');
   if (PACKAGED && current?.path && !samePath(current.path, root) && fromSource(current.path)) {
     return { ok: true, current: false, detail: `Registered from a source checkout (${current.path}); the app leaves it as it is.` };
   }
@@ -174,10 +181,11 @@ async function registerClaude(root: string): Promise<HostRegistration | null> {
     const added = await run('claude', ['plugin', 'marketplace', 'add', root], 60_000);
     if (!added.ok) return { ok: false, current: false, detail: `Could not register the marketplace: ${lastLine(added.out)}` };
   }
-  const plugins = await claudeJSON<InstalledPlugin[]>(['plugin', 'list']);
-  const plugin = plugins?.find((entry) => entry.id === 'crew@crew');
+  const plugins = await claudeList<InstalledPlugin>(['plugin', 'list'], 'id');
+  if (!plugins.rows) return { ok: false, current: false, detail: `Could not list Claude Code plugins: ${lastLine(plugins.out)}` };
+  const plugin = plugins.rows.find((entry) => entry.id === 'crew@crew');
   // A copy of another build with the same version has Claude Code read the plugin from the new folder too.
-  const moved = plugin?.readFromFolder !== undefined && !samePath(plugin.readFromFolder, path.join(root, 'plugin'));
+  const moved = plugin && (typeof plugin.readFromFolder !== 'string' || !plugin.readFromFolder || !samePath(plugin.readFromFolder, path.join(root, 'plugin')));
   const step = !plugin ? ['install', 'crew@crew'] : plugin.version !== VERSION || (COPIED && moved) ? ['update', 'crew@crew'] : null;
   if (step) {
     const res = await run('claude', ['plugin', ...step], 60_000);
@@ -197,8 +205,12 @@ const CODEX_DIR = path.join(os.homedir(), '.crew', 'codex');
  */
 async function registerCodex(root: string): Promise<HostRegistration | null> {
   const bin = loadConfig().codex.bin;
-  if (!(await run(bin, ['--version'])).ok) return null;
-  const current = (await codexMarketplaces(bin)).get('crew');
+  const version = await run(bin, ['--version']);
+  if (version.missing) return null;
+  if (!version.ok) return { ok: false, current: false, detail: `Could not check the Codex version: ${lastLine(version.out)}` };
+  const list = await run(bin, ['plugin', 'marketplace', 'list'], 60_000);
+  if (!list.ok) return { ok: false, current: false, detail: `Could not list Codex marketplaces: ${lastLine(list.out)}` };
+  const current = codexMarketplaces(list.out).get('crew');
   const marketplace = PACKAGED ? path.join(CODEX_DIR, 'marketplace') : MARKETPLACE;
   const other = current !== undefined && !sameFolder(current, marketplace);
   if (PACKAGED) {
@@ -223,9 +235,8 @@ async function registerCodex(root: string): Promise<HostRegistration | null> {
 const CODEX_TRUST = 'Codex runs its hooks only once trusted: open `/hooks` in a Codex session, press `t` to trust the Crew hooks, then start a new session. When Codex first asks to run a Crew tool, choose Always allow.';
 
 /** Codex's marketplaces by name, from `codex plugin marketplace list`: a header row, then name and root folder. */
-async function codexMarketplaces(bin: string): Promise<Map<string, string>> {
-  const res = await run(bin, ['plugin', 'marketplace', 'list'], 60_000);
-  const rows = res.ok ? res.out.split('\n').slice(1) : [];
+function codexMarketplaces(output: string): Map<string, string> {
+  const rows = output.split('\n').slice(1);
   return new Map(rows.map((row) => /^(\S+)\s+(.+?)\s*$/.exec(row)).filter((m) => m !== null).map((m) => [m[1], m[2]]));
 }
 
@@ -249,11 +260,15 @@ const fromSource = (folder: string) => fs.existsSync(folder) && !fs.existsSync(p
  * This was seen right after a registration, likely another Claude Code process starting meanwhile and writing back the
  * marketplace it had loaded.
  */
-export async function registrationMoved(): Promise<boolean> {
+export async function registrationMoved(): Promise<boolean | null> {
   if (!COPIED) return false;
-  const plugin = (await claudeJSON<InstalledPlugin[]>(['plugin', 'list']))?.find((entry) => entry.id === 'crew@crew');
+  const { rows, missing } = await claudeList<InstalledPlugin>(['plugin', 'list'], 'id');
+  if (missing) return false;
+  if (!rows) return null;
+  const plugin = rows.find((entry) => entry.id === 'crew@crew');
   // A plugin the user removed stays removed.
-  if (!plugin?.readFromFolder) return false;
+  if (!plugin) return false;
+  if (typeof plugin.readFromFolder !== 'string' || !path.isAbsolute(plugin.readFromFolder)) return null;
   return !samePath(plugin.readFromFolder, path.join(registeredRoot(), 'plugin')) && !fromSource(path.resolve(plugin.readFromFolder, '..'));
 }
 
@@ -440,7 +455,7 @@ export async function checks(): Promise<SetupItem[]> {
   const config = loadConfig();
   const [claude, plugins, codex, agy] = await Promise.all([
     run('claude', ['--version']),
-    claudeJSON<InstalledPlugin[]>(['plugin', 'list']),
+    claudeList<InstalledPlugin>(['plugin', 'list'], 'id').then((result) => result.rows),
     run(config.codex.bin, ['--version']),
     run(config.antigravity.bin, ['--version']),
   ]);

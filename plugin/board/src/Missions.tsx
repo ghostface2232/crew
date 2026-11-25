@@ -12,7 +12,7 @@ import {
   agentSummary, elapsed, jobLabel, jobRole, missionJobStep, missionLooksFinished, missionStep, missionStopPosition,
   missionStops, NAMES, pullIsStale, pullStatuses, roleLabel, sessionAgent,
 } from './model.ts';
-import { ActionStatus, AgentMark, Chip, Collapse, Elapsed, Icon, Menu, StatusIcon, sameItems, useAction, useFade, useClock } from './ui.tsx';
+import { ActionStatus, AgentMark, Chip, Collapse, Elapsed, Icon, Menu, StatusIcon, sameItems, useAction, useFade, useClock, useLanguage } from './ui.tsx';
 import { t, translated } from './i18n.ts';
 
 export const jobStatusState = (job: BoardJob) => (job.stalled ? 'stalled' : job.state);
@@ -34,6 +34,7 @@ export const JobRow = memo(function JobRow({ job, selected, openJob, kind, index
   kind?: string;
   index?: number;
 }) {
+  useLanguage();
   const active = job.endedAt == null;
   const detail = [
     kind ?? (job.debate ? t('Debate') : job.ask ? t('Question') : null),
@@ -139,6 +140,7 @@ export function SessionWorkflow({ run, agents }: { run: ClaudeSession['workflows
 
 /** A lead session as a row like a job's, opening its own detail panel. */
 export const SessionRow = memo(function SessionRow({ session, selected, openSession }: { session: ClaudeSession; selected?: boolean; openSession: (id: string) => void }) {
+  useLanguage();
   // The mark names the agent, so the detail line says only what the session is doing.
   const detail = [session.waitingFor ?? (session.state === 'idle' ? null : session.phase), session.inTool ? t('Running a tool') : null, agentSummary(session)]
     .filter(Boolean).join(' · ');
@@ -170,6 +172,7 @@ export const SessionRow = memo(function SessionRow({ session, selected, openSess
 let measure: CanvasRenderingContext2D | null | undefined;
 
 export const MissionTrack = memo(function MissionTrack({ mission }: { mission: Mission }) {
+  useLanguage();
   const stops = missionStops(mission);
   const at = missionStep(mission);
   const active = mission.state === 'active';
@@ -312,6 +315,7 @@ export const MissionPanel = memo(function MissionPanel({
   openSession: (id: string) => void;
   index?: number;
 }) {
+  useLanguage();
   const [expanded, setExpandedState] = useState(() => expandedMissions.get(mission.id) ?? mission.state === 'active');
   const setExpanded = (value: boolean) => {
     expandedMissions.set(mission.id, value);

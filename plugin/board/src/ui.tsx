@@ -7,7 +7,7 @@ import {
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import { elapsed } from './model.ts';
-import { t } from './i18n.ts';
+import { language, onLanguageChange, t } from './i18n.ts';
 import { actions, drafts } from './api.ts';
 import claudeMark from './icons/ClaudeCode.svg';
 import codexMark from './icons/Codex.svg';
@@ -35,6 +35,9 @@ export const PANEL_EXIT_MS = 300;
 export const SHEET_EXIT_MS = 220;
 /** True while a side panel or a sheet is still on screen only to play its exit; the Dialog inside reads it. */
 export const LeavingContext = createContext(false);
+
+/** Memoized views subscribe here so translations update without remounting their state. */
+export const useLanguage = () => useSyncExternalStore(onLanguageChange, () => language);
 /**
  * Keeps showing a value for `ms` after it is cleared, so what it names can animate out in place instead of vanishing. A new value
  * replaces it at once. Returns what to show and whether it is only lingering.

@@ -2073,6 +2073,7 @@ test('a follow-up can first bring the worker up to date with the lead, without c
     ctl.done('first');
   });
   const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  const ancestor = job.worktree!.base;
   const head = commit('lead.js', 'l\n');
 
   let told = '';
@@ -2089,6 +2090,11 @@ test('a follow-up can first bring the worker up to date with the lead, without c
   // The lead's file is in the worktree but is not the worker's change.
   assert.deepEqual(job.result!.files, ['worker.js']);
   assert.deepEqual(job.rounds!.map((round) => [round.turn, round.files]), [[1, ['worker.js']], [2, ['worker.js']]]);
+
+  await jobs.reply(job.id, { message: 'sync an older commit', sync: ancestor });
+  await settled(jobs, job);
+  assert.equal(job.worktree!.base, head);
+  assert.deepEqual(job.result!.files, ['worker.js']);
 
   // A merge that conflicts leaves the base and result alone but still delivers the message.
   const conflicting = commit('worker.js', 'lead version\n');

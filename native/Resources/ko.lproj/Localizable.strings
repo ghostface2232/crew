@@ -533,6 +533,8 @@
 "Could not back up the installed Crew app." = "설치된 Crew 앱을 백업하지 못했어요.";
 "Could not move the updated Crew app into place." = "업데이트된 Crew 앱을 설치 위치로 옮기지 못했어요.";
 "The updated Crew app could not open." = "업데이트된 Crew 앱을 열지 못했어요.";
+"Could not stop the updated Crew app; the previous app is at %@." = "업데이트된 Crew 앱을 종료하지 못했어요. 이전 Crew 앱은 %@에 있어요.";
+"The updated Crew app did not finish starting." = "업데이트된 Crew 앱이 시작을 완료하지 못했어요.";
 "Could not install the update: %@" = "업데이트를 설치하지 못했어요. %@";
 "GitHub answered %lld." = "GitHub에서 상태 코드 %lld 응답이 왔어요.";
 "Could not check for updates: %@" = "업데이트를 확인하지 못했어요: %@";

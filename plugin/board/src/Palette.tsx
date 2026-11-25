@@ -7,7 +7,7 @@ import {
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { Snapshot } from './types.ts';
 import { jobLabel, missionStep, missionStops, NAMES, projectOf, roleLabel, jobRole, sessionAgent } from './model.ts';
-import { AgentMark, Chip, EASE_IN_OUT, EASE_OUT, Icon, reducedMotion, Elapsed, tNodes, useClock, WordReveal } from './ui.tsx';
+import { AgentMark, Chip, EASE_IN_OUT, EASE_OUT, Icon, reducedMotion, Elapsed, tNodes, useClock, useLanguage, WordReveal } from './ui.tsx';
 import { jobStatusState, missionStateLabel, sessionStateLabel } from './Missions.tsx';
 import { t, translated } from './i18n.ts';
 import { notificationPermission, notificationsWanted, requestNotifications, setNotificationsWanted } from './notify.ts';
@@ -83,6 +83,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
   const { jobs, claude, missions, roleInfo } = state;
   const notifyState = useClock(notificationPermission);
   const notifyOn = useClock(() => notifyState === 'granted' && notificationsWanted(), notifyState === 'granted');
+  const locale = useLanguage();
   const entries = useMemo(() => {
     const list: Entry[] = [];
     list.push({
@@ -179,7 +180,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
       });
     }
     return list;
-  }, [jobs, claude, missions, roleInfo, names, projects, actions, notifyState, notifyOn]);
+  }, [jobs, claude, missions, roleInfo, names, projects, actions, notifyState, notifyOn, locale]);
   const shown = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (words.length) return entries.filter((entry) =>

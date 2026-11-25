@@ -552,7 +552,7 @@ async function installUpdate() {
       updater.stoppingDaemon();
       let accepted = false;
       try {
-        await api('POST', '/api/shutdown', { ifIdle: true });
+        await api('POST', '/api/shutdown', { ifIdle: true, expectedPid: daemon.pid });
         accepted = true;
         // It saves jobs and missions, then exits; the process going is what counts, not a quiet health check.
         for (let waited = 0; alive(daemon.pid); waited += 200) {

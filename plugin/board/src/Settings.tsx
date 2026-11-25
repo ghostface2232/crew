@@ -202,7 +202,7 @@ function TypedSetting({ label, value, placeholder, onCommit }: { label: string; 
 }
 
 /** `initial` opens a page at once, as the sidebar's failed update opens About. */
-export function Settings({ state, update, close, initial }: { state: Snapshot; update: AppUpdate | null; close: () => void; initial?: 'about' | 'language' }) {
+export function Settings({ state, update, close, initial }: { state: Snapshot; update: AppUpdate | null; close: () => void; initial?: 'about' }) {
   const [pane, setPane] = useState<Pane>(initial ?? 'build');
   // On a phone the sidebar is a list of its own, and a page replaces it; wider, both show.
   const [view, setView] = useState<'list' | 'page'>(initial ? 'page' : 'list');
@@ -234,10 +234,15 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   // none then, and the holders it had then are what that means until the daemon has answered.
   const resolved = resolveDraft(info, roles, opened.roles);
   const storedPreset = useStored<PresetName | null>(() => state.preset ?? null, Object.is, async (submitted) => {
+    const revision = board.getPresetRevision();
     const result = await request<Pick<Snapshot, 'preset' | 'presets'>>('/api/preset', { preset: submitted });
-    board.receive('preset', result);
+    // The stream may already have delivered this save and a newer one. Use the reply when there was no stream update.
+    if (board.getPresetRevision() === revision) board.receive('preset', result);
     return result.preset ?? null;
   });
+  useEffect(() => {
+    storedPreset.adopt(state.preset ?? null);
+  }, [state.preset, storedPreset.busy]);
   const preset = storedPreset.value;
   const selectedPreset = preset ? state.presets?.[preset] : undefined;
   const [scope, setScope] = useState('');
@@ -379,8 +384,6 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   // Stored as it is picked; the board then switches to the language the daemon reports (followSetting in i18n.ts).
   const [languageStatus, setLanguageStatus] = useState('');
   const chooseLanguage = async (language: Language | null) => {
-    // The new language draws Settings again, which would drop instructions still being edited.
-    if (text !== saved && !(await ask(t('Discard the unsaved changes to these instructions?'), t('Discard')))) return;
     setLanguageStatus('');
     try {
       board.receive('language', await request<Pick<Snapshot, 'language'>>('/api/language', { language }));

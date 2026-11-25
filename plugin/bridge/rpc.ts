@@ -58,17 +58,29 @@ export class RpcPeer {
     return !this.closed;
   }
 
-  request<T = any>(method: string, params?: unknown, timeoutMs?: number): Promise<T> {
+  request<T = any>(method: string, params?: unknown, timeoutMs?: number, signal?: AbortSignal): Promise<T> {
     if (this.closed) return Promise.reject(new Error('process is not running'));
+    if (signal?.aborted) return Promise.reject(signal.reason);
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       const timer = timeoutMs === undefined ? undefined : setTimeout(() => {
         this.pending.delete(id);
+        cleanup();
         reject(new RpcTimeoutError(`${method} timed out after ${timeoutMs / 1000}s`));
       }, timeoutMs);
+      const cleanup = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+      };
+      const abort = () => {
+        this.pending.delete(id);
+        cleanup();
+        reject(signal?.reason);
+      };
+      signal?.addEventListener('abort', abort, { once: true });
       this.pending.set(id, {
-        resolve: (result) => { clearTimeout(timer); resolve(result); },
-        reject: (err) => { clearTimeout(timer); reject(err); },
+        resolve: (result) => { cleanup(); resolve(result); },
+        reject: (err) => { cleanup(); reject(err); },
       });
       this.write({ jsonrpc: '2.0', id, method, params });
     });
@@ -208,7 +220,22 @@ export function execTimed(bin: string, args: readonly string[], options: TimedOp
   };
   // A command that cannot start (ENOENT) keeps its code, as execFile's error does.
   child.on('error', finish);
-  child.on('close', (code, signal) => finish(code === 0 ? null : Object.assign(new Error(`Command failed: ${bin} ${args.join(' ')}`.trim()), { code, signal })));
+  child.on('close', (code, signal) => {
+    // Descendants that closed their copy of the pipes can stay in the group after its leader exits.
+    if (killer && group && child.pid !== undefined) {
+      try {
+        process.kill(-child.pid, 0);
+        killer.ref();
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EPERM') {
+          killer.ref();
+          return;
+        }
+      }
+    }
+    finish(code === 0 ? null : Object.assign(new Error(`Command failed: ${bin} ${args.join(' ')}`.trim()), { code, signal }));
+  });
   const timer = setTimeout(() => {
     timedOut = true;
     stop();

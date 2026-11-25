@@ -185,7 +185,8 @@ private final class FeedProtocol: URLProtocol, @unchecked Sendable {
         #expect(updater.phase == .ready)
         #expect(updater.installing())
         do {
-            _ = try AppUpdater.handOver(archive: archive, version: "0.3.0", installed: bundle.bundleURL, processID: 0, result: updater.failureReport)
+            _ = try AppUpdater.handOver(archive: archive, version: "0.3.0", installed: bundle.bundleURL, processID: 0,
+                                      result: updater.failureReport, home: home, running: .nullDevice)
             Issue.record("An invalid archive must not start the helper")
         } catch let error as AppUpdater.InvalidArchive {
             updater.discard(error.localizedDescription)
@@ -233,7 +234,61 @@ private final class FeedProtocol: URLProtocol, @unchecked Sendable {
         #expect(try codesign(AppUpdater.verificationArguments(requirement: Self.release), file) != 0)
     }
 
-    @Test(arguments: ["success", "open-failure", "leftover-backup", "quit-timeout", "changed-staged", "wrong-signer"]) func swapKeepsTheOriginalOnFailure(scenario: String) throws {
+    @Test func bundleLaunchGateAdmitsOnlyTheCurrentReplacementUntilRollbackCompletes() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "crew-gate-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let installed = directory.appending(path: "Crew.app")
+        let lock = try BundleLaunchLock(installed: installed, directory: directory)
+        let otherBundle = try BundleLaunchLock(installed: directory.appending(path: "Other.app"), directory: directory)
+        let home = directory.appending(path: "profile")
+        let otherHome = directory.appending(path: "other-profile")
+        let work = directory.appending(path: "Crew-update-\(UUID().uuidString)")
+        let otherWork = directory.appending(path: "Crew-update-\(UUID().uuidString)")
+        let oldLease = try lock.admit(home: home, work: nil)
+        let secondLease = try lock.admit(home: otherHome, work: nil)
+        let old = try #require(oldLease)
+        let secondProfile = try #require(secondLease)
+        do {
+            let unexpectedGate = try lock.prepareHandover(home: home, work: work, running: old)
+            try unexpectedGate.close()
+            Issue.record("An update cannot move the bundle with another profile using it")
+        } catch is CrewFailure {}
+        try secondProfile.close()
+        let gate = try lock.prepareHandover(home: home, work: work, running: old)
+        try old.close()
+        #expect(try lock.admit(home: home, work: nil) == nil)
+        #expect(try lock.admit(home: otherHome, work: nil) == nil)
+        #expect(try lock.admit(home: home, work: otherWork) == nil)
+        #expect(try lock.admit(home: otherHome, work: work) == nil)
+        let other = try otherBundle.admit(home: home, work: nil)
+        try #require(other).close()
+        let admitted = try lock.admit(home: home, work: work)
+        let candidate = try #require(admitted)
+        try candidate.close()
+        #expect(try lock.admit(home: home, work: nil) == nil)
+        try gate.close()
+        #expect(try lock.admit(home: home, work: work) == nil)
+        let restored = try lock.admit(home: home, work: nil)
+        try #require(restored).close()
+    }
+
+    @Test(arguments: [false, true]) func readinessCannotUndoAnExpiredStartup(expired: Bool) throws {
+        let work = AppUpdater.handoverTempDirectory.resolvingSymlinksInPath().appending(path: "Crew-update-\(UUID().uuidString)")
+        let pending = work.appending(path: "pending"), ready = work.appending(path: "ready")
+        try FileManager.default.createDirectory(at: pending, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: work) }
+        let arguments = ["Crew", "--update-startup", work.path]
+        #expect(AppUpdater.startupDirectory(arguments: arguments)?.path == work.path)
+        #expect(AppUpdater.startupDirectory(arguments: ["Crew", "--updated"]) == nil)
+        #expect(AppUpdater.startupDirectory(arguments: arguments, temp: work) == nil)
+        try AppUpdater.recordStartup(in: work)
+        #expect(try String(contentsOf: work.appending(path: "pid"), encoding: .utf8) == String(ProcessInfo.processInfo.processIdentifier))
+        if expired { try FileManager.default.moveItem(at: pending, to: work.appending(path: "expired")) }
+        #expect(AppUpdater.markStartupReady(in: work) == !expired)
+        #expect(FileManager.default.fileExists(atPath: ready.path) == !expired)
+    }
+
+    @Test(arguments: ["success", "open-failure", "exits-unready", "start-timeout", "start-timeout-no-pid", "leftover-backup", "quit-timeout", "changed-staged", "wrong-signer"]) func swapKeepsTheOriginalOnFailure(scenario: String) throws {
         let home = FileManager.default.temporaryDirectory.appending(path: "crew-swap-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: home) }
         let target = home.appending(path: "Crew.app"), staged = home.appending(path: "staged.app")
@@ -243,6 +298,7 @@ private final class FeedProtocol: URLProtocol, @unchecked Sendable {
         for directory in [target, staged, work, commands] {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
+        try FileManager.default.createDirectory(at: work.appending(path: "pending"), withIntermediateDirectories: false)
         let version = "Contents/Resources/version"
         for (app, value) in [(target, "old"), (staged, "new")] {
             try FileManager.default.createDirectory(at: app.appending(path: "Contents/Resources"), withIntermediateDirectories: true)
@@ -265,10 +321,31 @@ private final class FeedProtocol: URLProtocol, @unchecked Sendable {
             "open": """
             #!/bin/sh
             printf '%s\\n' "$*" >> "$OPEN_LOG"
-            if [ "$SCENARIO" = open-failure ] && [ "$3" = --updated ]; then exit 1; fi
-            exit 0
+            while [ "$1" = --env ]; do shift 2; done
+            [ "$2" = -W ] || exit 0
+            shift 2
+            while [ "$1" = --env ]; do shift 2; done
+            [ "$3" = --update-startup ] || exit 1
+            [ "$SCENARIO" != open-failure ] || exit 1
+            [ "$SCENARIO" != exits-unready ] || exit 0
+            case "$SCENARIO" in
+                start-timeout*)
+                    "$CANDIDATE" --update-startup "$4" &
+                    wait "$!"
+                    exit 0 ;;
+            esac
+            set -- "$4" "$1".previous.*/Crew.app/Contents/Resources/version
+            [ "$(cat "$2")" = old ] || exit 1
+            mv "$1/pending" "$1/ready"
             """,
-            "sleep": "#!/bin/sh\nexit 0\n",
+            "sleep": "#!/bin/sh\ncase \"$SCENARIO\" in start-timeout*) /bin/sleep .005 ;; esac\n",
+            "candidate": """
+            #!/bin/sh
+            if [ "$SCENARIO" != start-timeout-no-pid ]; then echo "$$" > "$2/pid"; fi
+            echo "$$" > "$CANDIDATE_PID"
+            i=0
+            while [ "$i" -lt 500 ]; do /bin/sleep .01; i=$((i + 1)); done
+            """,
         ]
         for (name, text) in scripts {
             let file = commands.appending(path: name)
@@ -281,9 +358,26 @@ private final class FeedProtocol: URLProtocol, @unchecked Sendable {
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         let pid = scenario == "quit-timeout" ? String(ProcessInfo.processInfo.processIdentifier) : "2147483647"
         process.arguments = [script.path, pid, target.path, staged.path, work.path, result.path] + verification
-        process.environment = ["PATH": "\(commands.path):/usr/bin:/bin", "SCENARIO": scenario, "OPEN_LOG": home.appending(path: "open.log").path]
+        process.environment = ["PATH": "\(commands.path):/usr/bin:/bin", "SCENARIO": scenario, "OPEN_LOG": home.appending(path: "open.log").path,
+                               "CANDIDATE": commands.appending(path: "candidate").path, "CANDIDATE_PID": home.appending(path: "candidate.pid").path,
+                               "CREW_HOME": home.path, "CREW_PORT": "59321"]
         try process.run()
         process.waitUntilExit()
+        if scenario == "start-timeout-no-pid" {
+            let pidText = try String(contentsOf: home.appending(path: "candidate.pid"), encoding: .utf8)
+            let candidate = try #require(Int32(pidText.trimmingCharacters(in: .whitespacesAndNewlines)))
+            defer { kill(candidate, SIGTERM) }
+            #expect(kill(candidate, 0) == 0)
+            #expect(process.terminationStatus == 1)
+            #expect(try String(contentsOf: target.appending(path: version), encoding: .utf8) == "new")
+            let backups = try FileManager.default.contentsOfDirectory(atPath: home.path).filter { $0.hasPrefix("Crew.app.previous.") }
+            let backup = try #require(backups.first)
+            #expect(backups.count == 1)
+            #expect(try String(contentsOf: home.appending(path: backup).appending(path: "Crew.app/\(version)"), encoding: .utf8) == "old")
+            #expect(try String(contentsOf: result, encoding: .utf8).contains("Could not stop the updated Crew app"))
+            #expect(try String(contentsOf: home.appending(path: "open.log"), encoding: .utf8).split(separator: "\n").count == 1)
+            return
+        }
         // Something already at the old backup name is not this run's: it neither stops the swap nor is touched by it.
         let succeeds = scenario == "success" || scenario == "leftover-backup"
         #expect(process.terminationStatus == (succeeds ? 0 : 1))
@@ -301,12 +395,21 @@ private final class FeedProtocol: URLProtocol, @unchecked Sendable {
         } else {
             let reason = try String(contentsOf: result, encoding: .utf8)
             #expect(reason.split(separator: "\n").count == 1)
+            if ["open-failure", "exits-unready", "start-timeout"].contains(scenario) {
+                #expect(reason == "The updated Crew app did not finish starting.\n")
+            }
+            if scenario == "start-timeout" {
+                let pidText = try String(contentsOf: home.appending(path: "candidate.pid"), encoding: .utf8)
+                let candidate = try #require(Int32(pidText.trimmingCharacters(in: .whitespacesAndNewlines)))
+                #expect(kill(candidate, 0) != 0 && errno == ESRCH)
+            }
             if scenario == "quit-timeout" { #expect(reason.contains("did not quit")) }
             if scenario == "changed-staged" || scenario == "wrong-signer" { #expect(reason.contains("verify")) }
         }
         if scenario != "quit-timeout" {
             let opened = try String(contentsOf: home.appending(path: "open.log"), encoding: .utf8)
-            #expect(opened.split(separator: "\n").count == (scenario == "open-failure" ? 2 : 1))
+            #expect(opened.split(separator: "\n").allSatisfy { $0.contains("--env CREW_HOME=\(home.path)") && $0.contains("--env CREW_PORT=59321") })
+            #expect(opened.split(separator: "\n").count == (["open-failure", "exits-unready", "start-timeout"].contains(scenario) ? 2 : 1))
         }
     }
 }

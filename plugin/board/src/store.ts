@@ -92,7 +92,11 @@ export class BoardStore {
       cancel();
     };
   };
+  private presetRevision = 0;
+  getPresetRevision = () => this.presetRevision;
+
   private update(patch: Partial<Snapshot>) {
+    if ('preset' in patch) this.presetRevision++;
     this.snapshot = { ...this.snapshot, ...patch };
     if (patch.connection !== undefined) this.notify();
     else if (this.listeners.size && !this.cancelNotification) this.scheduleNotification();

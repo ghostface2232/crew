@@ -14,7 +14,7 @@ import type { BoardJob, CrewEvent, Snapshot } from './types.ts';
 import { actions, drafts, request } from './api.ts';
 import { board, mergeEvents } from './store.ts';
 import { elapsed, evidenceTurn, jobLabel, jobRole, MAX_COMPARED, NAMES, orderEvidence, projectOf, roleLabel, sessionAgent } from './model.ts';
-import { ActionStatus, CloseButton, CopyButton, CopyMenu, Dialog, Icon, Chip, useAction, useDraft, Elapsed, useStableItems } from './ui.tsx';
+import { ActionStatus, CloseButton, CopyButton, CopyMenu, Dialog, Icon, Chip, useAction, useDraft, Elapsed, useLanguage, useStableItems } from './ui.tsx';
 import { ReportText as RenderReport } from './Report.ts';
 import { debatePoints, stanceCounts } from './debate.ts';
 import type { Stance } from './debate.ts';
@@ -591,6 +591,7 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
   streamLog: CrewEvent[];
   close: () => void;
 } & Pick<Snapshot, 'agents' | 'roleInfo' | 'revision' | 'connection'>) {
+  useLanguage();
   const [detail, setDetail] = useState<BoardJob | null>(null);
   const [log, setLog] = useState<CrewEvent[]>([]);
   const [error, setError] = useState('');
@@ -924,6 +925,7 @@ function DetailPanel({ label, close, chip, title, subtitle, children }: {
 
 /** A Claude session's details, as the app shows them: what it waits on, its facts and missions, and how to resume it. */
 export const SessionDrawer = memo(function SessionDrawer({ id, state, close }: { id: string; state: Snapshot; close: () => void }) {
+  useLanguage();
   const session = state.claude.find((item) => item.id === id);
   const missions = state.missions.filter((mission) => mission.owner === id).sort((a, b) => b.createdAt - a.createdAt);
   const status = session && (session.stalled ? 'stalled' : session.state);

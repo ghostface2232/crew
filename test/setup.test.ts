@@ -150,7 +150,7 @@ test('packaged startup under CREW_HOME leaves the user registration and command 
   const profile = fs.mkdtempSync(path.join(home, 'profile-'));
   const calls = path.join(profile, 'calls');
   writeFakeBin(path.join(profile, 'claude'), `require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2)) + '\\n'); console.log('[]');`);
-  // Registration also registers with Codex where it is installed; a missing Codex keeps the user's own out of it.
+  // A failing Codex probe keeps the user's own configuration out of the test.
   writeFakeBin(path.join(profile, 'codex'), 'process.exit(1);');
   const originalPath = process.env.PATH;
   process.env.PATH = profile + path.delimiter + originalPath;
@@ -231,11 +231,14 @@ test('a built copy registers with Codex, records it as complete only when both h
   const calls = path.join(profile, 'calls');
   const marketplaces = path.join(profile, 'marketplaces');
   const failAdd = path.join(profile, 'fail-add');
-  const noClaude = path.join(profile, 'no-claude');
+  const failClaude = path.join(profile, 'fail-claude');
+  const malformedClaude = path.join(profile, 'malformed-claude');
+  const failVersion = path.join(profile, 'fail-version');
   const log = `require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(1)) + '\\n');`;
-  writeFakeBin(path.join(profile, 'claude'), `${log} if (require('node:fs').existsSync(${JSON.stringify(noClaude)})) process.exit(1); console.log('[]');`);
+  writeFakeBin(path.join(profile, 'claude'), `${log} if (require('node:fs').existsSync(${JSON.stringify(failClaude)})) { console.error('temporary lookup failure'); process.exit(1); } console.log(require('node:fs').existsSync(${JSON.stringify(malformedClaude)}) ? '[{}]' : '[]');`);
   writeFakeBin(path.join(profile, 'codex'), `${log}
     const fs = require('node:fs'); const args = process.argv.slice(2).join(' ');
+    if (args === '--version' && fs.existsSync(${JSON.stringify(failVersion)})) { console.error('temporary version failure'); process.exit(1); }
     if (args === 'plugin marketplace list') console.log('MARKETPLACE  ROOT\\n' + (fs.existsSync(${JSON.stringify(marketplaces)}) ? fs.readFileSync(${JSON.stringify(marketplaces)}, 'utf8') : ''));
     if (args === 'plugin add crew@crew' && fs.existsSync(${JSON.stringify(failAdd)})) { console.error('no space left'); process.exit(1); }`);
   const originalPath = process.env.PATH;
@@ -308,12 +311,40 @@ test('a built copy registers with Codex, records it as complete only when both h
   assert.equal((await register(true)).ok, true);
   assert.deepEqual(codexCalls().filter((call) => /remove|add/.test(call)), ['plugin marketplace remove crew', `plugin marketplace add ${ours}`, 'plugin add crew@crew']);
 
+  // A failed query is different from an agent that is absent. Keep earlier copies until both can be checked.
+  const oldCopy = path.join(home, 'plugins', 'earlier-test-build');
+  if (process.platform === 'win32') fs.mkdirSync(oldCopy, { recursive: true });
+  fs.writeFileSync(failClaude, '');
+  const claudeUnavailable = await register(true);
+  assert.equal(claudeUnavailable.ok, false);
+  assert.match(claudeUnavailable.detail, /Could not list Claude Code marketplaces: temporary lookup failure/);
+  assert.equal(complete(), false);
+  if (process.platform === 'win32') assert.ok(fs.existsSync(oldCopy));
+  fs.rmSync(failClaude);
+  fs.writeFileSync(malformedClaude, '');
+  assert.match((await register(true)).detail, /Claude Code returned an invalid inventory/);
+  assert.equal(complete(), false);
+  if (process.platform === 'win32') assert.ok(fs.existsSync(oldCopy));
+  fs.rmSync(malformedClaude);
+  fs.writeFileSync(failVersion, '');
+  const codexUnavailable = await register(true);
+  assert.equal(codexUnavailable.ok, false);
+  assert.match(codexUnavailable.detail, /Could not check the Codex version: temporary version failure/);
+  assert.equal(complete(), false);
+  if (process.platform === 'win32') assert.ok(fs.existsSync(oldCopy));
+  fs.rmSync(failVersion);
+
   // Without Claude Code, a Codex registration is a registration: recorded, with the command.
   fs.rmSync(record);
   fs.rmSync(marketplaces);
   fs.rmSync(path.join(profile, '.local'), { recursive: true });
-  fs.writeFileSync(noClaude, '');
-  const codexOnly = await register(true);
+  fs.rmSync(path.join(profile, process.platform === 'win32' ? 'claude.cmd' : 'claude'));
+  const appData = process.env.APPDATA;
+  delete process.env.APPDATA;
+  process.env.PATH = profile;
+  const codexOnly = await register(true).finally(() => {
+    if (appData !== undefined) process.env.APPDATA = appData;
+  });
   assert.equal(codexOnly.ok, true);
   assert.match(codexOnly.detail, /^Claude Code was not found\. Codex: Installed in Codex\./);
   assert.ok(fs.existsSync(record));

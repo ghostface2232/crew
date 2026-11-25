@@ -10,7 +10,7 @@ import type { FluentIcon } from '@fluentui/react-icons';
 import { board } from './store.ts';
 import { formatDate, longDay } from './dates.ts';
 import { detailFromFragment, isNewJobKey, knownProjects, projectNames, projectOf, searchShortcut } from './model.ts';
-import { AskHost, ClockProvider, CopyMenu, Icon, tNodes, LeavingContext, PANEL_EXIT_MS, RollingNumber, SHEET_EXIT_MS, useClock, useLinger, useStableItems } from './ui.tsx';
+import { AskHost, ClockProvider, CopyMenu, Icon, tNodes, LeavingContext, PANEL_EXIT_MS, RollingNumber, SHEET_EXIT_MS, useClock, useLanguage, useLinger, useStableItems } from './ui.tsx';
 import appIcon from './icons/CrewAppIcon.png';
 import { Activity, History, Workspace } from './Overview.tsx';
 import { NeedsYou } from './NeedsYou.tsx';
@@ -22,7 +22,7 @@ import { Onboarding } from './Onboarding.tsx';
 import { NavList, ProjectPeek } from './Shell.tsx';
 import { Notifier } from './notify.ts';
 import { desktop, useAppUpdate } from './desktop.ts';
-import { followSetting, language, onLanguageChange, t, translated } from './i18n.ts';
+import { followSetting, t, translated } from './i18n.ts';
 
 export type Page = 'overview' | 'needs' | 'activity' | 'history';
 const GridNavIcon = bundleIcon(GridFilled, GridRegular);
@@ -57,17 +57,10 @@ const typing = (target: EventTarget | null) =>
 
 export function App() {
   const state = useSyncExternalStore(board.subscribe, board.getSnapshot);
-  const shown = useSyncExternalStore(onLanguageChange, () => language);
+  const shown = useLanguage();
   const search = searchShortcut(navigator.platform);
   const [selection, setSelection] = useState(storedSelection);
-  const [settings, setSettings] = useState<boolean | 'about' | 'language'>(false);
-  // A change of language draws everything below again (the key on ClockProvider), so Settings, if open, comes back on
-  // its Language page, where the change was most likely made.
-  const [drawnIn, setDrawnIn] = useState(shown);
-  if (drawnIn !== shown) {
-    setDrawnIn(shown);
-    if (settings) setSettings('language');
-  }
+  const [settings, setSettings] = useState<boolean | 'about'>(false);
   const update = useAppUpdate();
   /** Where a sheet grows from: the control that opened it, or nothing for a keyboard shortcut. */
   const [dispatching, setDispatching] = useState<{ origin?: DOMRect } | null>(null);
@@ -243,8 +236,7 @@ export function App() {
     />
   );
   return (
-    // Some components are memoized and would keep text in the language they were drawn in.
-    <ClockProvider key={shown} skew={state.clockSkew}>
+    <ClockProvider skew={state.clockSkew}>
       <div className="app">
         <aside className="sidebar" id="sidebar" aria-label={t('Sidebar')} ref={sidebar} data-open={drawer || undefined} inert={folded}>
           <div className="brand">
@@ -396,7 +388,7 @@ export function App() {
           )}
         </LeavingContext>
         <LeavingContext value={settingsLeaving}>
-          {shownSettings && <Settings state={state} update={update} close={() => setSettings(false)} initial={shownSettings === 'about' || shownSettings === 'language' ? shownSettings : undefined} />}
+          {shownSettings && <Settings state={state} update={update} close={() => setSettings(false)} initial={shownSettings === 'about' ? shownSettings : undefined} />}
         </LeavingContext>
         <AskHost />
       </div>

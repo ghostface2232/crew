@@ -1125,8 +1125,10 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       return saved;
     }
     if (pathname === '/api/shutdown') {
+      const { expectedPid, ifIdle } = await readJson(req);
+      if (expectedPid !== undefined && expectedPid !== process.pid) throw new HttpError(409, 'The Crew daemon changed before shutdown.');
       // Re-check active jobs here in case work started after the client's health check.
-      if ((await readJson(req)).ifIdle && (jobs.activeCount > 0 || mutatingPosts > 0)) throw new HttpError(409, `${jobs.activeCount} job(s) are active and ${mutatingPosts} mutating request(s) are in flight, so the daemon keeps running.`);
+      if (ifIdle && (jobs.activeCount > 0 || mutatingPosts > 0)) throw new HttpError(409, `${jobs.activeCount} job(s) are active and ${mutatingPosts} mutating request(s) are in flight, so the daemon keeps running.`);
       stopping = true;
       setImmediate(shutdown);
       return {};
@@ -1193,10 +1195,10 @@ async function setupState(refresh: boolean): Promise<{ items: SetupItem[]; packa
 const autoRegister = PACKAGED && process.env.CREW_HOME === undefined;
 if (autoRegister && !registered()) void registerPlugin();
 else if (autoRegister && process.platform === 'win32') {
-  prunePlugins();
   void registrationMoved().then(
     (moved) => {
       if (moved) void registerPlugin();
+      else if (moved === false) prunePlugins();
     },
     () => {},
   );

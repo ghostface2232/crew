@@ -705,6 +705,16 @@ test('a client replacing an outdated daemon is refused while a job is active', {
   assert.equal((await h.api('POST', '/api/shutdown', { ifIdle: true })).status, 200);
 });
 
+test('an idle daemon only accepts a guarded shutdown for its own PID', { timeout: 15000 }, async (t) => {
+  const h = await daemon(t);
+  const { pid } = (await h.api('GET', '/api/health')).body;
+  const refused = await h.api('POST', '/api/shutdown', { ifIdle: true, expectedPid: pid + 1 });
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error, /daemon changed/);
+  assert.equal((await h.api('GET', '/api/health')).body.pid, pid);
+  assert.equal((await h.api('POST', '/api/shutdown', { ifIdle: true, expectedPid: pid })).status, 200);
+});
+
 test('idle shutdown waits for a mutating POST still reading its body', { timeout: 15000 }, async (t) => {
   const h = await daemon(t);
   const request = http.request({ host: '127.0.0.1', port: h.port, path: '/api/jobs', method: 'POST', headers: {

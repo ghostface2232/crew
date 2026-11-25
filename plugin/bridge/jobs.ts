@@ -844,6 +844,10 @@ export class Jobs {
       if (job.instructions.includes('## Outcome')) job.outcomeAsked = true;
       this.jobs.set(id, job);
       if (job.kind === 'review' && repo) await this.recordReviewed(job, repo);
+      if (isTerminal(job) || this.cancelling.has(id)) {
+        registered = true;
+        return job;
+      }
       this.event(job, 'started', `${spec.kind}: ${title}`);
       this.flush();
       registered = true;
@@ -955,7 +959,8 @@ export class Jobs {
         } else {
           synced = merged.commit;
         }
-        if (synced && synced !== job.worktree.base) {
+        // Git treats a previously synced ancestor as up to date. Moving the base back would count lead edits as worker changes.
+        if (synced && synced !== job.worktree.base && await git(job.repo, ['merge-base', job.worktree.base, synced]) !== synced) {
           // Rounds are replayed from the branch's history, which starts where the job did, not where it was last synced.
           job.roundsBase ??= job.worktree.base;
           job.worktree.base = synced;

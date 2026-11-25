@@ -42,6 +42,4 @@ Ranked by value for effort; each needs a live check first.
 
 ## Not for Crew
 
-- **Codex's message board (shared channels between agents) and Claude Code's agent teams and cross-session `SendMessage` (macOS and Linux only):** Crew routes coordination through the lead on purpose.
-- **Best-of-N attempts (Codex cloud tasks):** Costly, and two `delegate` calls do the same job.
-- **`PermissionRequest` auto-answers and `onFailure: "block"`:** Approvals stay with the user, and Crew's hooks must never block a lead when the daemon is down.
+Codex's message board (shared channels between agents) and Claude Code's agent teams and cross-session `SendMessage` (macOS and Linux only): Crew routes coordination through the lead on purpose. Best-of-N attempts (Codex cloud tasks): costly, and two `delegate` calls do the same job. `PermissionRequest` auto-answers and `onFailure: "block"`: approvals stay with the user, and Crew's hooks must never block a lead when the daemon is down.

@@ -95,18 +95,20 @@ export const PageTabs = memo(function PageTabs({ label, items, current, onSelect
   const list = useRef<HTMLElement>(null);
   const [thumb, setThumb] = useState<{ left: number; width: number; slide: boolean } | null>(null);
   const shown = useRef('');
+  // Kept across runs: new items (a count changing) must not restart the thumb where it already is, or cut its slide.
+  const placed = useRef('');
   // A narrow bar shows the tabs' icons only (board.css), so each then names itself in a tooltip. Read from the label,
   // since the bar's width, not the window's, decides.
   const [compact, setCompact] = useState(false);
   useLayoutEffect(() => {
     const element = list.current!;
-    let placed = '';
     const measure = () => {
       const tab = element.querySelector<HTMLElement>(`[data-tab="${CSS.escape(current)}"]`);
       if (!tab) return;
       setCompact((tab.querySelector<HTMLElement>('.tab-label')?.offsetWidth ?? 0) <= 1);
-      if (placed === `${tab.offsetLeft}:${tab.offsetWidth}`) return;
-      placed = `${tab.offsetLeft}:${tab.offsetWidth}`;
+      const place = `${current}:${tab.offsetLeft}:${tab.offsetWidth}`;
+      if (placed.current === place) return;
+      placed.current = place;
       setThumb({ left: tab.offsetLeft, width: tab.offsetWidth, slide: shown.current !== '' && shown.current !== current });
       shown.current = current;
     };

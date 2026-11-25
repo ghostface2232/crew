@@ -414,7 +414,10 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     setProjectStatus(null);
     setProjectSaving(true);
     try {
-      board.receive('projects', (await request<{ projects: Record<string, ProjectSettings> }>('/api/project-settings', { project: dir, changes: { [key]: on } })).projects);
+      // A newer state from the stream, such as the app's flip, wins over this save's older answer.
+      const revision = board.getProjectsRevision();
+      const saved = await request<{ projects: Record<string, ProjectSettings> }>('/api/project-settings', { project: dir, changes: { [key]: on } });
+      if (board.getProjectsRevision() === revision) board.receive('projects', saved.projects);
     } catch (error) {
       setProjectStatus({ project: dir, text: t('Not saved: {error}', { error: (error as Error).message }) });
     } finally {

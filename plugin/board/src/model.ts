@@ -182,19 +182,27 @@ const within = (path: string, project: string) => {
 /**
  * The events of one project, or all of them with none chosen. An event belongs to its job's or session's project while
  * that is still known; otherwise to the project the daemon recorded with it. A session's first events are recorded
- * with its folder before git names the repository's root, so a recorded folder that is no project of its own counts
- * for the project it sits in. As in the app.
+ * with its folder before git names the repository's root, so a recorded folder counts for the innermost known project
+ * it sits in, which keeps a nested repository's events out of the one around it. As in the app.
  */
-export function eventsIn(project: string, state: Pick<BoardState, 'events' | 'jobs' | 'claude'>) {
+export function eventsIn(project: string, state: Pick<BoardState, 'events' | 'jobs' | 'claude' | 'missions'>) {
   if (!project) return state.events;
   const jobs = new Map(state.jobs.map((job) => [job.id, projectOf(job)]));
   const sessions = new Map(state.claude.map((session) => [session.id, projectOf(session)]));
-  const known = new Set([...jobs.values(), ...sessions.values()]);
+  const known = [...new Set([...knownProjects(state), project])];
+  const owners = new Map<string, string>();
+  const owner = (path: string) => {
+    let found = owners.get(path);
+    if (found === undefined) {
+      found = known.filter((candidate) => within(path, candidate)).reduce((a, b) => (b.length > a.length ? b : a), '');
+      owners.set(path, found);
+    }
+    return found;
+  };
   return state.events.filter((event) => {
     const live = (event.job_id && jobs.get(event.job_id)) || (event.session_id && sessions.get(event.session_id));
     if (live) return live === project;
-    const recorded = event.project ?? '';
-    return recorded === project || (!known.has(recorded) && within(recorded, project));
+    return owner(event.project ?? '') === project;
   });
 }
 export const knownProjects = (state: Pick<BoardState, 'jobs' | 'claude' | 'missions'>) =>

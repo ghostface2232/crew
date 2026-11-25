@@ -729,7 +729,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
   const row = (job: BoardJob, index: number) => <JobRow key={job.id} job={job} selected={selected === job.id} openJob={openJob} kind={jobKind(job, state)} index={index} />;
   const empty = !jobs.length && !missions.length && !sessions.length;
   // The same events Activity shows, so the live feed and its All link agree.
-  const events = useMemo(() => eventsIn(project, state), [project, state.events, state.jobs, state.claude]);
+  const events = useMemo(() => eventsIn(project, state), [project, state.events, state.jobs, state.claude, state.missions]);
   return (
     <>
       <Kpis state={state} project={project} />

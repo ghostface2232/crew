@@ -1288,6 +1288,31 @@ test('the top bar keeps its controls on one row at every width', async ({ page }
   await expect(page.locator('.tab').first()).toHaveAttribute('title', 'Overview');
 });
 
+test('a waiting count that changes mid-slide leaves the thumb sliding', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1440, height: 800 });
+  const thumb = page.locator('.tabs-thumb');
+  await page.getByRole('navigation', { name: 'Pages' }).getByRole('button', { name: 'Activity' }).click();
+  await expect(thumb).toHaveAttribute('data-slide', 'true');
+  await request.post('/__push', { data: { type: 'job', data: { id: 'cx-question', state: 'running', waiting: null } } });
+  await expect(page.locator('.tab-dot')).toHaveCount(0);
+  await expect(thumb).toHaveAttribute('data-slide', 'true');
+});
+
+test('forced colors keep the current page and the waiting dot visible in the top bar', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 800 });
+  await page.emulateMedia({ forcedColors: 'active' });
+  // Forced colors paint a plain fill as Canvas, which is what the page behind them is.
+  const colors = await page.locator('.topbar-bar').evaluate((bar) => {
+    const fill = (selector: string) => getComputedStyle(bar.querySelector(selector)!).backgroundColor;
+    const probe = document.body.appendChild(Object.assign(document.createElement('i'), { style: 'background: Canvas' }));
+    const canvas = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return { canvas, thumb: fill('.tabs-thumb'), dot: fill('.tab-dot') };
+  });
+  expect(colors.thumb).not.toBe(colors.canvas);
+  expect(colors.dot).not.toBe(colors.canvas);
+});
+
 test('320px sheets keep controls within the viewport and support reduced motion', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 800 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

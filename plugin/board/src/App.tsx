@@ -84,7 +84,7 @@ export function App() {
   const scopedJobs = useMemo(() => project ? waitingJobs.filter((job) => projectOf(job) === project) : waitingJobs, [waitingJobs, project]);
   const scopedSessions = useMemo(() => project ? waitingSessions.filter((session) => projectOf(session) === project) : waitingSessions, [waitingSessions, project]);
   const pending = scopedJobs.length + scopedSessions.length;
-  const events = useMemo(() => eventsIn(project, state), [project, state.events, jobs, claude]);
+  const events = useMemo(() => eventsIn(project, state), [project, state.events, jobs, claude, state.missions]);
   const activityJobs = useMemo(() => project ? jobs.filter((job) => projectOf(job) === project) : jobs, [jobs, project]);
   const activityMissions = useMemo(() => project ? missions.filter((mission) => projectOf(mission) === project) : missions, [missions, project]);
   const live = state.connection === 'live';

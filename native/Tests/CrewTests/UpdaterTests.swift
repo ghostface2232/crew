@@ -17,7 +17,10 @@ private final class FeedProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
-@Suite struct UpdaterTests {
+// Serialized because a process spawned on another thread briefly shares every descriptor in this process, so a
+// flock released by close() can still block the next lock call. The launch gate test needs each close to release
+// at once; the other tests here spawn processes, and no other suite does.
+@Suite(.serialized) struct UpdaterTests {
     private func release(_ version: String, url: String? = nil, digest: String = String(repeating: "a", count: 64), extra: [String: Any] = [:]) throws -> Data {
         let link = url ?? "https://github.com/ghostface2232/crew/releases/download/v\(version)/\(Releases.assetName(version))"
         var body: [String: Any] = [

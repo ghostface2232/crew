@@ -21,7 +21,7 @@ import type { Config, Holder } from './config.ts';
 import { evidenceType, openEvidence } from './evidence.ts';
 import { projectRoot } from './git.ts';
 import { Issues } from './issues.ts';
-import { followUps, isTerminal, Jobs, UnreadableLedger } from './jobs.ts';
+import { autoResumesLeft, followUps, isTerminal, Jobs, UnreadableLedger } from './jobs.ts';
 import { memoryFor, missionPreset, Missions } from './missions.ts';
 import type { Mission } from './missions.ts';
 import { Pulls } from './pulls.ts';
@@ -216,7 +216,7 @@ function view(job: Job) {
  * work meanwhile. Worked out only for such a job, since it reads the config file.
  */
 function resumesAfterLimit(job: Job): boolean {
-  if (job.state !== 'failed' || !job.error?.limit || !job.mission || !job.sessionId || !job.worktree) return false;
+  if (job.state !== 'failed' || !job.error?.limit || !job.mission || !job.sessionId || !job.worktree || !autoResumesLeft(job)) return false;
   const mission = missions.list().find((m) => m.id === job.mission);
   return mission?.state === 'active' && projectSettings(liveConfig(), job.root ?? job.project).autoResume === true;
 }

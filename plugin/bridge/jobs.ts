@@ -430,6 +430,11 @@ export function openRefusals(job: Pick<Job, 'refusals' | 'turns' | 'retrying' | 
   return (job.retrying ?? []).map((action) => ({ action }));
 }
 
+/** Whether Crew may still take up a job a usage limit stopped by itself; past the cap, continuing it is the lead's. */
+export function autoResumesLeft(job: Pick<Job, 'autoResumes'>): boolean {
+  return (job.autoResumes ?? 0) < MAX_AUTO_RESUMES;
+}
+
 /** Only follow-ups requested by the lead count toward the build's adoption rating. */
 export function followUps(job: Pick<Job, 'turns' | 'approvals' | 'autoFixTurn' | 'autoResumes'>): number {
   return Math.max(0, (job.turns ?? 1) - 1 - (job.approvals?.length ?? 0) - Number(Boolean(job.autoFixTurn)) - (job.autoResumes ?? 0));
@@ -909,7 +914,7 @@ export class Jobs {
           && job.mission && activeMission(job.mission) && projectSettings(this.readConfig(), job.root ?? job.project).autoResume);
       };
       if (!eligible() || !fs.existsSync(job.worktree.path)) continue;
-      if ((job.autoResumes ?? 0) >= MAX_AUTO_RESUMES) {
+      if (!autoResumesLeft(job)) {
         const note = `Stopped after ${MAX_AUTO_RESUMES} automatic resumes. Use reply to continue this job.`;
         if (!job.notes.includes(note)) {
           job.notes.push(note);

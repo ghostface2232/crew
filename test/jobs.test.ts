@@ -10,7 +10,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { canonicalPath, resolveConfig } from '../plugin/bridge/config.ts';
 import type { Config } from '../plugin/bridge/config.ts';
 import { leadContext } from '../plugin/bridge/instructions.ts';
-import { followUps, jobRole, Jobs, outOfScope, parseOutcome } from '../plugin/bridge/jobs.ts';
+import { autoResumesLeft, followUps, jobRole, Jobs, outOfScope, parseOutcome } from '../plugin/bridge/jobs.ts';
 import type { Adapter, CrewEvent, Job, JobCtl, JobSpec, Probe, ReviewTarget } from '../plugin/bridge/jobs.ts';
 import { describe, needsLead, outcomeContradiction } from '../plugin/bridge/render.ts';
 import { tierModel } from '../plugin/bridge/tiers.ts';
@@ -363,6 +363,7 @@ test('three automatic usage resumes leave further retries to the lead', async (t
     ] }, () => true);
   }
   assert.deepEqual([job.state, job.autoResumes, job.turns], ['failed', 3, 4]);
+  assert.equal(autoResumesLeft(job), false, 'the lead is no longer told Crew will resume it');
   assert.equal(job.notes.filter((note) => /3 automatic resumes/i.test(note)).length, 1);
   await h.jobs.reply(job.id, { message: 'try manually' });
   assert.equal(job.turns, 5);

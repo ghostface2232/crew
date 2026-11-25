@@ -94,9 +94,12 @@ export class BoardStore {
   };
   private presetRevision = 0;
   getPresetRevision = () => this.presetRevision;
+  private budgetRevision = 0;
+  getBudgetRevision = () => this.budgetRevision;
 
   private update(patch: Partial<Snapshot>) {
     if ('preset' in patch) this.presetRevision++;
+    if ('turnTokenBudget' in patch) this.budgetRevision++;
     this.snapshot = { ...this.snapshot, ...patch };
     if (patch.connection !== undefined) this.notify();
     else if (this.listeners.size && !this.cancelNotification) this.scheduleNotification();
@@ -161,6 +164,9 @@ export class BoardStore {
         break;
       case 'peerRatings':
         this.update({ peerRatings: value as boolean });
+        break;
+      case 'turnTokenBudget':
+        this.update({ turnTokenBudget: value as BoardState['turnTokenBudget'] });
         break;
       case 'projects':
         this.update({ projects: value as Record<string, ProjectSettings> });

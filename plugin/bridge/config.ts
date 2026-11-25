@@ -201,6 +201,19 @@ export interface Preset {
   maxTier?: Tier;
 }
 
+/**
+ * The caps a user may set on a worker turn's tokens. The low ones suit small models at low effort; a turn at high
+ * effort often passes 10M, since each request counts the cached context again.
+ */
+export const TURN_TOKEN_CHOICES = [1_000_000, 5_000_000, 10_000_000, 20_000_000, 30_000_000, 50_000_000, 100_000_000];
+
+/** A turn's token cap as the user sets it: null sets it by job difficulty, "unlimited" sets none. */
+export type TurnTokenBudget = number | 'unlimited' | null;
+
+export function validTurnTokenBudget(value: unknown): value is TurnTokenBudget {
+  return value === null || value === 'unlimited' || TURN_TOKEN_CHOICES.includes(value as number);
+}
+
 export interface Config {
   /** Seconds of silence from a running worker before it is flagged as possibly stalled. */
   stallSeconds: number;
@@ -255,6 +268,8 @@ export interface Config {
   presets: Record<PresetName, Preset>;
   /** Switches the user turns on for one project, keyed by its canonicalPath. Every switch is off by default. */
   projects: Record<string, ProjectSettings>;
+  /** Replaces the token cap a worker's turn gets by its job's difficulty; the wall-clock cap stays. */
+  turnTokenBudget: TurnTokenBudget;
 }
 
 /**
@@ -308,6 +323,7 @@ const defaults: Config = {
   preset: null,
   presets: PRESETS,
   projects: {},
+  turnTokenBudget: null,
 };
 
 export const DEFAULT_ROLES = defaults.roles;
@@ -422,6 +438,7 @@ export function resolveConfig(user: UserConfig): Config {
   }
   // Any other value would read as on, and "false" in quotes is the likely one.
   if (user.peerRatings !== undefined && typeof user.peerRatings !== 'boolean') throw new Error('peerRatings must be true or false.');
+  if (user.turnTokenBudget !== undefined && !validTurnTokenBudget(user.turnTokenBudget)) throw new Error(`turnTokenBudget is ${JSON.stringify(user.turnTokenBudget)}; use one of ${TURN_TOKEN_CHOICES.join(', ')}, or "unlimited", or leave it out to set it by job difficulty.`);
   if (user.language != null && !LANGUAGES.includes(user.language)) throw new Error(`language is "${String(user.language)}"; use one of: ${LANGUAGES.join(', ')}, or leave it out to follow the system.`);
   return {
     ...defaults,

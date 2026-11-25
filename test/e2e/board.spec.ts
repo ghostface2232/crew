@@ -1347,6 +1347,25 @@ test('a preset is stored as it is picked, describes its models, and permits none
   await lastBody(request, '/api/preset').toEqual({ preset: null });
 });
 
+test('the turn token budget follows difficulty, or is one of its caps, or unlimited', async ({ page, request }) => {
+  await openSettings(page, 'Model Presets');
+  const select = page.getByRole('combobox', { name: 'Tokens per Turn' });
+  await expect(select).toHaveText('By Difficulty');
+  await expect(page.getByText('A worker turn stops at 60M tokens for a routine job, 80M for a standard one, and 120M for a hard one.', { exact: false })).toBeVisible();
+  await pick(select, '5M');
+  await expect(select).toHaveText('5M');
+  await expect(page.getByText('Every worker turn stops at this many tokens, whatever its difficulty.', { exact: false })).toBeVisible();
+  await lastBody(request, '/api/turn-token-budget').toEqual({ budget: 5_000_000 });
+  if (process.env.CREW_E2E_SHOT) await page.screenshot({ path: process.env.CREW_E2E_SHOT });
+  await pick(select, '100M');
+  await lastBody(request, '/api/turn-token-budget').toEqual({ budget: 100_000_000 });
+  await pick(select, 'Unlimited');
+  await expect(page.getByText('so one that goes in circles keeps spending them until its time runs out', { exact: false })).toBeVisible();
+  await lastBody(request, '/api/turn-token-budget').toEqual({ budget: 'unlimited' });
+  await pick(select, 'By Difficulty');
+  await lastBody(request, '/api/turn-token-budget').toEqual({ budget: null });
+});
+
 test('an open preset selector adopts changes made from another client', async ({ page, request }) => {
   await openSettings(page, 'Model Presets');
   const select = page.getByRole('combobox', { name: 'Model preset' });

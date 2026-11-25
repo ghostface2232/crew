@@ -480,6 +480,9 @@ test('a board signs in once with a ticket and may do only what its pages do', { 
   assert.equal((await h.api('POST', '/api/preset', { preset: 'best' }, board)).status, 200);
   assert.deepEqual((await h.api('POST', '/api/language', { language: 'ko' }, board)).body, { language: 'ko' });
   assert.equal((await h.api('GET', '/api/state')).body.language, 'ko');
+  assert.deepEqual((await h.api('POST', '/api/turn-token-budget', { budget: 'unlimited' }, board)).body, { turnTokenBudget: 'unlimited' });
+  assert.equal((await h.api('GET', '/api/state')).body.turnTokenBudget, 'unlimited');
+  assert.equal((await h.api('POST', '/api/turn-token-budget', { budget: 15_000_000 }, board)).status, 400);
   assert.equal((await h.api('POST', `/api/jobs/${job.id}/reply`, { message: 'carry on' }, board)).status, 200);
   // What only the lead, the CLI or the app sends does not, and leaves nothing behind.
   const refused = { status: 403, body: { error: 'The board may not do this.' } };

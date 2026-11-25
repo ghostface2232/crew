@@ -207,6 +207,25 @@ struct CrewSettingsView: View {
                 Text(model.preset?.summary ?? String(localized: "Uses each agent's own model and effort settings."))
             }.settingsFootnote()
         }
+        // Stored as it is picked, as in the board.
+        if let budget = store.state.turnTokenBudget {
+            Section {
+                Picker("Tokens per Turn", selection: Binding(get: { budget }, set: { next in Task { await store.setTurnTokenBudget(next) } })) {
+                    ForEach([TurnTokenBudget.byDifficulty] + TurnTokenBudget.choices + [.unlimited], id: \.self) { choice in
+                        Text(verbatim: choice.label).tag(choice)
+                    }
+                }
+                // Its save drops a pick made while another is being stored, as the project switches' does.
+                .disabled(!store.connected || store.actions[CrewStore.turnTokenBudgetKey]?.pending == true)
+            } header: {
+                Text("Turn Budget")
+            } footer: {
+                VStack(alignment: .leading, spacing: Space.s) {
+                    if let error = store.actions[CrewStore.turnTokenBudgetKey]?.error { ErrorLabel(message: String(localized: "Not saved: \(error)")) }
+                    Text(verbatim: budget.footnote)
+                }.settingsFootnote()
+            }
+        }
         Section {
             LabeledContent(String(localized: "Role settings"), value: String(localized: "Override any preset"))
             LabeledContent(String(localized: "Mission preset"), value: String(localized: "Overrides default for new jobs"))

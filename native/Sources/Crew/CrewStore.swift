@@ -211,6 +211,7 @@ final class CrewStore {
         case "usage":
             usage = try JSONDecoder().decode(Usage.self, from: event.data)
             return
+        case "turnTokenBudget", "state": turnTokenBudgetRevision += 1
         case "limits":
             limits.merge(try JSONDecoder().decode([String: LimitUsage?].self, from: event.data)) { _, new in new }
             return
@@ -298,6 +299,18 @@ final class CrewStore {
         await run(Self.peerRatingsKey) {
             let saved: Saved = try await api.post("/api/peer-ratings", Change(enabled: enabled))
             state.peerRatings = saved.peerRatings
+        }
+    }
+    static let turnTokenBudgetKey = "turn-token-budget"
+    /// Counts budgets received from the daemon, so a save's reply does not undo a newer one that arrived meanwhile.
+    private var turnTokenBudgetRevision = 0
+    func setTurnTokenBudget(_ budget: TurnTokenBudget) async {
+        struct Change: Encodable, Sendable { var budget: TurnTokenBudget }
+        struct Saved: Decodable, Sendable { var turnTokenBudget: TurnTokenBudget }
+        await run(Self.turnTokenBudgetKey) {
+            let revision = turnTokenBudgetRevision
+            let saved: Saved = try await api.post("/api/turn-token-budget", Change(budget: budget))
+            if turnTokenBudgetRevision == revision { state.turnTokenBudget = saved.turnTokenBudget }
         }
     }
     static func projectSwitchKey(_ project: String) -> String { "project-settings:\(project)" }

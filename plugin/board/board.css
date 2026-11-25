@@ -840,8 +840,6 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 @media (hover: hover) { .nav-item:hover { color: var(--label); } }
 .nav-dot { width: 7px; height: 7px; border-radius: 50%; corner-shape: round; background: var(--tone); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 18%, transparent); }
 .nav-count { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; corner-shape: round; background: var(--orange); color: var(--on-orange); font-size: 10.5px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; box-shadow: var(--shadow-bead); animation: swap 360ms var(--ease-out); }
-.nav-key { opacity: 0; transition: opacity 160ms ease-out; }
-@media (hover: hover) { .nav-item:hover .nav-key { opacity: 1; } }
 .sidebar-foot { display: grid; gap: 6px; margin-top: auto; padding-top: 13px; border-top: 1px solid var(--hairline); }
 .sidebar-foot-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .sidebar-foot-row > .sidebar-item { flex: 1; min-width: 0; }
@@ -906,23 +904,53 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   align-items: center;
   gap: 10px;
   min-height: 60px;
-  padding: 12px var(--window-inset) 12px 10px;
+  /* The bar's leading edge lines up with the stage's below it. */
+  padding: 12px var(--window-inset) 12px 0;
 }
 .topbar button { flex: none; white-space: nowrap; }
 .topbar-sidebar { display: none; }
-.topbar-spacer { flex: 1; }
-.crumbs { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--tertiary); font-size: 13px; }
-.crumb { min-height: 26px; padding: 0 6px; margin-inline-start: 0; background: none; color: var(--secondary); font-weight: 450; }
-.crumb:disabled { opacity: 1; cursor: default; }
-.crumb-current { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--label); font-weight: 550; }
-.search-pill {
-  justify-content: flex-start;
-  gap: 8px;
-  width: 260px;
-  min-height: 34px;
-  padding: 0 12px;
+/* One pill holds the pages, search and New Job. Its controls sit flat on it and rise only for the current page and under
+   the pointer, as the sidebar's items rise. */
+.topbar-bar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px; corner-shape: round;
+  background: var(--fill);
+}
+.tabs { position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; }
+.tabs-thumb {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--left);
+  width: var(--width);
+  border-radius: 999px; corner-shape: round;
   background: var(--raised);
   box-shadow: var(--shadow-raised);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tabs-thumb[data-slide] { transition: left 340ms var(--ease-out), width 340ms var(--ease-out); }
+}
+/* The same weight in every state, so choosing a page never moves the tabs beside it. */
+.tab { position: relative; min-height: 30px; padding: 0 12px 0 10px; gap: 7px; background: none !important; color: var(--secondary); }
+.tab svg { width: 16px; height: 16px; }
+.tab[aria-current="page"] { color: var(--label); }
+.tab[aria-current="page"] svg { color: var(--accent); }
+@media (hover: hover) { .tab:hover { color: var(--label); } }
+.search-pill {
+  flex: 0 1 260px;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  min-height: 30px;
+  margin-inline-start: auto;
+  padding: 0 8px 0 12px;
+  background: none;
   color: var(--tertiary);
   font-weight: 450;
   transition: opacity 120ms ease-out, background-color 160ms ease-out, box-shadow 200ms ease-out;
@@ -930,13 +958,19 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .search-pill > span { flex: 1; text-align: start; overflow: hidden; text-overflow: ellipsis; }
 .search-pill svg { color: var(--secondary); }
 .search-pill[data-hidden] { opacity: 0; }
-@media (hover: hover) { .search-pill:not(:disabled):hover { background: var(--raised); box-shadow: var(--shadow-raised), 0 4px 12px -6px var(--lift); } }
+/* The shortcut shows only where the search is about to be used: under the pointer or with keyboard focus. */
+.search-pill > kbd { opacity: 0; transition: opacity 160ms ease-out; }
+.search-pill:focus-visible > kbd { opacity: 1; }
+@media (hover: hover) {
+  .search-pill:not(:disabled):hover { background: var(--raised); box-shadow: var(--shadow-raised); }
+  .search-pill:not(:disabled):hover > kbd { opacity: 1; }
+}
 .connection { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 999px; corner-shape: round; color: var(--secondary); font-size: 12px; white-space: nowrap; }
 .connection > i { width: 7px; height: 7px; border-radius: 50%; corner-shape: round; background: var(--tertiary); }
 .connection[data-state="live"] > i { background: var(--green); }
 .connection[data-state="lost"] { color: var(--orange); }
 .connection[data-state="lost"] > i { background: var(--orange); }
-.new-job { min-height: 34px; padding: 0 14px 0 11px; }
+.new-job { min-height: 30px; padding: 0 14px 0 11px; }
 .new-job svg { transition: rotate 420ms var(--ease-out); }
 @media (hover: hover) { .new-job:not(:disabled):hover svg { rotate: 90deg; } }
 
@@ -1483,13 +1517,15 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
 .sign-in { display: grid; justify-items: center; gap: 12px; max-width: 420px; margin: 20vh auto; padding: 0 16px; text-align: center; animation: rise 520ms var(--ease-out) backwards; }
 .sign-in-mark { display: grid; place-items: center; color: var(--secondary); }
 
-/* The dock: on narrow windows, the pages as a floating bar at the bottom. */
-.dock { display: none; }
-
-/* Narrow windows: the sidebar floats out over the page, the pages move to the dock. */
+/* Narrower windows keep the top bar on one row: search folds to its icon and only the current page keeps its name.
+   Narrow ones also fold the sidebar away, to float out over the page. */
 @media (max-width: 1000px) {
-  .search-pill { width: 34px; padding: 0; justify-content: center; }
+  .search-pill { flex: none; width: 30px; padding: 0; justify-content: center; }
   .search-pill > span, .search-pill > kbd { display: none; }
+  .tab:not([aria-current="page"]) { padding: 0 9px; }
+  .tab:not([aria-current="page"]) > .tab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  /* Without its name a tab keeps only its icon, and waiting requests become a dot on the bell's shoulder, as in the app. */
+  .tab:not([aria-current="page"]) > .nav-count { position: absolute; top: 5px; left: 21px; width: 7px; min-width: 0; height: 7px; padding: 0; font-size: 0; }
 }
 @media (max-width: 760px) {
   .app { grid-template-columns: minmax(0, 1fr); }
@@ -1510,53 +1546,22 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
     transition: translate 420ms var(--ease-out), visibility 0s 420ms;
   }
   .sidebar[data-open] { translate: 0 0; visibility: visible; transition: translate 420ms var(--ease-out); }
-  .sidebar > .nav:first-of-type { display: none; }
   .topbar { gap: 8px; min-height: 54px; padding: 8px var(--window-inset); }
-  /* As tall as the search and New Job controls beside it. */
-  button.topbar-sidebar { display: inline-flex; width: 34px; min-height: 34px; }
-  .new-job { width: 34px; padding: 0; }
+  /* As tall as the bar beside it. */
+  button.topbar-sidebar { display: inline-flex; width: 36px; min-height: 36px; }
+  .new-job { width: 30px; padding: 0; }
   .new-job-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .page { margin-inline-start: var(--window-inset); padding: 20px 12px 104px; }
+  .page { margin-inline-start: var(--window-inset); padding: 20px 12px 32px; }
   .page-title { font-size: 28px; }
   .dash-side { grid-template-columns: minmax(0, 1fr); }
   dialog.detail-panel { inset: 8px; width: auto; }
   .panel-grip { display: none; }
   .peek { display: none; }
-  .dock {
-    position: fixed;
-    left: 50%;
-    bottom: max(12px, env(safe-area-inset-bottom));
-    z-index: 5;
-    display: block;
-    /* Sized by its items: a fixed box at left: 50% would otherwise be given only half the screen to fit them in. */
-    width: max-content;
-    max-width: calc(100vw - 24px);
-    translate: -50% 0;
-    padding: 5px;
-    border-radius: 999px; corner-shape: round;
-    background: color-mix(in srgb, var(--surface) 82%, transparent);
-    -webkit-backdrop-filter: blur(24px) saturate(1.6);
-    backdrop-filter: blur(24px) saturate(1.6);
-    box-shadow: var(--shadow-pop);
-    animation: rise 520ms var(--ease-out) backwards 200ms;
-  }
-  .dock .nav-list { display: flex; gap: 2px; }
-  .dock .nav-glide { display: none; }
-  .dock .nav-item { width: auto; min-height: 40px; padding: 0 14px; border-radius: 999px; corner-shape: round; gap: 6px; }
-  .dock .nav-item[aria-current="true"] { background: var(--ink) !important; color: var(--on-ink); box-shadow: var(--shadow-accent); }
-  /* On the ink pill the glyph takes the pill's text color, and the sidebar's accent bar has no place. */
-  .dock .nav-item[aria-current="true"] svg { color: inherit; }
-  .dock .nav-item::before { display: none; }
-  /* Out of sight but still the item's name. */
-  .dock .nav-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .dock .nav-item[aria-current="true"] .nav-label { position: static; width: auto; height: auto; clip-path: none; font-size: 12px; }
-  .dock .nav-key { display: none; }
-  .dock .nav-count { position: absolute; top: 2px; right: 4px; min-width: 16px; height: 16px; padding: 0 4px; line-height: 16px; font-size: 9.5px; }
-  .dock .nav-list[data-hovering] .nav-item { opacity: 1 !important; }
 }
 @media (max-width: 420px) {
-  .crumbs > button, .crumbs > span[aria-hidden] { display: none; }
-  .dock .nav-item[aria-current="true"] .nav-label { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); }
+  .tab > .tab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .tab { padding: 0 9px; }
+  .tab > .nav-count { position: absolute; top: 5px; left: 21px; width: 7px; min-width: 0; height: 7px; padding: 0; font-size: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; }

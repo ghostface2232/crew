@@ -174,6 +174,18 @@ export function relativeDuration(ms: number) {
 }
 export const projectOf = (item: { root?: string; project?: string; cwd?: string }) =>
   item.root ?? item.project ?? item.cwd ?? '';
+/**
+ * The events of one project, or all of them with none chosen. An event belongs to its job's or session's project while
+ * that is still known, since a session finds its repository's root after its first events; otherwise to the project
+ * the daemon recorded with it. As in the app.
+ */
+export function eventsIn(project: string, state: Pick<BoardState, 'events' | 'jobs' | 'claude'>) {
+  if (!project) return state.events;
+  const jobs = new Map(state.jobs.map((job) => [job.id, projectOf(job)]));
+  const sessions = new Map(state.claude.map((session) => [session.id, projectOf(session)]));
+  return state.events.filter((event) =>
+    ((event.job_id && jobs.get(event.job_id)) || (event.session_id && sessions.get(event.session_id)) || event.project) === project);
+}
 export const knownProjects = (state: Pick<BoardState, 'jobs' | 'claude' | 'missions'>) =>
   [...new Set([...state.jobs, ...state.claude, ...state.missions].map(projectOf).filter(Boolean))].sort();
 /**

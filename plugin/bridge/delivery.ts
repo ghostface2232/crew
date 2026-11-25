@@ -261,6 +261,9 @@ export class Delivery {
   watch(session: string, deadline: number, now = Date.now()): Watch | null {
     leadSession(session);
     if (!Number.isFinite(deadline) || deadline <= now || deadline > now + HOOK_SECONDS * 1000) throw new Error('Invalid watcher deadline.');
+    // Under `claude -p` an asyncRewake hook runs in the foreground, so a watcher would hold the session open for a day.
+    // A session that leads nothing has nothing to wait for; its first Crew call arms a watcher once it does.
+    if (!this.subjects().some((subject) => subject.lead === session)) return null;
     const current = this.watching.get(session);
     if (current && current.expiresAt > now && now - current.beat < WATCH_SILENT_MS && current.deadline - now > WATCH_REPLACE_MS) return null;
     const watch = { generation: randomUUID(), deadline, expiresAt: Math.min(deadline, now + WATCH_MS), beat: now };

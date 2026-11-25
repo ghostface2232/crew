@@ -137,6 +137,21 @@ test('sub-agents are listed with their Agent call description and keep a finishe
   assert.deepEqual(s.agents, []);
 });
 
+test('Stop drops sub-agents whose SubagentStop was missed only when its background list names no agent', () => {
+  const { sessions, hook } = tracker();
+  hook('SubagentStart', { agent_id: 'a1', agent_type: 'Explore' });
+  const s = sessions.sessions.get('s1')!;
+  hook('Stop', { background_tasks: [{ id: 'b1', type: 'subagent', status: 'running', description: 'Explore' }] });
+  assert.equal(s.state, 'working');
+  hook('Stop', { background_tasks: [{ id: 'b2', type: 'teammate', status: 'running', description: 'unknown kind' }] });
+  assert.equal(s.agents.length, 1, 'a task type it does not know may be an agent');
+  hook('Stop', {});
+  assert.equal(s.agents.length, 1, 'a host that sends no list changes nothing');
+  hook('Stop', { background_tasks: [{ id: 'b3', type: 'shell', status: 'running', description: 'npm test' }] });
+  assert.equal(s.state, 'idle');
+  assert.deepEqual(s.agents, []);
+});
+
 test('a sub-agent moving on clears the prompt it raised', () => {
   const { sessions, hook } = tracker();
   hook('SubagentStart', { agent_id: 'a1', agent_type: 'Explore' });

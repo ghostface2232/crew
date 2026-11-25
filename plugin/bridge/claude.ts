@@ -280,6 +280,9 @@ export class ClaudeSessions {
         break;
       case 'Stop':
         this.resting.add(id);
+        // Claude Code lists what still runs in the background. With no agent among it, any agent still shown missed its
+        // SubagentStop and would keep the session working until FORGET_AGENT_MS. A type this does not know may be one.
+        if (Array.isArray(p.background_tasks) && p.background_tasks.every((task: any) => task?.type === 'shell' || task?.type === 'monitor')) s.agents = [];
         s.state = s.agents.length ? 'working' : 'idle';
         s.inTool = false;
         s.waitingFor = null;

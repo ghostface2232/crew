@@ -24,6 +24,16 @@ function actedOn(input: HookInput): string[] {
 }
 interface HookOutput { code: number; stderr?: string; stdout?: string }
 
+/**
+ * The line Claude Code shows the user when a watcher wakes the lead, in place of its default "Stop hook feedback".
+ * Only the first JSON line on stdout is read, so it must stay one line.
+ */
+export function rewakeSummary(offer: { text: string; items?: { jobId: string }[] }): string {
+  const ids = [...new Set((offer.items ?? []).map((item) => item.jobId))];
+  const named = ids.slice(0, 3).join(', ') + (ids.length > 3 ? ` and ${ids.length - 3} more` : '');
+  return `Crew: news from ${named || 'a job'}${offer.text.includes(' · ASKS YOU [') ? ' (a question waits)' : ''}`;
+}
+
 /** The transport is injectable so crash/retry paths can be checked without a live Claude session. */
 export async function leadHook(input: HookInput, mode: string, request: typeof api = api, deadline = Date.now() + (HOOK_SECONDS - 10) * 1000): Promise<HookOutput> {
   const session = input.session_id;
@@ -38,8 +48,10 @@ export async function leadHook(input: HookInput, mode: string, request: typeof a
     const { offer } = await send('offer', { automatic: true });
     if (!offer) return { code: 0 };
     // Codex runs a hook under pwsh on Windows, which turns node's exit code 2 into 1, so its hooks ask to continue
-    // through the JSON decision instead (docs/mcp-compatibility.md#5-codex-as-a-lead-host).
-    return mode === 'stop-json' ? { code: 0, stdout: JSON.stringify({ decision: 'block', reason: offer.text }) } : { code: 2, stderr: offer.text };
+    // through the JSON decision instead (docs/mcp-compatibility.md#5-codex-as-a-lead-host). Claude Code continues the
+    // turn on a Stop hook's additionalContext without labeling the news a hook error, as exit code 2 does.
+    return mode === 'stop-json' ? { code: 0, stdout: JSON.stringify({ decision: 'block', reason: offer.text }) }
+      : { code: 0, stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'Stop', additionalContext: offer.text } }) };
   }
   // The hook knows the session for certain; the lead's MCP server may not (an older server, /clear, no session
   // variable). So the session whose Crew call just acted on these jobs takes them over, before it watches for news.
@@ -65,7 +77,7 @@ export async function leadHook(input: HookInput, mode: string, request: typeof a
         }
         await send('heartbeat', { generation });
         const { offer } = await send('offer', { automatic: true, generation, wait: true });
-        if (offer) return { code: 2, stderr: offer.text };
+        if (offer) return { code: 2, stderr: offer.text, stdout: JSON.stringify({ rewakeSummary: rewakeSummary(offer) }) };
         backoff = 250;
       } catch (error) {
         // A restart forgets watching leases. A replaced watcher cannot reacquire while its successor is live.

@@ -16,7 +16,7 @@ import { resolveConfig } from '../plugin/bridge/config.ts';
 import { addNews, Delivery, HOOK_SECONDS, jsonBytes, LEAD_BYTES, OFFER_MS, PRESENT_MS, textPage, unread, WATCH_MS, WATCH_REPLACE_MS } from '../plugin/bridge/delivery.ts';
 import { Pulls } from '../plugin/bridge/pulls.ts';
 import { ClaudeSessions } from '../plugin/bridge/claude.ts';
-import { leadHook } from '../plugin/bridge/wake.ts';
+import { leadHook, rewakeSummary } from '../plugin/bridge/wake.ts';
 import type { api } from '../plugin/bridge/client.ts';
 
 function harness(t: TestContext) {
@@ -267,7 +267,7 @@ test('watch hook adopts the jobs its Crew call showed, waits after losing an off
   // A started job is taken over; an id the response only quotes is not, since another session may own it.
   const result = await leadHook({ session_id: 'lead', hook_event_name: 'PostToolUse', tool_name: 'mcp__plugin_crew_crew__review',
     tool_response: [{ type: 'text', text: '[cx-0a1b2c] Codex · review · DONE\n[cx-0a1b2c] again, [ag-ffffff]' }] }, 'watch', recording);
-  assert.deepEqual(result, { code: 2, stderr: 'news' });
+  assert.deepEqual(result, { code: 2, stderr: 'news', stdout: JSON.stringify({ rewakeSummary: 'Crew: news from a job' }) });
   assert.deepEqual(adopted, [['cx-0a1b2c']]);
   assert.equal(polls, 2);
   assert.equal(calls.at(-1), '/api/lead/release');
@@ -290,7 +290,9 @@ test('sync Stop guards continuation; subagents never arm a lead watcher; context
 
 test('a Codex Stop hook asks to continue in JSON, which survives pwsh, and a Claude one by exit code', async () => {
   const request = (async () => ({ offer: { text: 'Crew news' } })) as typeof api;
-  assert.deepEqual(await leadHook({ session_id: 'lead' }, 'stop', request), { code: 2, stderr: 'Crew news' });
+  // Not exit code 2, which Claude Code labels a hook error.
+  assert.deepEqual(await leadHook({ session_id: 'lead' }, 'stop', request),
+    { code: 0, stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'Stop', additionalContext: 'Crew news' } }) });
   const codex = await leadHook({ session_id: 'thread' }, 'stop-json', request);
   assert.equal(codex.code, 0);
   assert.deepEqual(JSON.parse(codex.stdout!), { decision: 'block', reason: 'Crew news' });
@@ -393,16 +395,29 @@ test('the wake hook runs when its plugin folder is reached through a link', asyn
   await new Promise<void>((resolve) => daemon.listen(0, '127.0.0.1', resolve));
   t.after(() => daemon.close());
   const { port } = daemon.address() as { port: number };
-  const hook = spawn(process.execPath, [path.join(linked, 'wake.ts'), 'stop'], { env: { ...process.env, CREW_HOME: dir, CREW_PORT: String(port) }, stdio: ['pipe', 'ignore', 'pipe'] });
-  let stderr = '';
-  hook.stderr.on('data', (chunk) => { stderr += chunk; });
+  const hook = spawn(process.execPath, [path.join(linked, 'wake.ts'), 'stop'], { env: { ...process.env, CREW_HOME: dir, CREW_PORT: String(port) }, stdio: ['pipe', 'pipe', 'ignore'] });
+  let stdout = '';
+  hook.stdout.on('data', (chunk) => { stdout += chunk; });
   hook.stdin.end(JSON.stringify({ session_id: 'lead', hook_event_name: 'Stop' }));
   const [code] = await once(hook, 'close');
-  assert.deepEqual([code, stderr.trim()], [2, 'news for the lead']);
+  assert.deepEqual([code, JSON.parse(stdout).hookSpecificOutput.additionalContext], [0, 'news for the lead']);
+});
+
+test('a wake-up names its jobs for the user, and says when one asks a question', () => {
+  assert.equal(rewakeSummary({ text: 'Crew news:\n[cx-1] news 1 · DONE', items: [{ jobId: 'cx-1' }, { jobId: 'cx-1' }] }), 'Crew: news from cx-1');
+  assert.equal(rewakeSummary({ text: '[ag-2] news 1 · RUNNING · question · ASKS YOU [q]: why?', items: ['cx-1', 'ag-2', 'cx-3', 'cx-4', 'cx-5'].map((jobId) => ({ jobId })) }),
+    'Crew: news from cx-1, ag-2, cx-3 and 2 more (a question waits)');
+});
+
+test('a session that leads nothing gets no watcher, so a foreground hook under claude -p ends at once', () => {
+  const delivery = new Delivery(() => [{ lead: 'lead', news: [] } as unknown as Job], () => {});
+  const now = Date.now();
+  assert.equal(delivery.watch('other', now + 3_600_000, now), null);
+  assert.ok(delivery.watch('lead', now + 3_600_000, now));
 });
 
 test('a watcher that died without releasing is replaced once it stops beating', () => {
-  const delivery = new Delivery(() => [], () => {});
+  const delivery = new Delivery(() => [{ lead: 'lead', news: [] } as unknown as Job], () => {});
   const now = Date.now();
   const first = delivery.watch('lead', now + 3_600_000, now)!;
   assert.equal(delivery.watch('lead', now + 3_600_000, now + 10_000), null, 'a live watcher is not duplicated');
@@ -422,6 +437,7 @@ test('a watcher whose long poll was cut off is replaced at once, as after its se
   });
   const route = vm.runInContext(`${stripTypeScriptTypes(handler)}; route`, context);
   const lead = (action: string, body: object, res: object = {}) => route({ method: 'POST', url: `/api/lead/${action}`, body: { session: 'lead', ...body } }, res);
+  await h.create();
   const deadline = Date.now() + 3_600_000;
   const { watch } = await lead('watch', { deadline });
   assert.equal((await lead('watch', { deadline })).watch, null, 'a live watcher is not duplicated');

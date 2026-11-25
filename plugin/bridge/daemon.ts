@@ -408,7 +408,7 @@ fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {
 
 const claude = new ClaudeSessions(config.stallSeconds, {
   onSession: (session, removed) => broadcast('claude', { session, removed: Boolean(removed) }),
-  onEvent: (session, kind, detail) => jobs.record(session.host ?? 'claude', session.id, kind, detail),
+  onEvent: (session, kind, detail) => jobs.record(session.host ?? 'claude', session.id, kind, detail, undefined, session.root ?? session.cwd),
   onAttention: (session, kind, detail) => notify(session.host ?? 'claude', kind, session.title, detail),
 });
 

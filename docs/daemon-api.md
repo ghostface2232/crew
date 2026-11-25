@@ -40,7 +40,7 @@ Server-sent events on `GET /api/stream` (in addition to `job`, `mission`, `event
 
 Jobs also carry `rounds?: Round[]`, `ask?: boolean`, `role?: Role`, `preset?: PresetName | null`, and `difficulty?: 'routine' | 'standard' | 'hard'` (`jobs.ts`). Missions carry `lead?: 'claude' | 'codex'`, `notes?: MissionNote[]`, `preset?: PresetName`, `tasks?: MissionTask[]`, and `difficulty?` (`missions.ts`).
 
-Each status event has the shape `{seq, ts, agent, session_id, job_id, kind, detail}`. Its `kind` is `started`, `progress`, `waiting`, `error`, `limit`, `stalled`, `done`, or `cancelled`.
+Each status event has the shape `{seq, ts, agent, session_id, job_id, project, kind, detail}`, where `project` is the job's or session's project when it was recorded (absent from events older than the field). Its `kind` is `started`, `progress`, `waiting`, `error`, `limit`, `stalled`, `done`, or `cancelled`.
 
 ## Endpoints
 

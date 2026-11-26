@@ -567,11 +567,18 @@ struct MissionPanel: View {
             }
             Text(outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
         }
-        // The lead's wrap-up of finished work: what changed, what was verified, what is left for the user.
+        // The lead's wrap-up of finished work: what changed, what was verified, what is left for the user. Folded until
+        // asked for: with several finished cards open, each wrap-up in full buries the cards themselves.
         if mission.state == "done", let summary = mission.summary, !summary.isEmpty {
-            // A group, as in the board: a label on the text itself would be read in place of the summary.
-            ReportText(report: summary).padding(.leading, WorkspaceStyle.rowTitleInset)
-                .accessibilityElement(children: .contain).accessibilityLabel(String(localized: "Wrap-up"))
+            let shown = store.summaryExpanded[mission.id] ?? false
+            if shown {
+                // A group, as in the board: a label on the text itself would be read in place of the summary.
+                ReportText(report: summary).padding(.leading, WorkspaceStyle.rowTitleInset)
+                    .accessibilityElement(children: .contain).accessibilityLabel(String(localized: "Wrap-up"))
+            }
+            RevealToggle(show: String(localized: "Show the wrap-up"), hide: String(localized: "Hide the wrap-up"), subject: mission.title,
+                         shown: Binding(get: { shown }, set: { store.summaryExpanded[mission.id] = $0 }))
+                .padding(.leading, WorkspaceStyle.rowTitleInset)
         }
     }
     /// One row however many decisions there are, so a long mission's card stays short; the detail panel lists them.

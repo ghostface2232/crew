@@ -280,6 +280,22 @@ test('a mission card keeps its decisions to one row, and the panel lists them an
   await expect(panel.getByText('No decisions to show.')).toBeVisible();
 });
 
+test('a finished mission keeps its wrap-up folded until its toggle opens it', async ({ page, request }) => {
+  const data = fixture();
+  Object.assign(data.missions[0], { state: 'done', endedAt: NOW, outcome: 'Shipped the board.', summary: '**Changed**\n- The board is a desktop app.' });
+  await request.post('/__push', { data: { type: 'state', data } });
+  // An ended mission starts collapsed; opened, it shows its outcome, and the wrap-up waits for its toggle.
+  const card = page.locator('[data-key="mission-1"]');
+  await card.getByRole('button', { name: 'Expand mission' }).click();
+  await expect(card.getByText('Shipped the board.')).toBeVisible();
+  const wrapUp = card.getByRole('group', { name: 'Wrap-up' });
+  await expect(wrapUp).toHaveCount(0);
+  await card.getByRole('button', { name: 'Show the wrap-up' }).click();
+  await expect(wrapUp).toContainText('The board is a desktop app.');
+  await card.getByRole('button', { name: 'Hide the wrap-up' }).click();
+  await expect(wrapUp).toHaveCount(0);
+});
+
 test('a mission dropped with Stop Tracking can still be marked done, reopening it explicitly', async ({ page, request }) => {
   await page.goto('about:blank');
   await request.post('/__reset', { data: { auth: true } });

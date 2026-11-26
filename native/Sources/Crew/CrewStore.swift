@@ -107,6 +107,8 @@ final class CrewStore {
     func isExpanded(_ mission: Mission) -> Bool { missionExpanded[mission.id] ?? (mission.state == "active") }
     /// Stages the user opened or folded, by mission and stop, kept as a mission's state is.
     var stageExpanded: [String: Bool] = [:]
+    /// Finished missions whose wrap-up the user opened, kept as a mission's state is; the rest stay folded.
+    var summaryExpanded: [String: Bool] = [:]
     /// Whether a folding mission shows a stage's rows: the user's pick, or else `stageOpensByDefault`.
     func isStageOpen(_ mission: Mission, _ index: Int, jobs: [Job], hasLead: Bool) -> Bool {
         stageExpanded["\(mission.id):\(index)"] ?? stageOpensByDefault(mission, index, jobs: jobs, hasLead: hasLead)

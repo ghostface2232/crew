@@ -1350,7 +1350,7 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   gap: 12px;
   width: 100%;
   min-height: 0;
-  padding: 10px 12px;
+  padding: 12px;
   border-radius: var(--row-radius); corner-shape: var(--smooth);
   background: var(--row);
   color: var(--label);

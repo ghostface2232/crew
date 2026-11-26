@@ -245,6 +245,8 @@ const FOLD_STAGES_AFTER = 1;
 /** A stage with this many jobs or fewer stays open by default, as reopening each one would cost more than it saves. */
 const STAGE_OPENS_UP_TO = 3;
 const openStages = new Map<string, boolean>();
+/** Finished missions whose wrap-up the user opened, kept as a mission's state is; the rest stay folded. */
+const openSummaries = new Map<string, boolean>();
 const PRESETS = translated((): [PresetName | null, string][] => [[null, t('Default')], ['economy', t('Economy')], ['balanced', t('Balanced')], ['best', t('Best')]]);
 
 /** A chip that names a pull request's most urgent status and counts the others the lead must act on; it opens the pull request. */
@@ -361,6 +363,11 @@ export const MissionPanel = memo(function MissionPanel({
   const setOpenStage = (stageKey: string, value: boolean) => {
     openStages.set(stageKey, value);
     setStagesVersion((version) => version + 1);
+  };
+  const [summaryOpen, setSummaryOpenState] = useState(() => openSummaries.get(mission.id) ?? false);
+  const setSummaryOpen = (value: boolean) => {
+    openSummaries.set(mission.id, value);
+    setSummaryOpenState(value);
   };
   return (
     <section
@@ -490,9 +497,17 @@ export const MissionPanel = memo(function MissionPanel({
         </div>
         {mission.outcome && <p className="mission-outcome selectable">{mission.outcome}</p>}
         {mission.summary && mission.state === 'done' && (
-          <div className="mission-summary selectable" role="group" aria-label={t('Wrap-up')}>
-            <ReportText text={mission.summary} />
-          </div>
+          // Folded until asked for: with several finished cards open, each wrap-up in full buries the cards themselves.
+          <>
+            {summaryOpen && (
+              <div className="mission-summary selectable" role="group" aria-label={t('Wrap-up')}>
+                <ReportText text={mission.summary} />
+              </div>
+            )}
+            <button className="reveal-toggle" aria-expanded={summaryOpen} onClick={() => setSummaryOpen(!summaryOpen)}>
+              {summaryOpen ? t('Hide the wrap-up') : t('Show the wrap-up')}
+            </button>
+          </>
         )}
       </Collapse>
       {/* Its menu holds Mark Done, so the card only says so. */}

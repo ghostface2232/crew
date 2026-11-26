@@ -47,7 +47,7 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 | `panelPadding` | 24 | Detail panel and New Job sheet |
 | `panelWidth` | 420 | The detail panel's width until the user drags it; a drag keeps to `panelMinWidth` (360) to `panelMaxWidth` (760), and the page keeps `panelPageRoom` (240) visible beside it and its inset, so a narrow window lowers the limit. `panelWidth(_:page:)` applies all three |
 | `panelHandleWidth` | 12 | The strip on the panel's leading edge that takes a resize drag |
-| `rowInsets` | 10 × 12 | Job and session rows |
+| `rowInsets` | 12 × 12 | Job and session rows |
 | `rowGap` | 4 | Between rows of one kind: a mission's jobs and the list cards (Recently finished, Other jobs, Lead sessions) |
 | `insetPadding` | 12 | The gray inset (`inset()`) holding a detail section's contents, or an agent card's sessions or jobs. The agent card leaves the inset out when there are none |
 | `iconColumn` | 20 | The column a row's icon or mark sits in, so titles line up |

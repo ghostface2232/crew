@@ -76,6 +76,7 @@ A mission groups one user command and the jobs it took, so the board can answer 
 
 ## History
 
+- 2026-11-27: A finished mission's card keeps its wrap-up folded until asked for. With several finished cards open, each wrap-up in full buried the cards themselves.
 - 2026-11-27: Decisions are now saved as the lead's summary, no longer in the user's words, and the card keeps them behind one row that lists them in the detail panel. On a long mission, each entry quoted the user's message and then restated it, and the list filled the card.
 - 2026-11-25: Added wrap-up summaries, remembered decisions, and per-project switches for autonomy and away-watching. Away watching reverses the 2026-11-20 rule against polling while a session is away, opted in per project so overnight failures are caught without adding a switch to every PR chip.
 - 2026-11-22: The progress ring on a mission card's title row was removed from the board and the app, with its formula (`missionProgress`), because it moved by stage rather than by measured work and the stage track already shows the same progress.

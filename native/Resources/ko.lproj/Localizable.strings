@@ -80,6 +80,8 @@
 "Details width" = "상세 정보 너비";
 "%lld points" = "%lld포인트";
 "Wrap-up" = "마무리 요약";
+"Show the wrap-up" = "마무리 요약 보기";
+"Hide the wrap-up" = "마무리 요약 숨기기";
 "Decisions" = "결정 사항";
 "1 decision" = "결정 1개";
 "%lld decisions" = "결정 %lld개";

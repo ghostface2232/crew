@@ -1,6 +1,6 @@
 {
   "name": "crew",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Lead a crew of coding agents from Codex or Claude Code: Codex and Claude lead, Codex implements and cross-reviews, Antigravity edits wording, with a live status board.",
   "author": {
     "name": "baemingwan"

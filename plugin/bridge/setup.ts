@@ -343,7 +343,7 @@ export type SetupItem = {
 };
 
 /**
- * The checklist's answer, kept for a while: a check starts five CLIs, and the board and the app each ask every
+ * The checklist's answer, kept for a while: a check runs several CLI commands, and the board and the app each ask every
  * minute for as long as they are open. A complete checklist is kept for ten minutes; one with something missing,
  * or a check that failed, for one, so a fix shows soon.
  */
@@ -405,7 +405,7 @@ export function ledgerItem(home = HOME): SetupItem | null {
 }
 
 /** Checks what a Codex session needs to lead so the user can set it up before starting their first Crew job. */
-async function codexLeadItems(bin: string): Promise<SetupItem[]> {
+async function codexLeadItems(bin: string): Promise<{ registered: boolean; plugin: SetupItem; hooks?: SetupItem }> {
   // Only Crew's marketplace: the whole list includes remote marketplaces, which can take a minute and megabytes.
   const list = await run(bin, ['plugin', 'list', '--marketplace', 'crew'], 60_000);
   // Columns are padded with two or more spaces: id, status ("installed, enabled", "not installed"), version, source.
@@ -417,14 +417,12 @@ async function codexLeadItems(bin: string): Promise<SetupItem[]> {
   const expected = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, '.codex-plugin', 'plugin.json'), 'utf8')).version;
   const ok = installed && version === expected;
   const detail = !installed ? 'Not installed.' : ok ? `Installed (${version})` : `Installed (${version ?? 'unknown version'}); this copy is ${expected}.`;
-  const items: SetupItem[] = [{
+  const plugin: SetupItem = {
     id: 'codex-plugin', label: 'Crew plugin in Codex', ok, detail, repairable: true,
     summary: ok ? 'Installed' : 'Select Install to set up the Crew plugin in Codex.',
-  }];
+  };
   // Trust is read by this copy's hook keys, so a copy of another version is reinstalled before its hooks are asked about.
-  if (!ok) return items;
-  items.push(await codexHooksItem(bin));
-  return items;
+  return { registered: installed, plugin, hooks: ok ? await codexHooksItem(bin) : undefined };
 }
 
 /** The Crew hooks' trust as Codex reports it; never "trusted" unless Codex says every one is. */
@@ -506,6 +504,23 @@ async function withAppServer<T>(bin: string, timeout: number, use: (request: App
   }
 }
 
+async function claudeLoginItem(): Promise<SetupItem> {
+  const item = { id: 'claude-login', label: 'Claude Code sign-in' };
+  const status = await run('claude', ['auth', 'status', '--json']);
+  let loggedIn: unknown;
+  try {
+    loggedIn = JSON.parse(status.out)?.loggedIn;
+  } catch { /* Older CLIs may lack the status command. */ }
+  if (status.ok && loggedIn === true) return { ...item, ok: true, detail: 'Signed in.', summary: 'Complete' };
+  if (loggedIn === false) return { ...item, ok: false, detail: 'Run `claude auth login` in a terminal.', summary: 'Sign in to Claude Code.' };
+  // Only a clear "signed out" fails: an item nothing can repair would keep the checklist up for a CLI that cannot say,
+  // such as an older version or a sign-in this command does not report.
+  const detail = /unknown (command|option)|unrecognized (command|option)/i.test(status.out)
+    ? 'This Claude Code version has no supported sign-in status command.'
+    : 'Could not check Claude Code sign-in.';
+  return { ...item, ok: true, detail, summary: 'Not checked' };
+}
+
 /** What Crew needs, as the app's checklist and `crew doctor` show it. Signing in is always left to the user. */
 export async function checks(): Promise<SetupItem[]> {
   const config = loadConfig();
@@ -515,6 +530,11 @@ export async function checks(): Promise<SetupItem[]> {
     run(config.codex.bin, ['--version']),
     run(config.antigravity.bin, ['--version']),
   ]);
+  const [claudeLogin, codexLogin, codexLead] = await Promise.all([
+    claude.ok ? claudeLoginItem() : null,
+    codex.ok ? run(config.codex.bin, ['login', 'status']) : null,
+    codex.ok ? codexLeadItems(config.codex.bin) : null,
+  ]);
   const items: SetupItem[] = [
     {
       id: 'claude', label: 'Claude Code', ok: claude.ok,
@@ -522,22 +542,26 @@ export async function checks(): Promise<SetupItem[]> {
       summary: claude.ok ? 'Installed' : 'Install Claude Code from claude.com/code.',
     },
   ];
+  if (claudeLogin) items.push(claudeLogin);
   const plugin = plugins?.find((entry) => entry.id === 'crew@crew');
   const here = plugin?.readFromFolder && samePath(plugin.readFromFolder, path.join(registeredRoot(), 'plugin'));
-  items.push({
-    id: 'plugin',
-    label: 'Crew plugin',
-    ok: Boolean(plugin),
-    detail: !claude.ok ? 'Needs Claude Code.' : !plugin ? 'Not installed.' : here ? `Installed (${plugin.version})` : `Installed from ${plugin.readFromFolder ?? 'another copy'} (${plugin.version})`,
-    summary: plugin ? 'Installed' : claude.ok ? 'Select Install to add the Crew plugin.' : 'Install Claude Code first.',
-    repairable: claude.ok,
-  });
+  // Claude Code's plugin. A user who leads only from Codex has Codex's plugin as its own item below, so the same plugin is
+  // not asked for twice; with neither host there is nothing to install the plugin into.
+  if (claude.ok || !codexLead) {
+    items.push({
+      id: 'plugin',
+      label: 'Crew plugin',
+      ok: Boolean(plugin),
+      detail: !claude.ok ? 'Needs Claude Code or Codex.' : !plugin ? 'Not installed.' : here ? `Installed (${plugin.version})` : `Installed from ${plugin.readFromFolder ?? 'another copy'} (${plugin.version})`,
+      summary: plugin ? 'Installed' : claude.ok ? 'Select Install to add the Crew plugin.' : 'Install Claude Code or Codex first.',
+      repairable: claude.ok,
+    });
+  }
   const command = fs.existsSync(COMMAND) || fs.existsSync(`${COMMAND}.cmd`);
   items.push({
     id: 'command', label: '`crew` command', ok: command, detail: command ? COMMAND : 'Not installed.', repairable: true,
     summary: command ? 'Installed' : 'Select Install to add the `crew` command.',
   });
-  const codexLogin = codex.ok ? await run(config.codex.bin, ['login', 'status']) : null;
   items.push({
     id: 'codex', label: 'Codex CLI', ok: codex.ok,
     detail: codex.ok ? codex.out : 'Not found. Install Codex, then run `codex login`.',
@@ -548,7 +572,8 @@ export async function checks(): Promise<SetupItem[]> {
     detail: codexLogin.ok ? lastLine(codexLogin.out) : 'Run `codex login` in a terminal.',
     summary: codexLogin.ok ? 'Complete' : 'Run `codex login` to sign in.',
   });
-  if (codex.ok) items.push(...(await codexLeadItems(config.codex.bin)));
+  if (codexLead) items.push(codexLead.plugin);
+  if (codexLead?.hooks) items.push(codexLead.hooks);
   if (config.antigravity.enabled) {
     items.push({
       id: 'antigravity', label: 'Antigravity CLI', ok: agy.ok,

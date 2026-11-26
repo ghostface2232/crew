@@ -1,12 +1,12 @@
 # Delivery
 
-The daemon keeps news for the lead and uses Claude Code hooks to wake an idle session when a job finishes or needs attention. Lead tools and hook digests offer the news until the lead echoes a receipt.
+The daemon keeps news for the lead and wakes an idle session when a job finishes or needs attention, using Claude Code hooks for a Claude lead or a queued note in its thread for a Codex lead. Lead tools and hook digests offer the news until the lead echoes a receipt.
 
 **Key files:** `plugin/bridge/daemon.ts`, `mcp.ts`, `wake.ts`, `report.ts`, `context.ts`, and `codex-lead.ts`. See [jobs.md](jobs.md) for lead tools, [missions.md](missions.md#pull-requests) for PR watches, and [daemon-api.md](daemon-api.md) for hook authentication and event formats.
 
 ## News and ownership
 
-The daemon owns delivery state in `jobs.json`. Each job records the starting MCP server's `CLAUDE_CODE_SESSION_ID` as `lead`. Board and legacy jobs start unowned; when a session acts on a job through a Crew tool, the MCP server or wake hook adopts the job before offering news. Completions, failures (including restart recovery), lead questions, decision requests, and updates from [watched pull requests](missions.md#pull-requests) append immutable `News` snapshots with a per-subject `newsSeq`. Routine progress does not create news.
+The daemon owns delivery state in `jobs.json`. Each job records the starting lead session ID as `lead` (`CLAUDE_CODE_SESSION_ID` in Claude Code, or the tool call's `_meta.sessionId` in Codex). Board and legacy jobs start unowned; when a session acts on a job through a Crew tool, the MCP server or wake hook adopts the job before offering news. Completions, failures (including restart recovery), lead questions, decision requests, and updates from [watched pull requests](missions.md#pull-requests) append immutable `News` snapshots with a per-subject `newsSeq`. Routine progress does not create news.
 
 ## Receipts and leases
 

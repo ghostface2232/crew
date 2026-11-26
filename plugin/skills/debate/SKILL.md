@@ -1,6 +1,6 @@
 ---
 name: debate
-description: Debate a hard, tricky, or important decision with the supporting engineer (Codex by default) before acting on it, in a few read-only rounds that end with a conclusion. Use when the user invokes /crew:debate or asks to debate, argue through, or stress-test a design or decision with Codex.
+description: Debate a hard, tricky, or important decision with the other agent (Codex under a Claude Code lead or Claude under a Codex lead by default) before acting on it, in a few read-only rounds that end with a conclusion. Use when the user invokes /crew:debate or asks to debate, argue through, or stress-test a design or decision with Codex or Claude.
 argument-hint: <decision to debate>
 ---
 

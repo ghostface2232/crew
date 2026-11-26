@@ -43,7 +43,9 @@ G2 (`--json` output) and G3 (activity signal and threshold hook) remain open in 
 
 `route` assigns work only to a role's configured holders or the lead. It treats a `tight` window as `ok` when its reset is within 15 minutes or 10% of the window's duration, whichever is longer (15 minutes if no duration is recorded). All applicable `tight` windows must meet their own threshold for the holder to count as `ok`, and the reason includes the reset time.
 
-Among usable holders, routing prefers Antigravity for `polish` and Codex for other roles, placing Claude last among workers and the lead after the workers. A holder with room takes precedence over a `tight` or `exhausted` one. Within the same usable status (`ok` or `tight`), a holder drops behind its peers if its longest applicable window has less than half the quota expected under even spending—for example, with 80% of the window's time left, the tie-breaker applies below 40% quota remaining. It never changes the holder's status, and an `unknown` or `stale` reading keeps its place in the preference order.
+Among usable holders, routing prefers Antigravity for `polish` and Codex for other roles, placing Claude last among workers and the lead after the workers. Even when a role lists the lead's own agent, routing considers it only when no worker can take the work (because none is listed, enabled, or able to run the app). A `tight` or `exhausted` worker's row in the table below still applies. A holder with room takes precedence over a `tight` or `exhausted` one. Within the same usable status (`ok` or `tight`), a holder drops behind its peers if its longest applicable window has less than half the quota expected under even spending—for example, with 80% of the window's time left, the tie-breaker applies below 40% quota remaining. It never changes the holder's status, and an `unknown` or `stale` reading keeps its place in the preference order.
+
+When the lead's own agent holds `fix` (the default, where both Codex and Claude hold it), routing keeps fixing with the lead to triage and decide whether to fix the findings itself or share them with a worker—considering sharing first when there is a lot to fix—and hands the fix to a worker with room only when the lead is short (if none has room, the lead fixes it itself); when only workers hold `fix`, the table below applies.
 
 A `review`, `verify`, or `debate` goes to an available configured holder, including one with `tight` quota. If all usable holders are `exhausted` and every exhausted deciding window on the selected holder resets within 30 minutes, the lead runs the cross-check after the last reset: the holder keeps the work, `deferUntil` gives that reset time, and `degraded` stays `false` (otherwise the `exhausted` column below applies).
 
@@ -65,7 +67,7 @@ A Codex lead asks with `lead=codex`. "The lead" in the table means that session,
 
 `preset` in `~/.crew/config.json` is `economy`, `balanced`, or `best` (unset by default). A role setting overrides the preset, and the preset overrides the agent's global config.
 
-| Preset | Codex effort | Lead's subagents | Worker tier cap (`maxTier`) |
+| Preset | Codex and Claude effort | Lead's subagents | Worker tier cap (`maxTier`) |
 | --- | --- | --- | --- |
 | `economy` | `low` | `haiku`, `sonnet` at most (`subagentMax`) | `standard` |
 | `balanced` | `medium` | `sonnet` | none |
@@ -73,9 +75,9 @@ A Codex lead asks with `lead=codex`. "The lead" in the table means that session,
 
 `subagentModel` and `subagentMax` name Claude models, so a Codex lead is told to keep its subagents on its own model under every preset.
 
-Under `economy`, `maxTier: "standard"` caps worker models at the `standard` tier (Sol for Codex, Hydrogen for Antigravity): a higher tier or larger named model is lowered to it, while the lead may still set a custom effort per job.
+Under `economy`, `maxTier: "standard"` caps worker models at the `standard` tier (Sol for Codex, Hydrogen for Antigravity, Sonnet for Claude): a higher tier or larger named model is lowered to it, while the lead may still set a custom effort per job.
 
-Built-in presets name no worker models because account availability differs. Customize models under `presets`:
+Built-in presets name no worker models because account availability differs. Customize a preset's `codex`, `claude`, or `antigravity` `model` and `effort` under `presets`:
 
 ```json
 {
@@ -103,8 +105,8 @@ A job can name its difficulty via `tier` (`delegate`, `review`, `polish`, `debat
 
 Tiers name model families, not versions. For Codex, Crew picks the newest unhidden model in that family from `$CODEX_HOME/models_cache.json` (falling back to Codex's default). For Antigravity, Crew matches the session's offered model list (skipping orchestrators) and falls back to the agent's default. Because Antigravity element names do not encode rank, families are mapped manually. `Neon` holds `frontier`. The displaced `Argon` stays recorded in `FORMER_FAMILIES` so explicit Argon models still run and preset caps still lower them.
 
-- **Model precedence:** explicit job `model` (a versionless family name such as `"Astra"` resolves as its tier), job `tier`, configured model (role, preset, or `codex.model`/`antigravity.model`), then default tier.
-- **Effort precedence:** job `effort`, role or preset `effort`, then (for Codex) named tier effort, `codex.effort`, or default tier effort. Under `economy`, jobs stay `low` unless the lead overrides `effort`. Antigravity accepts `effort` only from the job, role, or preset (mapped to `thought_level`).
+- **Model precedence:** explicit job `model` (a versionless family name such as `"Astra"` resolves as its tier), job `tier`, configured model (role, preset, or `codex.model`/`antigravity.model`/`claude.model`), then default tier.
+- **Effort precedence:** job `effort`, role or preset `effort`, then for Codex a named tier effort, `codex.effort`, or default tier effort, and for a Claude worker `claude.effort` when no tier is named. Under `economy`, jobs stay `low` unless the lead overrides `effort`. Antigravity accepts `effort` only from the job, role, or preset (mapped to `thought_level`).
 
 ## Tests
 

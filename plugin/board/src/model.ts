@@ -3,6 +3,12 @@ import type { BoardJob, BoardPull, BoardState, ClaudeSession, Mission } from './
 import { t, translated } from './i18n.ts';
 
 export const NAMES = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity' };
+/**
+ * Claude Code takes these aliases for its newest model of each family, and the efforts `claude --effort` accepts, as
+ * the daemon validates them. The daemon lists no Claude models, since Claude Code has no model listing to read.
+ */
+export const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+export const CLAUDE_MODELS = [['haiku', 'Haiku'], ['sonnet', 'Sonnet'], ['opus', 'Opus']].map(([id, name]) => ({ id, name, efforts: CLAUDE_EFFORTS }));
 /** The agent a lead session runs in: Claude Code, or Codex. */
 export const sessionAgent = (session: Pick<ClaudeSession, 'host'>) => session.host ?? 'claude';
 /** Every holder, in the order a role lists them, as config.ts HOLDERS does. */
@@ -45,7 +51,7 @@ export function resolveDraft(info: RoleInfo[], draft: RoleSettings, saved: Board
     const base = own.agents?.length ? { agents: sortHolders(own.agents) } : parent ? resolved[parent] : saved[role] && { agents: saved[role].agents };
     if (!base) continue;
     const merged: RoleAssignment = { agents: base.agents };
-    for (const agent of base.agents.filter((holder): holder is WorkerAgent => holder !== 'claude')) {
+    for (const agent of base.agents) {
       const settings = agentSettings({ ...base[agent], ...agentSettings(own[agent]) });
       if (settings) merged[agent] = settings;
     }

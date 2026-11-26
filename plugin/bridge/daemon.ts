@@ -1150,7 +1150,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
           reviewer: role === 'review' && job ? job.agent : body.reviewer,
           ...(!audit && (role === 'review' || body.of_job !== undefined || body.of_model !== undefined) ? { of: { ...(built ? { job: built.id } : {}), model: builtModel, ...(built?.role === 'fix' ? { fix: true as const } : {}) } } : {}),
           // Off, a rating is not kept: the lead is told so, and the line stands without it.
-          ...(body.rating !== undefined && peerRatings ? { rating: body.rating } : {}),
+          ...(body.rating !== undefined && peerRatings ? { rating: body.rating, ...(body.lead === 'codex' ? { ratedBy: 'codex' as const } : {}) } : {}),
           findings: body.findings ?? {},
           ...(body.declined !== undefined ? { declined: body.declined } : {}),
           ...(body.outcome !== undefined ? { outcome: body.outcome } : {}),

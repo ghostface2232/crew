@@ -651,8 +651,11 @@ final class SettingsModel {
                     let inherited = RoleSetting(assignment)[agent]
                     let own = setting[agent]
                     let merged = RoleAgentSettings(model: own?.model ?? inherited?.model, effort: own?.effort ?? inherited?.effort)
-                    if agent == "codex" { assignment.codex = merged.normalized() }
-                    else { assignment.antigravity = merged.normalized() }
+                    switch agent {
+                    case "codex": assignment.codex = merged.normalized()
+                    case "claude": assignment.claude = merged.normalized()
+                    default: assignment.antigravity = merged.normalized()
+                    }
                 }
                 resolved[info.role] = assignment
             }

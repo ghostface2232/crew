@@ -55,7 +55,7 @@ export type RouteKind = Role | 'lead';
 
 export interface RouteDecision {
   kind: RouteKind;
-  /** Who should do it. For a role this is its holder or "claude" (the lead does it itself); never an agent the user did not assign. */
+  /** Who should do it. The leading agent means the lead does the work itself. */
   assignee: Agent;
   reason: string;
   /** Who to turn to next if the assignee fails. */
@@ -448,9 +448,20 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
   const holders = [...workersFor(kind, roles[kind], [], you), ...roles[kind].agents.filter((agent) => agent === you || (agent !== LEAD && roleInfo(kind).unable?.includes(agent)))];
   const listed = holders.map((agent) => ({ agent, status: status(agent) }));
   // A holder that cannot do this kind of work is never suggested: a disabled agent, or one that cannot run the app for verify.
+  // The lead's own agent is a fallback, not a peer: a worker that is short keeps its role's policy, so a cross-check stays
+  // one or is reported as skipped, and the lead takes the work as a holder only when no worker can.
   const usable: Agent[] = workersFor(kind, roles[kind], disabled, you);
-  if (roles[kind].agents.includes(you)) usable.push(you);
+  if (!usable.length && roles[kind].agents.includes(you)) usable.push(you);
   const able = (agent: Agent) => usable.includes(agent);
+  // Fixing follows triage, which is the lead's, so a lead that holds it decides whether to share the fix with a worker;
+  // only its own short usage, with a worker that has room, hands the fix over.
+  if (kind === 'fix' && roles.fix.agents.includes(you)) {
+    const spare = usable.filter((agent) => agent !== you && status(agent) !== 'exhausted');
+    const roomy = spare.find((agent) => !short(agent));
+    if (short(you) && roomy) return { ...plain(roomy, withResets(`${why(you)} Hand the fix to ${label(roomy)}.`, [you]), [you]), holders: listed };
+    const share = spare.length ? `Decide whether to fix it yourself or share it with ${spare.map(label).join(' or ')}; when there is a lot to fix, consider sharing it first.` : 'Fix the findings yourself.';
+    return { ...plain(you, share, spare), holders: listed };
+  }
   if (!usable.length) {
     const who = holders.map(name).join(' and ');
     return { kind, assignee: you, reason: `${who} cannot take ${kind} work now (disabled, or unable to run the app). Do it yourself, and say that the cross-check was skipped.`, fallback: [], degraded: true, deferUntil: null, holders: listed };

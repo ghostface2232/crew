@@ -746,7 +746,7 @@ export class Jobs {
     // The MCP server keeps a role the lead's own agent holds with the lead; a lead calling the API directly gets the same answer.
     if (picked === 'codex' && codexLead) throw new Error(`${roleName} is held by Codex, the lead's own agent, which starts no Codex worker: the lead does the work itself, in a subagent, or in a session it starts.`);
     if (picked === LEAD && !claudeWorker) throw new Error(`${roleName} is held by Claude, which runs no worker here: start it from a lead session. Claude Code does the work itself or in a subagent, and a Codex lead starts a Claude worker.`);
-    const role: { agent: Agent; model?: string; effort?: string; ownModel?: boolean } = claudeWorker ? { agent: LEAD } : effectiveRole(config, roleName, preset, picked as WorkerAgent);
+    const role = effectiveRole(config, roleName, preset, picked, codexLead ? 'codex' : LEAD);
     const { agent } = role;
     if (spec.runsApp && spec.kind === 'polish') throw new Error('A polish job cannot run the app: an editor only changes wording. Drop runs_app.');
     if (spec.runsApp && spec.kind === 'review' && !workerInfo(agent).reviewerRunsGit) {
@@ -922,7 +922,7 @@ export class Jobs {
         reviewTarget: spec.review?.target,
         targets: spec.targets ?? [],
         check: spec.check?.trim() || undefined,
-        ...pickModel(agent, spec, { ...role, ownModel: agent !== LEAD && Boolean(config.roles[roleName][agent]?.model) }, config, preset),
+        ...pickModel(agent, spec, { ...role, ownModel: Boolean(config.roles[roleName][agent]?.model) }, config, preset),
         sessionId: null,
         createdAt: now,
         turnStartedAt: now,

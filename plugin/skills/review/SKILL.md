@@ -1,6 +1,6 @@
 ---
 name: review
-description: Review a change with the crew, as a fresh-context self-review and a cross-review by Codex, in parallel, then fix what holds up. Use when the user invokes /crew:review or asks for the crew, or Codex, to review a change.
+description: Review a change with the crew, as a fresh-context self-review and a cross-review by the other agent (by default Codex under a Claude Code lead, Claude under a Codex lead), in parallel, then fix what holds up. Use when the user invokes /crew:review or asks for the crew, Codex, or Claude to review a change.
 argument-hint: "[uncommitted | branch <base> | commit <sha>]"
 ---
 

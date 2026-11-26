@@ -63,12 +63,22 @@ import Testing
             #expect((body["review"] != nil) == (info.kind == "review"))
         }
     }
+    @Test func claudeSettingsRoundTripAndPresetsShowClaude() throws {
+        // A Claude worker's model and effort, for a Codex lead, survive decoding and encoding like the other agents'.
+        let data = Data("{\"agents\":[\"codex\",\"claude\"],\"claude\":{\"model\":\"opus\",\"effort\":\"xhigh\"}}".utf8)
+        let assignment = try JSONDecoder().decode(RoleAssignment.self, from: data)
+        #expect(assignment.claude == RoleAgentSettings(model: "opus", effort: "xhigh"))
+        #expect(try JSONDecoder().decode(RoleAssignment.self, from: JSONEncoder().encode(assignment)) == assignment)
+        let preset = try JSONDecoder().decode(Preset.self, from: Data("{\"codex\":{\"effort\":\"low\"},\"claude\":{\"effort\":\"low\"}}".utf8))
+        #expect(preset.details.map(\.label).prefix(2) == ["Codex", "Claude"])
+    }
     @Test func legacyHoldersAndWorkerSettingsDecodeIntoTheNewShape() throws {
         for agent in RoleAssignment.holderOrder {
             let data = Data("{\"agent\":\"\(agent)\",\"also\":[\"claude\",\"antigravity\",\"codex\",\"codex\"],\"model\":\"legacy-model\",\"effort\":\"high\"}".utf8)
             let assignment = try JSONDecoder().decode(RoleAssignment.self, from: data)
             #expect(assignment.holders == RoleAssignment.holderOrder)
-            #expect(assignment.workerHolders == ["codex", "antigravity"])
+            #expect(assignment.workerHolders == RoleAssignment.holderOrder)
+            #expect(assignment.claude == nil)
             #expect(assignment.codex == (agent == "codex" ? RoleAgentSettings(model: "legacy-model", effort: "high") : nil))
             #expect(assignment.antigravity == (agent == "antigravity" ? RoleAgentSettings(model: "legacy-model") : nil))
             #expect(try JSONDecoder().decode(RoleSetting.self, from: data) == RoleSetting(assignment))

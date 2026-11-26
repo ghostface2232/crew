@@ -16,7 +16,7 @@ IDs R1 to R16 keep the meanings other documents refer to.
 | --- | --- | --- |
 | R1 | Agents may be connected by any background mechanism, but the user-facing surface stays clean and uncluttered | Required |
 | R2 | Claude Desktop as the lead's app is the primary mode. Crew's own screen grows out of the status board alongside it | Required |
-| R3 | Each role has a default agent: the session the user starts in leads and self-reviews, whether Claude Code or Codex; Codex implements separable pieces and cross-reviews; Antigravity checks UX copy and tidies comments and docs. The user can reassign any role, including Antigravity's | Required |
+| R3 | Each role has a default agent: the session the user starts in leads and self-reviews, whether Claude Code or Codex; both Codex and Claude hold building and review by default, so the agent other than the lead (Codex under a Claude Code lead, Claude under a Codex lead) implements separable pieces and cross-reviews first; Antigravity checks UX copy and tidies comments and docs. The user can reassign any role, including Antigravity's | Required |
 | R4 | In Claude Desktop lead mode, the services' own features stay usable: subagents, inter-session messaging, Remote Control, computer use, built-in and headless browsers, Chrome, side chat, MCP, compaction | Required |
 | R5 | Each agent's activity is visible in near real time, including stalls, exhausted usage limits, and error stops | Required |
 | R6 | Sessions started through Crew also appear in each service's desktop app where the service allows it | Nice to have |

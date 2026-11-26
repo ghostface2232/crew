@@ -841,6 +841,7 @@ test('a waiting job resumes on a decision and reports the limit kind on failure'
   const failed = await settled(limited.jobs, await limited.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } }));
   assert.equal(failed.state, 'failed');
   assert.equal(limited.events.at(-1)?.kind, 'limit');
+  assert.match(describe(failed), /Run your self-reviewer again with the review focus, and tell the user the cross-review was skipped/);
 });
 
 test('a finished job can be continued, and only echoed receipts acknowledge it', async () => {
@@ -1160,8 +1161,8 @@ test('a role assigned to a disabled or unknown agent fails with the reason, and 
   assert.throws(() => resolveConfig({ roles: { review: { agent: 'cursor' as never } } }), /roles\.review\.agent is "cursor"; use one of: codex, antigravity/);
   // Unset roles keep their defaults, and roles added later follow their parents.
   assert.deepEqual(resolveConfig({ roles: { polish: { antigravity: { model: 'm' } } } }).roles, {
-    delegate: { agents: ['codex'] }, refactor: { agents: ['codex'] }, release: { agents: ['codex'] }, debate: { agents: ['codex'] },
-    review: { agents: ['codex'] }, verify: { agents: ['codex'] }, fix: { agents: ['claude'] }, polish: { agents: ['antigravity'], antigravity: { model: 'm' } },
+    delegate: { agents: ['codex', 'claude'] }, refactor: { agents: ['codex', 'claude'] }, release: { agents: ['codex', 'claude'] }, debate: { agents: ['codex', 'claude'] },
+    review: { agents: ['codex', 'claude'] }, verify: { agents: ['codex', 'claude'] }, fix: { agents: ['codex', 'claude'] }, polish: { agents: ['antigravity'], antigravity: { model: 'm' } },
   });
 
   // A table that is not exactly right must not quietly fall back to the defaults.
@@ -1705,10 +1706,47 @@ test('the lead picks one of a role\'s holders per job, and a role Claude holds s
   await assert.rejects(jobs.create({ ...delegate, agent: 'codex', lead: codexLead }), /held by Codex, the lead's own agent, which starts no Codex worker/);
   assert.equal((await jobs.create({ ...delegate, lead: codexLead })).agent, 'antigravity');
   assert.equal((await jobs.create({ ...delegate, lead: claudeLead })).agent, 'codex');
-  // Held by Codex alone, the role is the Codex lead's own work, while a board-started job still goes to Codex.
+  // By default Claude builds too, so a Codex lead's job goes to a Claude worker, and a board-started one to Codex.
   plain.jobs.delivery.host(codexLead, 'codex');
-  await assert.rejects(plain.jobs.create({ ...delegate, lead: codexLead }), /held by Codex, the lead's own agent/);
+  assert.equal((await plain.jobs.create({ ...delegate, lead: codexLead })).agent, 'claude');
   assert.equal((await plain.jobs.create(delegate)).agent, 'codex');
+  // Held by Codex alone, the role is the Codex lead's own work, while a board-started job still goes to Codex.
+  const codexOnly = resolveConfig({ notify: false, codex: config.codex, roles: { delegate: { agents: ['codex'] } } });
+  const alone = harness((ctl) => ctl.done('ok'), () => codexOnly);
+  t.after(() => { alone.jobs.flush(); fs.rmSync(alone.home, { recursive: true, force: true, maxRetries: 5 }); });
+  alone.jobs.delivery.host(codexLead, 'codex');
+  await assert.rejects(alone.jobs.create({ ...delegate, lead: codexLead }), /held by Codex, the lead's own agent/);
+  assert.equal((await alone.jobs.create(delegate)).agent, 'codex');
+});
+
+test('a Claude worker uses job, role, preset, and global settings in order', async (t) => {
+  const repo = tempRepo();
+  let current = resolveConfig({
+    notify: false,
+    claude: { bin: 'claude', model: 'haiku', effort: 'xhigh' },
+    roles: { delegate: { claude: { model: 'opus', effort: 'max' } } },
+    preset: 'economy',
+    presets: { economy: { claude: { model: 'opus' } } },
+  });
+  const { jobs, home } = harness((ctl) => ctl.done('ok'), () => current);
+  t.after(() => {
+    jobs.flush();
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+  const lead = '019d0000-0000-7000-8000-000000000001';
+  jobs.delivery.host(lead, 'codex');
+  const start = async (spec: Partial<JobSpec> = {}) => {
+    const job = await settled(jobs, await jobs.create({ kind: 'delegate', lead, cwd: repo, task: 'x', isolation: 'in_place', ...spec }));
+    assert.equal(job.agent, 'claude');
+    return [job.model, job.effort, job.tier];
+  };
+  assert.deepEqual(await start({ model: 'haiku', effort: 'medium' }), ['haiku', 'medium', 'light']);
+  assert.deepEqual(await start(), ['opus', 'max', undefined]);
+  current = { ...current, roles: resolveConfig({}).roles };
+  assert.deepEqual(await start(), ['sonnet', 'low', 'standard']);
+  assert.deepEqual(await start({ tier: 'frontier' }), ['sonnet', 'low', 'standard']);
+  assert.deepEqual(await start({ preset: null }), ['haiku', 'xhigh', undefined]);
 });
 
 test('a job runs under the preset it was given and keeps it, capping its tier by that preset', async (t) => {

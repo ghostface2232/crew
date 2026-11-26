@@ -234,17 +234,26 @@ test('a built copy registers with Codex, records it as complete only when both h
   const failClaude = path.join(profile, 'fail-claude');
   const malformedClaude = path.join(profile, 'malformed-claude');
   const failVersion = path.join(profile, 'fail-version');
+  const claudeAuth = path.join(profile, 'claude-auth');
+  const missingCodexPlugin = path.join(profile, 'missing-codex-plugin');
   const codexVersion = JSON.parse(fs.readFileSync('plugin/.codex-plugin/plugin.json', 'utf8')).version;
   const log = `require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(1)) + '\\n');`;
   writeFakeBin(path.join(profile, 'claude'), `${log}
-    if (require('node:fs').existsSync(${JSON.stringify(failClaude)})) { console.error('temporary lookup failure'); process.exit(1); }
-    console.log(process.argv[2] === '--version' ? '2.1.326 (Claude Code)' : require('node:fs').existsSync(${JSON.stringify(malformedClaude)}) ? '[{}]' : '[]');`);
+    const fs = require('node:fs');
+    if (fs.existsSync(${JSON.stringify(failClaude)})) { console.error('temporary lookup failure'); process.exit(1); }
+    if (process.argv.slice(2).join(' ') === 'auth status --json') {
+      const mode = fs.existsSync(${JSON.stringify(claudeAuth)}) ? fs.readFileSync(${JSON.stringify(claudeAuth)}, 'utf8') : 'signed-in';
+      if (mode === 'unsupported') { console.error("error: unknown command 'auth'"); process.exit(1); }
+      console.log(JSON.stringify({ loggedIn: mode === 'signed-in' }));
+      process.exit(mode === 'signed-in' ? 0 : 1);
+    }
+    console.log(process.argv[2] === '--version' ? '2.1.326 (Claude Code)' : fs.existsSync(${JSON.stringify(malformedClaude)}) ? '[{}]' : '[]');`);
   writeFakeBin(path.join(profile, 'codex'), `${log}
     const fs = require('node:fs'); const args = process.argv.slice(2).join(' ');
     if (args === '--version' && fs.existsSync(${JSON.stringify(failVersion)})) { console.error('temporary version failure'); process.exit(1); }
     if (args === 'plugin marketplace list') console.log('MARKETPLACE  ROOT\\n' + (fs.existsSync(${JSON.stringify(marketplaces)}) ? fs.readFileSync(${JSON.stringify(marketplaces)}, 'utf8') : ''));
     if (args === 'plugin add crew@crew' && fs.existsSync(${JSON.stringify(failAdd)})) { console.error('no space left'); process.exit(1); }
-    if (args === 'plugin list --marketplace crew') console.log('crew@crew  installed, enabled  ${codexVersion}  local');
+    if (args === 'plugin list --marketplace crew') console.log(fs.existsSync(${JSON.stringify(missingCodexPlugin)}) ? 'crew@crew  not installed  local' : 'crew@crew  installed, enabled  ${codexVersion}  local');
     if (args === 'app-server') require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
       const { id, method } = JSON.parse(line);
       if (id === undefined) return;
@@ -335,7 +344,17 @@ test('a built copy registers with Codex, records it as complete only when both h
   const claudeCheck = setupItems.find((item) => item.id === 'claude');
   assert.equal(claudeCheck?.summary, 'Installed');
   assert.equal(claudeCheck?.detail, '2.1.326 (Claude Code)');
+  assert.equal(setupItems.find((item) => item.id === 'claude-login')?.ok, true);
   assert.equal(setupItems.find((item) => item.id === 'plugin')?.summary, 'Select Install to add the Crew plugin.');
+  fs.writeFileSync(claudeAuth, 'signed-out');
+  const signedOut = (await checks()).find((item: SetupItem) => item.id === 'claude-login');
+  assert.equal(signedOut?.ok, false);
+  assert.match(signedOut?.detail ?? '', /claude auth login/);
+  fs.writeFileSync(claudeAuth, 'unsupported');
+  const unsupported = (await checks()).find((item: SetupItem) => item.id === 'claude-login');
+  // A CLI that cannot say does not hold the checklist up: only a clear "signed out" fails.
+  assert.equal(unsupported?.ok, true);
+  assert.match(unsupported?.detail ?? '', /no supported sign-in status command/);
   // On Windows the registered root is the copy in the Crew home, which open sessions keep running through an update.
   const registeredRoot = JSON.parse(fs.readFileSync(record, 'utf8')).root;
   if (process.platform === 'win32') assert.match(registeredRoot, /[\\/]plugins[\\/][^\\/]+-built$/);
@@ -382,11 +401,23 @@ test('a built copy registers with Codex, records it as complete only when both h
   const appData = process.env.APPDATA;
   delete process.env.APPDATA;
   process.env.PATH = profile;
-  const codexOnly = await register(true).finally(() => {
+  const { codexOnly, codexOnlyItems, missingPlugin } = await (async () => {
+    const codexOnly = await register(true);
+    const codexOnlyItems: SetupItem[] = await checks();
+    fs.writeFileSync(missingCodexPlugin, '');
+    const missingPlugin: SetupItem[] = await checks();
+    return { codexOnly, codexOnlyItems, missingPlugin };
+  })().finally(() => {
     if (appData !== undefined) process.env.APPDATA = appData;
   });
   assert.equal(codexOnly.ok, true);
   assert.match(codexOnly.detail, /^Claude Code was not found\. Codex: Installed in Codex\./);
+  assert.equal(codexOnlyItems.some((item) => item.id === 'claude-login'), false);
+  // Without Claude Code, Codex's plugin is the one asked for, once, in its own item.
+  assert.equal(codexOnlyItems.some((item) => item.id === 'plugin'), false);
+  assert.equal(codexOnlyItems.find((item) => item.id === 'codex-plugin')?.ok, true);
+  assert.equal(missingPlugin.some((item) => item.id === 'plugin'), false);
+  assert.equal(missingPlugin.find((item) => item.id === 'codex-plugin')?.ok, false);
   assert.ok(fs.existsSync(record));
   assert.ok(fs.existsSync(path.join(profile, '.local', 'bin', 'crew')));
 });

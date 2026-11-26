@@ -29,7 +29,7 @@ test('saving roles keeps every other setting, drops blank fields, and returns th
   const delegate = { agents: ['codex'], codex: { effort: 'high' } };
   assert.deepEqual(saved.roleSettings, { delegate, polish: { agents: ['codex'] } });
   assert.deepEqual(saved.roles, {
-    delegate, refactor: delegate, release: delegate, debate: delegate, review: { agents: ['codex'] }, verify: { agents: ['codex'] }, fix: { agents: ['claude'] }, polish: { agents: ['codex'] },
+    delegate, refactor: delegate, release: delegate, debate: delegate, review: { agents: ['codex', 'claude'] }, verify: { agents: ['codex', 'claude'] }, fix: { agents: ['codex', 'claude'] }, polish: { agents: ['codex'] },
   });
   // The table is replaced as a whole: a role left out goes back to its default.
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {
@@ -167,12 +167,12 @@ test('no preset is set by default, and a setting on the role wins over the prese
   const best = resolveConfig({ preset: 'best', roles: { review: { codex: { effort: 'low' } }, delegate: { codex: { model: 'own' } } } });
   assert.deepEqual(effectiveRole(best, 'delegate'), { agent: 'codex', model: 'own', effort: 'high' });
   assert.deepEqual(effectiveRole(best, 'review'), { agent: 'codex', effort: 'low' });
-  // The built-in presets set Codex's effort only, and name no models.
+  // The built-in presets leave Antigravity alone and name no worker models.
   assert.deepEqual(effectiveRole(best, 'polish'), { agent: 'antigravity' });
 
   // A user's preset entry adds to the built-in one of the same name.
   const tuned = resolveConfig({ preset: 'economy', presets: { economy: { codex: { model: 'small' }, antigravity: { model: 'flash' } } } });
-  assert.deepEqual(tuned.presets.economy, { codex: { effort: 'low', model: 'small' }, antigravity: { model: 'flash' }, subagentModel: 'haiku', subagentMax: 'sonnet', maxTier: 'standard' });
+  assert.deepEqual(tuned.presets.economy, { codex: { effort: 'low', model: 'small' }, claude: { effort: 'low' }, antigravity: { model: 'flash' }, subagentModel: 'haiku', subagentMax: 'sonnet', maxTier: 'standard' });
   assert.deepEqual(effectiveRole(tuned, 'delegate'), { agent: 'codex', model: 'small', effort: 'low' });
   assert.deepEqual(effectiveRole(tuned, 'polish'), { agent: 'antigravity', model: 'flash' });
   assert.deepEqual(tuned.presets.best, PRESETS.best);
@@ -182,8 +182,8 @@ test('a role without agents follows its parent; one with agents starts fresh', (
   const config = resolveConfig({ roles: { delegate: { codex: { model: 'gpt-x', effort: 'high' } }, refactor: { agents: ['antigravity'] }, debate: { codex: { effort: 'medium' } }, review: { agents: ['antigravity'] } } });
   // The parent's settings belong to its agents, so they never reach a role given other agents.
   assert.deepEqual(config.roles.refactor, { agents: ['antigravity'] });
-  assert.deepEqual(config.roles.release, { agents: ['codex'], codex: { model: 'gpt-x', effort: 'high' } });
-  assert.deepEqual(config.roles.debate, { agents: ['codex'], codex: { model: 'gpt-x', effort: 'medium' } });
+  assert.deepEqual(config.roles.release, { agents: ['codex', 'claude'], codex: { model: 'gpt-x', effort: 'high' } });
+  assert.deepEqual(config.roles.debate, { agents: ['codex', 'claude'], codex: { model: 'gpt-x', effort: 'medium' } });
   assert.deepEqual(config.roles.verify, { agents: ['antigravity'] });
   assert.throws(() => resolveConfig({ roles: { deploy: { agents: ['codex'] } } as never }), /roles\.deploy is not a role; use one of: delegate, refactor, release, debate, review, verify, fix, polish/);
   assert.throws(() => resolveConfig({ roles: { verify: { agent: 'cursor' } } as never }), /roles\.verify\.agent is "cursor"/);
@@ -211,7 +211,29 @@ test('a preset that is not exactly valid is refused', () => {
   assert.throws(() => resolveConfig({ presets: { best: { codex: { speed: 'x' } } } as never }), /presets\.best\.codex\.speed is not a setting; use model or effort/);
   assert.deepEqual(effectiveRole(resolveConfig({ preset: 'best', presets: { best: { antigravity: { effort: 'high' } } } }), 'polish'), { agent: 'antigravity', effort: 'high' });
   assert.throws(() => resolveConfig({ presets: { best: { codex: { model: 1 } } } as never }), /must be a string/);
-  assert.throws(() => resolveConfig({ presets: { best: { lead: 'x' } } as never }), /use codex, antigravity, subagentModel, subagentMax, or maxTier/);
+  assert.throws(() => resolveConfig({ presets: { best: { lead: 'x' } } as never }), /use codex, antigravity, claude, subagentModel, subagentMax, or maxTier/);
+});
+
+test('Claude worker settings are saved, inherited, and validated', (t) => {
+  const home = tempDir();
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const file = path.join(home, 'config.json');
+  const presets = { best: { claude: { model: 'opus', effort: 'max' } } };
+  fs.writeFileSync(file, JSON.stringify({ presets }));
+  const { roles } = saveRoles(home, {
+    review: { claude: { model: 'sonnet', effort: '' } },
+    verify: { claude: { effort: 'xhigh' } },
+  });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {
+    presets,
+    roles: { review: { claude: { model: 'sonnet' } }, verify: { claude: { effort: 'xhigh' } } },
+  });
+  assert.deepEqual(roles.verify.claude, { model: 'sonnet', effort: 'xhigh' });
+  const config = resolveConfig({ roles, presets, preset: 'best' });
+  assert.deepEqual(effectiveRole(config, 'review', 'best', undefined, 'codex'), { agent: 'claude', model: 'sonnet', effort: 'max' });
+  assert.deepEqual(effectiveRole(config, 'review'), { agent: 'codex', effort: 'high' });
+  assert.throws(() => saveRoles(home, { review: { claude: { effort: 'minimal' } } }), /roles\.review\.claude\.effort must be one of/);
+  assert.throws(() => resolveConfig({ presets: { best: { claude: { effort: 'minimal' } } } }), /presets\.best\.claude\.effort must be one of/);
 });
 
 test('saving a preset keeps every other setting, and clearing it removes the key', () => {

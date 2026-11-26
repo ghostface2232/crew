@@ -16,12 +16,12 @@ A role is a kind of work the user assigns to one or more holders (`ROLE_INFO` in
 | `debate` | `delegate` (read-only) | `delegate` | Tests the lead's position on a hard decision (`debater.md`) |
 | `review` | `review` | | Static cross-review |
 | `verify` | `review` | `review` | Review that runs the app in a snapshot of the change (`unable: ["antigravity"]`) |
-| `fix` | `delegate` | | Fixing accepted review findings in the lead's code or a merged result (`engineer.md` + `fix.md`); held by Claude by default |
+| `fix` | `delegate` | | Fixing accepted review findings in the lead's code or a merged result (`engineer.md` + `fix.md`); held by Codex and Claude by default |
 | `polish` | `polish` | | Wording (`polisher.md`) |
 
 ## Role assignments
 
-Each tool maps to one or more roles, and `roles` in `~/.crew/config.json` names which agents hold each role. Without `roles`, defaults apply (implementation/review/refactor/release/debate/verify to Codex, fixing to Claude, wording to Antigravity).
+Each tool maps to one or more roles, and `roles` in `~/.crew/config.json` names which agents hold each role. Without `roles`, defaults apply (implementation/review/refactor/release/debate/verify/fixing to Codex and Claude, wording to Antigravity). Both are listed so either lead hands building and reviewing to the other agent first, keeping the lead only as a fallback; for fixing, the lead decides whether to fix the findings itself or share them.
 
 ```json
 {
@@ -33,7 +33,7 @@ Each tool maps to one or more roles, and `roles` in `~/.crew/config.json` names 
 }
 ```
 
-Unassigned roles and roles without `agents` inherit their parent's holders with their own per-agent settings overlaid. Listing `agents` starts fresh. Settings stay scoped per agent (`codex`, `antigravity`), and unused agents' settings are omitted. A role may have several holders, including `claude` (all have the same status in the assignment). A role held by the lead's own agent is the lead's own work: `claude` under a Claude lead, `codex` under a Codex lead. Every other holder runs as a worker, so under a Codex lead a role held by `claude` starts a Claude Code worker.
+Unassigned roles and roles without `agents` inherit their parent's holders with their own per-agent settings overlaid. Listing `agents` starts fresh. Settings stay scoped per agent (`codex`, `antigravity`, `claude`), and unused agents' settings are omitted. A role may have several holders, including `claude` (all have the same status in the assignment). A role held by the lead's own agent is the lead's own work: `claude` under a Claude lead, `codex` under a Codex lead. Every other holder runs as a worker, so under a Codex lead a role held by `claude` starts a Claude Code worker.
 
 ```json
 { "roles": { "review": { "agents": ["codex", "claude"], "codex": { "effort": "high" } }, "polish": { "agents": ["claude"] } } }
@@ -47,8 +47,8 @@ Unassigned roles and roles without `agents` inherit their parent's holders with 
 
 ### Model and effort settings
 
-- Per-role `codex` and `antigravity` entries (`model`, `effort`) override global agent settings, and per-job tool arguments override both. Antigravity's `effort` sets `thought_level` after selecting the model and steps down to the nearest lower supported level if needed. Omitted or unsupported levels keep the session default.
-- Settings offer the models each agent lists for this account, with the efforts each accepts: Codex's from `$CODEX_HOME/models_cache.json`, Antigravity's from `agy models`, which the daemon asks at most hourly when a client reads its state (every five minutes after a failure). agy prints a line per model and thinking level (`gemini-4-neon-high`), so the lines are folded into the model a session takes (`gemini-4-neon`) with its levels as efforts. Until agy first answers, the tier families (Hydrogen, Neon) are offered; a later failure keeps the last list.
+- Per-role `codex`, `antigravity`, and `claude` entries (`model`, `effort`) override global agent settings, and per-job tool arguments override both. A role's `claude` settings apply only when Claude runs as a worker under a Codex lead (under a Claude Code lead, the lead does the work itself), and a legacy role entry's `model` and `effort` still never become Claude's; Claude's `effort` must be `low`, `medium`, `high`, `xhigh`, or `max` (the levels `claude --effort` accepts). Antigravity's `effort` sets `thought_level` after selecting the model and steps down to the nearest lower supported level if needed. Omitted or unsupported levels keep the session default.
+- Settings offer the models each agent lists for this account, with the efforts each accepts: Codex's from `$CODEX_HOME/models_cache.json`, Antigravity's from `agy models`, which the daemon asks at most hourly when a client reads its state (every five minutes after a failure), and Claude's three model families (Haiku, Sonnet, and Opus), since Claude Code lists none. agy prints a line per model and thinking level (`gemini-4-neon-high`), so the lines are folded into the model a session takes (`gemini-4-neon`) with its levels as efforts. Until agy first answers, the tier families (Hydrogen, Neon) are offered; a later failure keeps the last list.
 - `polish` accepts `model` like `delegate` and `review`, and results print `model:` right after the header. `resolvedModel` and `resolvedEffort` record what the session reported (falling back to configured values or `unknown (agent default)`). When Codex reroutes a turn to another model (`model/rerouted`), `resolvedModel` becomes the new model, so scores and ratings name the one that did the work, and the job gets a note naming both.
 
 `roles` is read at job start so edits apply to the next job without a restart. An invalid table fails the job with the reason instead of falling back to defaults. The lead's tool titles and server instructions name the role holders as of session start.
@@ -154,6 +154,7 @@ Shared instructions were verified with markers across Codex, Antigravity, and he
 
 ## History
 
+- 2026-11-26: Default holders for `delegate` and `review` (and the roles that follow them: `refactor`, `release`, `debate`, `verify`) changed from Codex alone to both Codex and Claude, and `fix` changed from Claude alone to both, while `polish` stayed with Antigravity. Because Codex can now lead too, a Codex-only default left a Codex lead doing building and reviewing itself, and a Claude-only default for `fix` sent a Codex lead's fixes to a Claude worker while meaning "the lead fixes"; naming both lets either lead hand building and reviewing to the other agent first, while for `fix` the lead decides whether to fix the findings itself or share them (considering sharing first when there is a lot, and handing the fix over when short if the other agent has room).
 - 2026-11-25: Correctness ratings of routine work were capped like routine lines, after gemini-4-hydrogen's eleven fives on wording jobs lifted its score above its build score.
 - 2026-11-25: Builders start at the reference 7.0 rather than at the other models' pooled rate, at the user's request: under the pooled start a model that had done one clean documentation job began at about 8.4, the average of the others, without having shown anything.
 - 2026-11-25: Correctness anchors moved from 5 = "found nothing" and 3 = "real bugs in edge cases" to the scale above, and the lead was given the same anchors, which it previously lacked. Under the old scale, nearly every cross-review rated 3 while the unanchored lead rated its workers 4 to 5. Ratings given before this date keep their old meaning; rater centering absorbs part of the shift.

@@ -1334,7 +1334,7 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .track > li[data-pos="now"] .track-name { color: var(--label); }
 .stage-groups { display: grid; gap: 6px; }
 /* The first stage sits as far under the track as the track sits under the title. */
-.stage-groups > .rows:first-child > .stage-name { padding-top: 0; }
+.stage-groups > .rows:first-child > .stage-name, .mission-wrap-up > .stage-name { padding-top: 0; }
 .stage-name { padding: 10px 4px 6px; color: var(--tertiary); font: 550 10.5px/1.2 var(--text-face); letter-spacing: 0.06em; text-transform: uppercase; }
 /* A folding stage's whole label (name, count, chevron) is the button, padded to an easy target; negative margins keep the
    text in place, and the button ends as far above the first row as the rows sit from each other. On hover the label

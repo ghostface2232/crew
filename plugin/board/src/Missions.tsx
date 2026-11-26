@@ -498,16 +498,20 @@ export const MissionPanel = memo(function MissionPanel({
         {mission.outcome && <p className="mission-outcome selectable">{mission.outcome}</p>}
         {mission.summary && mission.state === 'done' && (
           // Folded until asked for: with several finished cards open, each wrap-up in full buries the cards themselves.
-          <>
-            {summaryOpen && (
+          // Its label folds it as a stage's label folds its rows.
+          <div className="rows mission-wrap-up">
+            <h3 className="stage-name">
+              <button aria-expanded={summaryOpen} onClick={() => setSummaryOpen(!summaryOpen)}>
+                {t('Wrap-up')}
+                <Icon icon={ChevronDown16Regular} className="disclosure" />
+              </button>
+            </h3>
+            <Collapse open={summaryOpen}>
               <div className="mission-summary selectable" role="group" aria-label={t('Wrap-up')}>
                 <ReportText text={mission.summary} />
               </div>
-            )}
-            <button className="reveal-toggle" aria-expanded={summaryOpen} onClick={() => setSummaryOpen(!summaryOpen)}>
-              {summaryOpen ? t('Hide the wrap-up') : t('Show the wrap-up')}
-            </button>
-          </>
+            </Collapse>
+          </div>
         )}
       </Collapse>
       {/* Its menu holds Mark Done, so the card only says so. */}

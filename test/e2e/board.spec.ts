@@ -254,6 +254,32 @@ test('a quiet ended workload looks finished and the authenticated user can mark 
   expect(calls).toEqual([{ route: '/api/missions/mission-1', body: { done: true, outcome: 'Marked done on the board.' } }]);
 });
 
+test('a mission card keeps its decisions to one row, and the panel lists them and forgets one', async ({ page, request }) => {
+  const data = fixture();
+  data.missions[0].memory = [
+    { key: 'buttons', text: 'Buttons follow sample A.', at: NOW - 60_000 },
+    { key: 'copy', text: 'Completion text follows sample B.', at: NOW - 30_000 },
+  ];
+  await request.post('/__push', { data: { type: 'state', data } });
+  const card = page.locator('[data-key="mission-1"]');
+  const row = card.getByRole('button', { name: 'Decisions 2', exact: true });
+  await expect(row).toBeVisible();
+  await expect(card.getByText('Buttons follow sample A.')).toHaveCount(0);
+  await row.click();
+  await expect(row).toHaveAttribute('aria-current', 'true');
+  const panel = page.getByRole('dialog', { name: 'Decisions' });
+  await expect(panel.getByRole('listitem')).toHaveText(['Buttons follow sample A.', 'Completion text follows sample B.']);
+  await expect(panel.getByText('Make the agent board a desktop app')).toBeVisible();
+  await panel.getByRole('button', { name: 'Forget “Buttons follow sample A.”' }).click();
+  await expect(panel.getByRole('listitem')).toHaveText(['Completion text follows sample B.']);
+  await expect(card.getByRole('button', { name: 'Decisions 1', exact: true })).toBeVisible();
+  expect(await (await request.get('/__requests')).json()).toEqual([{ route: '/api/missions/mission-1', body: { forget: ['buttons'] } }]);
+  // With none left the row goes, and the open panel says so in place of a list.
+  await panel.getByRole('button', { name: 'Forget “Completion text follows sample B.”' }).click();
+  await expect(card.getByRole('button', { name: /^Decisions/ })).toHaveCount(0);
+  await expect(panel.getByText('No decisions to show.')).toBeVisible();
+});
+
 test('a mission dropped with Stop Tracking can still be marked done, reopening it explicitly', async ({ page, request }) => {
   await page.goto('about:blank');
   await request.post('/__reset', { data: { auth: true } });

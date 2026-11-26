@@ -410,6 +410,49 @@ struct SessionDetailView: View {
     }
 }
 
+/// A mission's decisions in the detail panel, as the board lists them: what the user decided for its later jobs, each
+/// one theirs to drop.
+struct MissionDecisionsView: View {
+    @Bindable var store: CrewStore
+    let id: String
+    @State private var scrolled = false
+    private var mission: Mission? { store.state.missions.first { $0.id == id } }
+    /// Only an active mission still gives its decisions to jobs, as its card shows them only then.
+    private var decisions: [MissionMemory] { mission?.state == "active" ? mission?.memory ?? [] : [] }
+    private var locked: Bool { !store.connected || mission.map { store.actions[$0.actionKey]?.locked == true } ?? true }
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.s) {
+                if decisions.isEmpty { Text("No decisions to show.").foregroundStyle(.secondary) }
+                ForEach(decisions, id: \.key) { entry in
+                    HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+                        Text(entry.text).font(Typeface.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                        Button { if let mission { Task { await store.forget(entry, in: mission) } } } label: {
+                            Image(systemName: "xmark").font(Symbol.control)
+                        }
+                        .iconButton().disabled(locked)
+                        .accessibilityLabel(String(localized: "Forget “\(entry.text)”"))
+                        .help("Forget this decision. Jobs started after this no longer get it.")
+                    }.inset()
+                }
+                if let mission { ActionMessage(state: store.actions[mission.actionKey]) }
+            }.padding(.horizontal, WorkspaceStyle.panelPadding).padding(.top, Space.m).padding(.bottom, WorkspaceStyle.panelPadding).frame(maxWidth: .infinity, alignment: .leading)
+                .background(OverlayScrollers())
+        }
+        .safeAreaBar(edge: .top) {
+            DetailHeader(title: String(localized: "Decisions"), subtitle: mission?.title, scrolled: scrolled, close: store.closeDetail) {
+                if !decisions.isEmpty {
+                    Text(decisions.count == 1 ? String(localized: "1 decision") : String(localized: "\(decisions.count) decisions"))
+                        .font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary)
+                }
+            }
+        }
+        .scrollEdgeEffectStyle(.soft, for: .top)
+        .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 1 } action: { _, now in scrolled = now }
+        .onExitCommand { store.closeDetail() }
+    }
+}
+
 /// A sub-agent as one line of what it is and one of what it is doing.
 private struct SubAgentRow: View {
     let agent: SubAgent

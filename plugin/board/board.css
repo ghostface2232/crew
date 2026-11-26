@@ -1264,11 +1264,11 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 /* The lead's wrap-up of finished work: what changed, what was verified, what is left for the user. */
 .mission-summary { padding: 12px 14px; border-radius: 16px; background: var(--surface-2); }
 .mission-summary .report { font-size: 12.5px; }
-/* Decisions the user made in this mission, each one theirs to drop. */
-.mission-decisions ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-.mission-decisions li { display: flex; align-items: flex-start; gap: 8px; padding: 6px 4px 6px 12px; border-radius: var(--row-radius); background: var(--surface-2); font-size: 12.5px; line-height: 1.45; }
-.mission-decisions li > span { flex: 1 1 auto; min-width: 0; padding-block: 2px; overflow-wrap: anywhere; }
-.mission-decisions li > button { flex: none; }
+/* Decisions the user made in a mission, listed in the detail panel, each one theirs to drop. */
+.decisions { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.decisions li { display: flex; align-items: flex-start; gap: 8px; padding: 6px 4px 6px 12px; border-radius: var(--row-radius); background: var(--surface-2); font-size: 12.5px; line-height: 1.45; }
+.decisions li > span { flex: 1 1 auto; min-width: 0; padding-block: 2px; overflow-wrap: anywhere; }
+.decisions li > button { flex: none; }
 
 /* MissionTrack: numbered markers, evenly spread between end insets, joined by a line, names centered under them. Each
    step is a zero-width anchor its marker and name center on. The insets fit the longer end name (--fit, measured) but stay

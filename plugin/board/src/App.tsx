@@ -14,7 +14,7 @@ import { AskHost, ClockProvider, CopyMenu, Icon, tNodes, LeavingContext, PANEL_E
 import appIcon from './icons/CrewAppIcon.png';
 import { Activity, History, Workspace } from './Overview.tsx';
 import { NeedsYou } from './NeedsYou.tsx';
-import { JobDrawer, SessionDrawer } from './JobDrawer.tsx';
+import { DecisionsDrawer, JobDrawer, SessionDrawer } from './JobDrawer.tsx';
 import { Settings } from './Settings.tsx';
 import { Dispatch } from './Dispatch.tsx';
 import { Palette } from './Palette.tsx';
@@ -54,7 +54,7 @@ function storedView(): View {
     return { project: '', page: 'overview' };
   }
 }
-/** The open detail panel, kept in the URL fragment: a job's id, or `session:<id>` for a Claude session. */
+/** The open detail panel, kept in the URL fragment: a job's id, `session:<id>` for a Claude session, or `decisions:<id>` for a mission's decisions. */
 const detailFromHash = () => detailFromFragment(location.hash);
 const typing = (target: EventTarget | null) =>
   target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
@@ -172,6 +172,7 @@ export function App() {
   const openJob = useCallback((id: string) => show(currentDetail.current === id ? '' : id), [show]);
   const showSession = useCallback((id: string) => show(`session:${id}`), [show]);
   const openSession = useCallback((id: string) => show(currentDetail.current === `session:${id}` ? '' : `session:${id}`), [show]);
+  const openDecisions = useCallback((id: string) => show(currentDetail.current === `decisions:${id}` ? '' : `decisions:${id}`), [show]);
   const closeDetail = useCallback(() => show(''), [show]);
   // A closed panel stays up while it slides out; a different one replaces it at once.
   const [panel, panelLeaving] = useLinger(detail, PANEL_EXIT_MS);
@@ -241,7 +242,7 @@ export function App() {
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
   }, []);
-  const scope = useMemo(() => ({ state, project, names, selected: detail, openJob, openSession }), [state, project, names, detail, openJob, openSession]);
+  const scope = useMemo(() => ({ state, project, names, selected: detail, openJob, openSession, openDecisions }), [state, project, names, detail, openJob, openSession, openDecisions]);
   const pageItems = useMemo(() => PAGES().map(([id, label, icon]) => ({ id, label, icon, count: id === 'needs' ? pending : undefined })), [pending, shown]);
   if (state.connection === 'unauthorized') {
     return (
@@ -406,6 +407,8 @@ export function App() {
         <LeavingContext value={panelLeaving}>
           {panel.startsWith('session:') ? (
             <SessionDrawer key={panel} id={panel.slice(8)} state={state} close={closeDetail} />
+          ) : panel.startsWith('decisions:') ? (
+            <DecisionsDrawer key={panel} id={panel.slice(10)} state={state} close={closeDetail} />
           ) : (
             panel && <JobDrawer key={panel} id={panel} state={state} close={closeDetail} />
           )}

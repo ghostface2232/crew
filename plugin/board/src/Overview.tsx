@@ -22,10 +22,11 @@ export interface Scope {
   state: Snapshot;
   project: string;
   names: Map<string, string>;
-  /** The open detail panel: a job id, or `session:<id>`. */
+  /** The open detail panel: a job id, `session:<id>`, or `decisions:<mission id>`. */
   selected: string;
   openJob: (id: string) => void;
   openSession: (id: string) => void;
+  openDecisions: (mission: string) => void;
 }
 export const matches = (search: string, text: string) => !search || text.toLowerCase().includes(search.toLowerCase());
 const inProject = (project: string, item: Parameters<typeof projectOf>[0]) => !project || projectOf(item) === project;
@@ -697,7 +698,7 @@ function useMissionPanels({ jobs, pulls, claude, missions }: Snapshot) {
 }
 
 /** The overview or a project: what is going on now, with the agents and the crew's rhythm beside it. */
-export function Workspace({ state, project, names, selected, openJob, openSession, newJob, openPage }: Scope & {
+export function Workspace({ state, project, names, selected, openJob, openSession, openDecisions, newJob, openPage }: Scope & {
   newJob: (origin?: Element | null, draft?: string) => void;
   openPage: (selection: string) => void;
 }) {
@@ -723,6 +724,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
       selected={selected}
       openJob={openJob}
       openSession={openSession}
+      openDecisions={openDecisions}
       index={index}
     />
   );
@@ -783,7 +785,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
 
 type SortKey = 'title' | 'agent' | 'project' | 'state' | 'duration' | 'ended';
 /** Finished work: ended missions, then every ended job in a table to filter and sort. */
-export const History = memo(function History({ state, project, names, selected, openJob, openSession }: Scope) {
+export const History = memo(function History({ state, project, names, selected, openJob, openSession, openDecisions }: Scope) {
   const locale = useLanguage();
   const [filter, setFilter] = useState<'' | 'done' | 'failed' | 'cancelled'>('');
   const [search, setSearch] = useState('');
@@ -839,6 +841,7 @@ export const History = memo(function History({ state, project, names, selected, 
               selected={selected}
               openJob={openJob}
               openSession={openSession}
+              openDecisions={openDecisions}
               index={index}
             />
           ))}
@@ -873,7 +876,7 @@ export const History = memo(function History({ state, project, names, selected, 
   );
 }, (a, b) =>
   a.project === b.project && a.names === b.names && a.selected === b.selected &&
-  a.openJob === b.openJob && a.openSession === b.openSession &&
+  a.openJob === b.openJob && a.openSession === b.openSession && a.openDecisions === b.openDecisions &&
   a.state.jobs === b.state.jobs && a.state.missions === b.state.missions &&
   a.state.roleInfo === b.state.roleInfo && a.state.pulls === b.state.pulls);
 

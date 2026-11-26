@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 import {
   ArrowCounterclockwiseRegular, ArrowUndoRegular, BranchFork16Regular, BranchRegular, ChatRegular,
   CheckmarkCircle16Regular, CheckmarkCircleRegular, CheckmarkRegular, CheckmarkStarburstRegular, ChevronDownRegular,
-  CircleHintRegular, CircleMultipleConcentricRegular, ClockRegular, ColumnDoubleCompareRegular, DismissCircle16Regular, DismissRegular,
+  CircleHintRegular, CircleMultipleConcentricRegular, ClockRegular, ColumnDoubleCompareRegular, Dismiss16Regular, DismissCircle16Regular, DismissRegular,
   DocumentTextRegular, FilmstripRegular, FlagCheckeredRegular, FlagRegular, FlashRegular, HistoryRegular,
   ImageMultipleRegular, NotebookRegular, PeopleRegular, QuestionCircleRegular, RecordStopRegular,
   ShieldCheckmarkRegular, ShieldErrorRegular, SubtractCircleRegular, TextAlignLeftRegular, WarningRegular,
@@ -1001,3 +1001,50 @@ export const SessionDrawer = memo(function SessionDrawer({ id, state, close }: {
 }, (a, b) => a.id === b.id && a.close === b.close &&
   a.state.missions === b.state.missions &&
   a.state.claude.find((session) => session.id === a.id) === b.state.claude.find((session) => session.id === b.id));
+
+/** A mission's decisions, as the app lists them: what the user decided for its later jobs, each one theirs to drop. */
+export const DecisionsDrawer = memo(function DecisionsDrawer({ id, state, close }: { id: string; state: Snapshot; close: () => void }) {
+  useLanguage();
+  const mission = state.missions.find((item) => item.id === id);
+  // Only an active mission still gives its decisions to jobs, as its card shows them only then.
+  const decisions = mission?.state === 'active' ? mission.memory ?? [] : [];
+  // The card's own key, so the card and the panel lock and report together.
+  const key = `mission:${id}:${mission?.state}`;
+  const action = useAction(key);
+  const locked = action.pending || action.accepted || state.connection !== 'live';
+  return (
+    <DetailPanel
+      label={t('Decisions')}
+      close={close}
+      chip={decisions.length > 0 && (
+        <span className="secondary caption digits">{decisions.length === 1 ? t('1 decision') : t('{count} decisions', { count: decisions.length })}</span>
+      )}
+      title={t('Decisions')}
+      subtitle={mission?.title}
+    >
+      {decisions.length ? (
+        <ul className="decisions">
+          {decisions.map((entry) => (
+            <li key={entry.key}>
+              <span className="selectable">{entry.text}</span>
+              {/* The lead keeps adding decisions as the user makes them; one that no longer holds is the user's to drop. */}
+              <button
+                className="icon"
+                disabled={locked}
+                aria-label={t('Forget “{text}”', { text: entry.text })}
+                title={t('Forget this decision. Jobs started after this no longer get it.')}
+                onClick={() => void actions.run(key, () => request(`/api/missions/${id}`, { forget: [entry.key] }), { done: '', once: false })}
+              >
+                <Icon icon={Dismiss16Regular} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="secondary">{t('No decisions to show.')}</p>
+      )}
+      <ActionStatus actionKey={key} />
+    </DetailPanel>
+  );
+}, (a, b) => a.id === b.id && a.close === b.close && a.state.connection === b.state.connection &&
+  a.state.missions.find((mission) => mission.id === a.id) === b.state.missions.find((mission) => mission.id === b.id));

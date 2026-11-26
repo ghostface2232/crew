@@ -95,6 +95,7 @@ struct BoardView: View {
                 Group {
                     if let id = store.selectedJob { JobDetailView(store: store, id: id).id(id) }
                     else if let id = store.selectedSession { SessionDetailView(store: store, id: id).id("session:\(id)") }
+                    else if let id = store.selectedDecisions { MissionDecisionsView(store: store, id: id).id("decisions:\(id)") }
                 }
                     .frame(width: WorkspaceStyle.panelWidth(store.panelWidth, page: pageWidth)).background(WorkspaceStyle.surface, in: shape)
                     .clipShape(shape)
@@ -573,23 +574,23 @@ struct MissionPanel: View {
                 .accessibilityElement(children: .contain).accessibilityLabel(String(localized: "Wrap-up"))
         }
     }
-    /// Decisions the user made in this mission, each one theirs to drop, as in the board.
+    /// One row however many decisions there are, so a long mission's card stays short; the detail panel lists them.
     @ViewBuilder private var decisions: some View {
         if mission.state == "active", let memory = mission.memory, !memory.isEmpty {
-            VStack(alignment: .leading, spacing: Space.s) {
-                Text("Decisions").font(Typeface.bodyStrong).foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
-                ForEach(memory, id: \.key) { entry in
-                    HStack(alignment: .firstTextBaseline, spacing: Space.m) {
-                        Text(entry.text).font(Typeface.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                        Button { Task { await store.forget(entry, in: mission) } } label: {
-                            Image(systemName: "xmark").font(Symbol.control)
-                        }
-                        .iconButton().disabled(locked)
-                        .accessibilityLabel(String(localized: "Forget “\(entry.text)”"))
-                        .help("Forget this decision. Jobs started after this no longer get it.")
-                    }
+            let selected = store.selectedDecisions == mission.id
+            Button { store.toggleDecisions(mission.id) } label: {
+                HStack(spacing: Space.l) {
+                    Image(systemName: "list.bullet.rectangle").font(Symbol.control).foregroundStyle(.secondary).frame(width: WorkspaceStyle.iconColumn)
+                    Text("Decisions").font(Typeface.bodyStrong).foregroundStyle(.primary)
+                    Spacer(minLength: WorkspaceStyle.rowSpacer)
+                    Text(memory.count, format: .number).monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right").font(Typeface.micro).foregroundStyle(.tertiary)
                 }
-            }.padding(.leading, WorkspaceStyle.rowTitleInset)
+                .padding(WorkspaceStyle.rowInsets).contentShape(Rectangle())
+                .background(selected ? Palette.selection : WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+            }.buttonStyle(WorkspacePressStyle())
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(selected ? .isSelected : [])
         }
     }
     /// Animated from here rather than inside the card, so the cards below move with it instead of jumping.

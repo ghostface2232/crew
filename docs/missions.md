@@ -36,10 +36,10 @@ A mission groups one user command and the jobs it took, so the board can answer 
 
 ## Decisions
 
-- A mission keeps the decisions the user made during it (`memory`: `{ key, text, tasks?, at }`, at most 12, text up to 400 characters). On any `mission` call—including the call that opens it—the lead records a decision with `remember` (in the user's words, with its scope) and drops one with `forget`. Reusing a key replaces that decision so a change supersedes the earlier entry; an invalid update (an unknown task, an unknown key to forget, or more than 12 entries) leaves the list unchanged.
+- A mission keeps the decisions the user made during it (`memory`: `{ key, text, tasks?, at }`, at most 12, text up to 400 characters). On any `mission` call—including the call that opens it—the lead records a decision with `remember` (a summary in one or two short sentences of what was decided and what it covers, not the user's message quoted) and drops one with `forget`. Reusing a key replaces that decision so a change supersedes the earlier entry; an invalid update (an unknown task, an unknown key to forget, or more than 12 entries) leaves the list unchanged.
 - Each job started for the mission receives the mission-wide decisions and any decisions scoped to its task at the end of its brief, under a heading stating that they permit no action (`memoryFor` in `missions.ts`, applied in `POST /api/jobs`). Running jobs are not updated; the lead replies to them directly. Mission replies and resume context list decisions so a lead retains them after compaction.
 - Decisions live only as long as the mission and are never permissions: a choice about taste or scope does not approve an action. Preferences that outlast the mission belong in `.crew/instructions.md`, which the lead offers when it ends.
-- The user can drop a decision from the mission card (*Forget*, `POST /api/missions/:id` with `forget`). Only the lead sends `remember` and `summary` (`LEAD_FIELDS` in `daemon.ts`).
+- The mission card shows one *Decisions* row with their count; it opens the list in the detail panel, where the user can drop a decision (*Forget*, `POST /api/missions/:id` with `forget`). Only the lead sends `remember` and `summary` (`LEAD_FIELDS` in `daemon.ts`).
 - **Why so few.** Every decision goes into every later job's brief, so the cap keeps briefs short; past 12, the lead must fold or forget entries rather than accumulate them.
 
 ## Notes and runbooks
@@ -76,6 +76,7 @@ A mission groups one user command and the jobs it took, so the board can answer 
 
 ## History
 
+- 2026-11-27: Decisions are saved as the lead's summary, no longer in the user's words, and the card lists them in the detail panel behind one row. On a long mission each entry quoted the user's message and then restated it, and the list of them filled the card.
 - 2026-11-25: Added wrap-up summaries, remembered decisions, and per-project switches for autonomy and away-watching. Away watching reverses the 2026-11-20 rule against polling while a session is away, opted in per project so overnight failures are caught without adding a switch to every PR chip.
 - 2026-11-22: The progress ring on a mission card's title row was removed from the board and the app, with its formula (`missionProgress`), because it moved by stage rather than by measured work and the stage track already shows the same progress.
 - 2026-11-20: Several open missions per session, with explicit mission IDs instead of an implicit current mission or a workflow engine; mission tasks; linked PR watches, with no polling while the lead session is away; `SessionStart` resume context.

@@ -272,12 +272,12 @@ const buildTools = () => [
         summary: { type: 'string', description: 'With done, for work that changed something: the wrap-up the user reads on the board, in Markdown and in the user\'s language. What changed, what was verified and how, what was skipped or not verified, and what is left for the user (a push, a pull request, a decision). Facts only, a few short lines.' },
         remember: {
           type: 'array',
-          description: 'Decisions the user made during this mission that later jobs must follow (a chosen sample, a wording, a scope), in the user\'s words with their scope. New jobs of the mission get them in their brief; tell a running job yourself with reply. Kept only for this mission. Not for approvals: a decision about taste or scope never grants a permission.',
+          description: 'Decisions the user made during this mission that later jobs must follow (a chosen sample, a wording, a scope), each summarized in one or two short sentences. New jobs of the mission get them in their brief; tell a running job yourself with reply. Kept only for this mission. Not for approvals: a decision about taste or scope never grants a permission.',
           items: {
             type: 'object',
             properties: {
               key: { type: 'string', description: 'Your short name for the decision, e.g. "button-style". The same key again replaces the old decision.' },
-              text: { type: 'string', description: 'The decision and what it covers, e.g. "Buttons follow sample A; only the completion text follows B."' },
+              text: { type: 'string', description: 'What was decided and what it covers, stated once as the job should follow it, e.g. "Buttons follow sample A; only the completion text follows B." Do not quote the user\'s message or say who said it: the user reads this list on the board, and every later job reads it in its brief.' },
               tasks: { type: 'array', items: { type: 'string' }, description: 'Task ids it applies to; leave out for the whole mission.' },
             },
             required: ['key', 'text'],

@@ -51,6 +51,9 @@ struct CrewSettingsView: View {
     var store: CrewStore
     @Environment(AppUpdater.self) private var updater
     @State private var selection: SettingsPane? = .build
+    /// Open at Login as macOS last reported it; read whenever About Crew shows, as the user can change it in System Settings.
+    @State private var login: LoginItem.State?
+    @State private var loginError: String?
     /// The model or effort being typed by hand, stored when it is left as when Return is pressed.
     @FocusState private var typing: SettingsModel.TypedField?
     /// Moving to another set of instructions loads it in place of the one being edited, so unsaved edits are asked about first.
@@ -129,6 +132,7 @@ struct CrewSettingsView: View {
             ForEach(model.roleInfo.filter { $0.group == group }) { roleSection($0) }
         } else if pane == .about {
             about
+            openAtLogin
         } else if pane == .presets {
             presets
         } else if pane == .models {
@@ -271,6 +275,33 @@ struct CrewSettingsView: View {
                     }
                 }
             }
+        }
+    }
+    /// Open at Login, under the updates. macOS holds the state, so the switch shows what it reads back after each change.
+    @ViewBuilder private var openAtLogin: some View {
+        if LoginItem.supported() {
+            Section {
+                Toggle("Open at Login", isOn: Binding(get: { login == .on }, set: { open in
+                    do { try LoginItem.set(open); loginError = nil } catch { loginError = error.localizedDescription }
+                    login = LoginItem.state
+                }))
+            } footer: {
+                VStack(alignment: .leading, spacing: Space.ml) {
+                    if let loginError { ErrorLabel(message: loginError).settingsFootnote() }
+                    if login == .needsApproval {
+                        HStack(spacing: Space.l) {
+                            Text("Crew is turned off in Login Items. Allow it there to open Crew at login.").settingsFootnote()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Button("Open Login Items") { LoginItem.openSystemSettings() }.pillButton()
+                        }
+                    } else {
+                        Text("Crew starts in the menu bar when you log in, so jobs stopped by a usage limit can resume with no session open.")
+                            .settingsFootnote()
+                    }
+                }
+            }
+            .onAppear { login = LoginItem.state }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in login = LoginItem.state }
         }
     }
     @ViewBuilder private var updateAction: some View {

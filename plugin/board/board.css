@@ -1270,7 +1270,7 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .decisions { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .decisions li { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px 6px 12px; border-radius: var(--row-radius); background: var(--surface-2); font-size: 12.5px; line-height: 1.45; }
 .decisions li > span { flex: 1 1 auto; min-width: 0; padding-block: 2px; overflow-wrap: anywhere; }
-/* Half an icon button, since one sits beside every decision: centered on the first line, with the room around it as its target. */
+/* Half the size of an icon button (one sits beside every decision), centered on the first line with an expanded hit target. */
 .decisions li > button { position: relative; flex: none; width: 16px; min-height: 16px; margin-top: 3px; color: var(--secondary); }
 .decisions li > button svg { width: 10px; height: 10px; }
 .decisions li > button::after { content: ''; position: absolute; inset: -5px; }

@@ -245,7 +245,7 @@ const FOLD_STAGES_AFTER = 1;
 /** A stage with this many jobs or fewer stays open by default, as reopening each one would cost more than it saves. */
 const STAGE_OPENS_UP_TO = 3;
 const openStages = new Map<string, boolean>();
-/** Finished missions whose wrap-up the user opened, kept as a mission's state is; the rest stay folded. */
+/** Wrap-ups the user opened or folded, per mission, kept as a mission's state is; folded by default. */
 const openSummaries = new Map<string, boolean>();
 const PRESETS = translated((): [PresetName | null, string][] => [[null, t('Default')], ['economy', t('Economy')], ['balanced', t('Balanced')], ['best', t('Best')]]);
 

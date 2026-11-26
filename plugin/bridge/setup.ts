@@ -343,7 +343,7 @@ export type SetupItem = {
 };
 
 /**
- * The checklist's answer, kept for a while: a check starts five CLIs, and the board and the app each ask every
+ * The checklist's answer, kept for a while: a check runs several CLI commands, and the board and the app each ask every
  * minute for as long as they are open. A complete checklist is kept for ten minutes; one with something missing,
  * or a check that failed, for one, so a fix shows soon.
  */

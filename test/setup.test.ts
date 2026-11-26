@@ -352,7 +352,8 @@ test('a built copy registers with Codex, records it as complete only when both h
   assert.match(signedOut?.detail ?? '', /claude auth login/);
   fs.writeFileSync(claudeAuth, 'unsupported');
   const unsupported = (await checks()).find((item: SetupItem) => item.id === 'claude-login');
-  assert.equal(unsupported?.ok, false);
+  // A CLI that cannot say does not hold the checklist up: only a clear "signed out" fails.
+  assert.equal(unsupported?.ok, true);
   assert.match(unsupported?.detail ?? '', /no supported sign-in status command/);
   // On Windows the registered root is the copy in the Crew home, which open sessions keep running through an update.
   const registeredRoot = JSON.parse(fs.readFileSync(record, 'utf8')).root;
@@ -412,8 +413,11 @@ test('a built copy registers with Codex, records it as complete only when both h
   assert.equal(codexOnly.ok, true);
   assert.match(codexOnly.detail, /^Claude Code was not found\. Codex: Installed in Codex\./);
   assert.equal(codexOnlyItems.some((item) => item.id === 'claude-login'), false);
-  assert.equal(codexOnlyItems.find((item) => item.id === 'plugin')?.ok, true);
-  assert.equal(missingPlugin.find((item) => item.id === 'plugin')?.ok, false);
+  // Without Claude Code, Codex's plugin is the one asked for, once, in its own item.
+  assert.equal(codexOnlyItems.some((item) => item.id === 'plugin'), false);
+  assert.equal(codexOnlyItems.find((item) => item.id === 'codex-plugin')?.ok, true);
+  assert.equal(missingPlugin.some((item) => item.id === 'plugin'), false);
+  assert.equal(missingPlugin.find((item) => item.id === 'codex-plugin')?.ok, false);
   assert.ok(fs.existsSync(record));
   assert.ok(fs.existsSync(path.join(profile, '.local', 'bin', 'crew')));
 });

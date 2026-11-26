@@ -513,10 +513,12 @@ async function claudeLoginItem(): Promise<SetupItem> {
   } catch { /* Older CLIs may lack the status command. */ }
   if (status.ok && loggedIn === true) return { ...item, ok: true, detail: 'Signed in.', summary: 'Complete' };
   if (loggedIn === false) return { ...item, ok: false, detail: 'Run `claude auth login` in a terminal.', summary: 'Sign in to Claude Code.' };
+  // Only a clear "signed out" fails: an item nothing can repair would keep the checklist up for a CLI that cannot say,
+  // such as an older version or a sign-in this command does not report.
   const detail = /unknown (command|option)|unrecognized (command|option)/i.test(status.out)
     ? 'This Claude Code version has no supported sign-in status command.'
     : 'Could not check Claude Code sign-in.';
-  return { ...item, ok: false, detail, summary: detail };
+  return { ...item, ok: true, detail, summary: 'Not checked' };
 }
 
 /** What Crew needs, as the app's checklist and `crew doctor` show it. Signing in is always left to the user. */
@@ -543,23 +545,18 @@ export async function checks(): Promise<SetupItem[]> {
   if (claudeLogin) items.push(claudeLogin);
   const plugin = plugins?.find((entry) => entry.id === 'crew@crew');
   const here = plugin?.readFromFolder && samePath(plugin.readFromFolder, path.join(registeredRoot(), 'plugin'));
-  // Claude Code's plugin when Claude Code is here; for a user who leads only from Codex, Codex's. Codex's own plugin has its
-  // own item below, so a Claude Code lead with Codex only as a worker is not asked for it twice.
-  const pluginOk = claude.ok ? Boolean(plugin) : Boolean(codexLead?.registered);
-  const pluginDetails: string[] = [];
-  if (claude.ok) {
-    const detail = !plugin ? 'Not installed.' : here ? `Installed (${plugin.version})` : `Installed from ${plugin.readFromFolder ?? 'another copy'} (${plugin.version})`;
-    pluginDetails.push(`Claude Code: ${detail}`);
+  // Claude Code's plugin. A user who leads only from Codex has Codex's plugin as its own item below, so the same plugin is
+  // not asked for twice; with neither host there is nothing to install the plugin into.
+  if (claude.ok || !codexLead) {
+    items.push({
+      id: 'plugin',
+      label: 'Crew plugin',
+      ok: Boolean(plugin),
+      detail: !claude.ok ? 'Needs Claude Code or Codex.' : !plugin ? 'Not installed.' : here ? `Installed (${plugin.version})` : `Installed from ${plugin.readFromFolder ?? 'another copy'} (${plugin.version})`,
+      summary: plugin ? 'Installed' : claude.ok ? 'Select Install to add the Crew plugin.' : 'Install Claude Code or Codex first.',
+      repairable: claude.ok,
+    });
   }
-  if (codexLead) pluginDetails.push(`Codex: ${codexLead.plugin.detail}`);
-  items.push({
-    id: 'plugin',
-    label: 'Crew plugin',
-    ok: pluginOk,
-    detail: pluginDetails.join(' ') || 'No supported host found.',
-    summary: !pluginDetails.length ? 'No supported host found.' : pluginOk ? 'Installed' : 'Select Install to add the Crew plugin.',
-    repairable: claude.ok || codex.ok,
-  });
   const command = fs.existsSync(COMMAND) || fs.existsSync(`${COMMAND}.cmd`);
   items.push({
     id: 'command', label: '`crew` command', ok: command, detail: command ? COMMAND : 'Not installed.', repairable: true,

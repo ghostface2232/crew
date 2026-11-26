@@ -1,6 +1,6 @@
 ---
 name: run
-description: Run a task through the full Crew pipeline — you lead and self-review, a supporting engineer implements separable pieces, a cross-reviewer reviews, and an editor polishes wording (by default Codex, Codex, and Antigravity). Use when the user asks to do something "with the crew", or invokes /crew:run.
+description: Run a task through the full Crew pipeline — you lead and self-review, a supporting engineer implements separable pieces, a cross-reviewer reviews, and an editor polishes wording (by default Codex under a Claude Code lead or Claude under a Codex lead builds and reviews, and Antigravity polishes). Use when the user asks to do something "with the crew", or invokes /crew:run.
 argument-hint: <task>
 ---
 

@@ -398,8 +398,8 @@ test('every role has its own policy when its holder runs out', () => {
   // The lead taking release work over keeps it to preparation.
   assert.match(route('release', gone, DEFAULT_ROLES).reason, /publish or deploy nothing/);
   assert.equal(route('refactor', gone, DEFAULT_ROLES).degraded, false);
-  // Fixing stays with the lead unless the user gives it to a worker; a worker out of usage hands it back.
-  assert.equal(route('fix', usageOf({}), CODEX_ROLES).assignee, 'claude');
+  // Fixing given to the lead alone stays with it; given to a worker, a worker out of usage hands it back.
+  assert.equal(route('fix', usageOf({}), { ...CODEX_ROLES, fix: { agents: ['claude' as const] } }).assignee, 'claude');
   const given = { ...CODEX_ROLES, fix: { agents: ['codex' as const] } };
   assert.equal(route('fix', usageOf({}), given).assignee, 'codex');
   const out = route('fix', gone, given);
@@ -629,9 +629,11 @@ test('with no holder named, wording goes to Antigravity and other work to Codex,
   assert.deepEqual(route('polish', usageOf({}), roles).holders?.map((h) => h.agent), ['antigravity', 'codex', 'claude']);
 });
 
-test('by default Codex and Claude both build and review, so either lead hands that work to the other agent first', () => {
+test('by default Codex and Claude both build, review and fix, so either lead hands that work to the other agent first', () => {
   assert.deepEqual([DEFAULT_ROLES.delegate.agents, DEFAULT_ROLES.review.agents, DEFAULT_ROLES.fix.agents, DEFAULT_ROLES.polish.agents],
-    [['codex', 'claude'], ['codex', 'claude'], ['claude'], ['antigravity']]);
+    [['codex', 'claude'], ['codex', 'claude'], ['codex', 'claude'], ['antigravity']]);
+  assert.equal(route('fix', usageOf({}), DEFAULT_ROLES).assignee, 'codex');
+  assert.equal(route('fix', usageOf({}), DEFAULT_ROLES, [], 'codex').assignee, 'claude');
   const room = usageOf({});
   // A Claude lead hands building and reviewing to Codex, and takes them over only when Codex is short.
   assert.equal(route('delegate', room, DEFAULT_ROLES).assignee, 'codex');

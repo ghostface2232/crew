@@ -303,11 +303,10 @@ export const PRESET_NAMES = Object.keys(PRESETS) as PresetName[];
 export const isPresetName = (value: unknown): value is PresetName => PRESET_NAMES.includes(value as PresetName);
 
 /**
- * Holders of the roles that have no parent, when the user names none. Building and reviewing name both Codex and
- * Claude, so either lead hands that work to the other agent and keeps it only as a fallback. Fixing stays with the
- * lead, as it was before it became a role: triage needs the conversation, and the fix often does too.
+ * Holders of the roles that have no parent, when the user names none. Building, reviewing and fixing name both Codex
+ * and Claude, so either lead hands that work to the other agent and keeps it only as a fallback.
  */
-const BASE_HOLDERS: Partial<Record<Role, Holder[]>> = { delegate: ['codex', LEAD], review: ['codex', LEAD], fix: [LEAD], polish: ['antigravity'] };
+const BASE_HOLDERS: Partial<Record<Role, Holder[]>> = { delegate: ['codex', LEAD], review: ['codex', LEAD], fix: ['codex', LEAD], polish: ['antigravity'] };
 const sortHolders = (agents: Holder[]) => HOLDERS.filter((holder) => agents.includes(holder));
 
 const defaults: Config = {

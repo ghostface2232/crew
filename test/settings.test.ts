@@ -29,7 +29,7 @@ test('saving roles keeps every other setting, drops blank fields, and returns th
   const delegate = { agents: ['codex'], codex: { effort: 'high' } };
   assert.deepEqual(saved.roleSettings, { delegate, polish: { agents: ['codex'] } });
   assert.deepEqual(saved.roles, {
-    delegate, refactor: delegate, release: delegate, debate: delegate, review: { agents: ['codex', 'claude'] }, verify: { agents: ['codex', 'claude'] }, fix: { agents: ['claude'] }, polish: { agents: ['codex'] },
+    delegate, refactor: delegate, release: delegate, debate: delegate, review: { agents: ['codex', 'claude'] }, verify: { agents: ['codex', 'claude'] }, fix: { agents: ['codex', 'claude'] }, polish: { agents: ['codex'] },
   });
   // The table is replaced as a whole: a role left out goes back to its default.
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {

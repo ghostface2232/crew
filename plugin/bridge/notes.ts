@@ -116,6 +116,8 @@ export interface Evidence {
   of?: { job?: string; model: string; fix?: true };
   /** The lead's rating of this line's work, resting on `text`. Only a job's work is rated, never the lead's own. */
   rating?: RatingItems;
+  /** The agent that led when the rating was given; Claude when absent, as every lead was before Codex could lead. */
+  ratedBy?: Holder;
   text: string;
 }
 /**
@@ -191,7 +193,8 @@ function wellFormed(models: Record<string, any>): Record<string, ModelNote> {
       && (e.difficulty === undefined || (e.role === 'build' && DIFFICULTIES.includes(e.difficulty)))
       && (e.reviewedBy === undefined || (e.role === 'build' && reviewModels(e.reviewedBy)))
       && (e.reviewJobs === undefined || (e.role === 'build' && reviewModels(e.reviewJobs)))
-      && (e.reviewAgents === undefined || (Array.isArray(e.reviewAgents) && Array.isArray(e.reviewedBy) && e.reviewAgents.length === e.reviewedBy.length && e.reviewAgents.every((a: unknown) => HOLDERS.includes(a as string)))));
+      && (e.reviewAgents === undefined || (Array.isArray(e.reviewAgents) && Array.isArray(e.reviewedBy) && e.reviewAgents.length === e.reviewedBy.length && e.reviewAgents.every((a: unknown) => HOLDERS.includes(a as string))))
+      && (e.ratedBy === undefined || (e.rating !== undefined && HOLDERS.includes(e.ratedBy))));
     Object.defineProperty(kept, model, {
       value: { model, agent: note.agent, summary: typeof note.summary === 'string' ? note.summary : '', summaryAt: Number.isFinite(note.summaryAt) ? note.summaryAt : null, evidence },
       enumerable: true, configurable: true, writable: true,
@@ -267,6 +270,7 @@ export function addEvidence(home: string, input: Omit<Evidence, 'id' | 'at'> & {
   check(input.reviewedBy === undefined || (input.role === 'build' && reviewModels(input.reviewedBy)), `reviewed_by (only for a build line: 1 to ${MAX_REVIEWS} model ids, one per review)`);
   check(input.reviewJobs === undefined || (input.reviewedBy !== undefined && reviewModels(input.reviewJobs) && input.reviewJobs.length <= input.reviewedBy.length), 'reviewJobs (the review jobs among reviewed_by)');
   check(input.reviewAgents === undefined || (input.reviewedBy !== undefined && input.reviewAgents.length === input.reviewedBy.length && input.reviewAgents.every((a) => HOLDERS.includes(a))), 'reviewAgents (the agent of each review in reviewed_by)');
+  check(input.ratedBy === undefined || (input.rating !== undefined && HOLDERS.includes(input.ratedBy)), 'ratedBy (the lead\'s agent, given with rating)');
   const counted = (given: Partial<Findings> | undefined, name: string): Findings => {
     const result = {} as Findings;
     for (const key of ['high', 'medium', 'low'] as const) {
@@ -483,7 +487,8 @@ function votes(file: NotesFile): Vote[] {
       out.push({ model, item, value, rater, source, weight: weight * (agentOf(model) === by ? SELF_REVIEW : 1), ...(easy && item === 'correctness' ? { routine: true as const } : {}) });
     }
   };
-  for (const e of all) if (e.rating) cast(e.model, e.rating, LEAD, LEAD, e.id, 1, Boolean(e.job && flawed.has(e.job)), e.role === 'build' && e.difficulty === 'routine');
+  // The lead rates as its own agent, so a Codex lead rating Codex's work counts as the self-rating it is.
+  for (const e of all) if (e.rating) cast(e.model, e.rating, e.ratedBy ?? LEAD, e.ratedBy ?? LEAD, e.id, 1, Boolean(e.job && flawed.has(e.job)), e.role === 'build' && e.difficulty === 'routine');
   for (const r of file.ratings) {
     const rater = r.byModel ?? r.by;
     const { findings, correctness, ...rest } = r.items;

@@ -488,13 +488,16 @@ test('a rating is read against its rater per item, counts half from the model\'s
   assert.ok(two([5, 5, 5, 3, 3], 5) <= two([5, 5, 5, 5, 3], 5) && two([5, 5, 5, 5, 3], 5) <= two([5, 5, 5, 5, 5], 5));
   assert.ok(two([5, 5, 5], 5) >= 0 && two([1, 1, 1], 1) <= 0);
   // The lead rating a model of its own agent counts half: the same ratings take off less.
-  const lost = (agent: 'codex' | 'claude') => {
-    const f = fixture(Array.from({ length: 3 }, (_, i) => ({ job: `cx-${i}`, agent, reviewer: 'antigravity' as const, rating: { correctness: 1 } })));
+  const lost = (agent: 'codex' | 'claude', ratedBy?: 'codex') => {
+    const f = fixture(Array.from({ length: 3 }, (_, i) => ({ job: `cx-${i}`, agent, reviewer: 'antigravity' as const, rating: { correctness: 1 }, ...(ratedBy ? { ratedBy } : {}) })));
     f.models['model-a'].agent = agent;
     const s = scoreAll(f)[0];
     return (s.build! - s.score!) / s.build!;
   };
   assert.ok(lost('claude') > 0 && lost('claude') < lost('codex'));
+  // A Codex lead rates as Codex: its ratings of Codex's work count half, and of Claude's in full.
+  assert.equal(lost('codex', 'codex'), lost('claude'));
+  assert.equal(lost('claude', 'codex'), lost('codex'));
   // Three fives on work with an accepted high finding count as three threes.
   const flawed = (correctness: number) => scoreAll(fixture(Array.from({ length: 3 }, (_, i) => ({ job: `cx-${i}`, findings: high, rating: { correctness } }))))[0].score;
   assert.equal(flawed(5), flawed(3));

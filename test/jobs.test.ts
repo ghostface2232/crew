@@ -1161,7 +1161,7 @@ test('a role assigned to a disabled or unknown agent fails with the reason, and 
   // Unset roles keep their defaults, and roles added later follow their parents.
   assert.deepEqual(resolveConfig({ roles: { polish: { antigravity: { model: 'm' } } } }).roles, {
     delegate: { agents: ['codex', 'claude'] }, refactor: { agents: ['codex', 'claude'] }, release: { agents: ['codex', 'claude'] }, debate: { agents: ['codex', 'claude'] },
-    review: { agents: ['codex', 'claude'] }, verify: { agents: ['codex', 'claude'] }, fix: { agents: ['claude'] }, polish: { agents: ['antigravity'], antigravity: { model: 'm' } },
+    review: { agents: ['codex', 'claude'] }, verify: { agents: ['codex', 'claude'] }, fix: { agents: ['codex', 'claude'] }, polish: { agents: ['antigravity'], antigravity: { model: 'm' } },
   });
 
   // A table that is not exactly right must not quietly fall back to the defaults.

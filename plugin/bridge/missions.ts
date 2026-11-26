@@ -46,7 +46,7 @@ export interface MissionTask {
 export interface MissionMemory {
   /** The lead's short name for what was decided, e.g. "button-style". */
   key: string;
-  /** The decision as the user put it, with its scope. */
+  /** The lead's summary of what was decided and what it covers, not a quotation of the user's message. */
   text: string;
   /** The tasks it applies to; absent when it applies to the whole mission. */
   tasks?: string[];
@@ -285,7 +285,7 @@ function mergeTasks(current: MissionTask[] | undefined, input: unknown): Mission
   return tasks;
 }
 
-const MEMORY_FORM = 'remember is a list of { key, text, tasks }: key is your short name for the decision, text the decision as the user put it with its scope, tasks the task ids it applies to (leave out for the whole mission). An entry with a key the mission already has replaces it.';
+const MEMORY_FORM = 'remember is a list of { key, text, tasks }: key is your short name for the decision; text is one or two short sentences saying what was decided and what it covers (the decision itself, not a quotation of the user); and tasks are the task ids it applies to, left out for the whole mission. An entry with a key the mission already has replaces it.';
 
 /**
  * The mission's memory with these decisions laid over it and the forgotten keys taken out, checked as a whole so a

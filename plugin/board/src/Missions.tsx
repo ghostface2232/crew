@@ -3,8 +3,8 @@ import type { CSSProperties } from 'react';
 import { board } from './store.ts';
 import {
   BranchRequest16Regular, BranchRequestClosed16Regular, Checkmark16Regular, CheckmarkCircleRegular, CheckmarkRegular,
-  ChevronDown16Regular, ChevronDownRegular, ChevronRight16Regular, Clock16Regular, Dismiss16Regular, DismissCircleRegular,
-  GaugeRegular, Merge16Regular, MoreHorizontalRegular,
+  ChevronDown16Regular, ChevronDownRegular, ChevronRight16Regular, Clock16Regular, DismissCircleRegular,
+  GaugeRegular, Merge16Regular, MoreHorizontalRegular, TaskListSquareLtr16Regular,
 } from '@fluentui/react-icons';
 import type { BoardJob, BoardPull, ClaudeSession, Mission, PresetName, Snapshot } from './types.ts';
 import { actions, request } from './api.ts';
@@ -302,6 +302,7 @@ export const MissionPanel = memo(function MissionPanel({
   selected,
   openJob,
   openSession,
+  openDecisions,
   index = 0,
 }: {
   mission: Mission;
@@ -314,6 +315,7 @@ export const MissionPanel = memo(function MissionPanel({
   selected: string;
   openJob: (id: string) => void;
   openSession: (id: string) => void;
+  openDecisions: (mission: string) => void;
   index?: number;
 }) {
   const language = useLanguage();
@@ -437,26 +439,18 @@ export const MissionPanel = memo(function MissionPanel({
         ))}
         <MissionTrack mission={mission} />
         {active && !!mission.memory?.length && (
-          <div className="mission-decisions" role="group" aria-label={t('Decisions')}>
-            <h3 className="stage-name">{t('Decisions')}</h3>
-            <ul>
-              {mission.memory.map((entry) => (
-                <li key={entry.key}>
-                  <span className="selectable">{entry.text}</span>
-                  {/* The lead keeps adding decisions as the user makes them; one that no longer holds is the user's to drop. */}
-                  <button
-                    className="icon"
-                    disabled={locked}
-                    aria-label={t('Forget “{text}”', { text: entry.text })}
-                    title={t('Forget this decision. Jobs started after this no longer get it.')}
-                    onClick={() => void actions.run(key, () => request(`/api/missions/${mission.id}`, { forget: [entry.key] }), { done: '', once: false })}
-                  >
-                    <Icon icon={Dismiss16Regular} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
+          // One row however many decisions there are, so a long mission's card stays short; the detail panel lists them.
+          <button
+            className="job-row decisions-row"
+            data-opens-panel=""
+            aria-current={selected === `decisions:${mission.id}` || undefined}
+            onClick={() => openDecisions(mission.id)}
+          >
+            <span className="row-mark"><Icon icon={TaskListSquareLtr16Regular} /></span>
+            <span className="job-row-text"><b>{t('Decisions')}</b></span>
+            <span className="job-row-time">{mission.memory.length}</span>
+            <Icon icon={ChevronRight16Regular} className="row-chevron" />
+          </button>
         )}
         <div className="stage-groups">
           {stops.map(({ name }, stopIndex) => {
@@ -514,8 +508,9 @@ export const MissionPanel = memo(function MissionPanel({
 }, (a, b) =>
   a.mission === b.mission && a.owner === b.owner && a.lead === b.lead &&
   a.projectName === b.projectName && a.index === b.index &&
-  a.openJob === b.openJob && a.openSession === b.openSession &&
+  a.openJob === b.openJob && a.openSession === b.openSession && a.openDecisions === b.openDecisions &&
   (a.selected === b.selected || (!a.jobs.some((job) => job.id === a.selected || job.id === b.selected) &&
+    a.selected !== `decisions:${a.mission.id}` && b.selected !== `decisions:${a.mission.id}` &&
     (!a.lead || (a.selected !== `session:${a.lead.id}` && b.selected !== `session:${a.lead.id}`)))) &&
   sameItems(a.jobs, b.jobs) && sameItems(a.missionJobs, b.missionJobs) &&
   (a.pulls === b.pulls || Boolean(a.pulls && b.pulls && sameItems(a.pulls, b.pulls))),

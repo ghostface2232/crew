@@ -1254,6 +1254,8 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   .job-row { flex-wrap: wrap; row-gap: 6px; }
   .job-row > .job-row-text { flex-basis: calc(100% - 40px); }
   .job-row-time { margin-inline-start: auto; }
+  /* One word and a count always fit on a line. */
+  .decisions-row { flex-wrap: nowrap; }
 }
 .disclosure { transition: rotate 320ms var(--ease-out), translate 320ms var(--ease-out); translate: 0 0.5px; }
 /* Pointing right, its ink sits left of the box's center, so it moves a pixel that way (translate is not turned by the rotation). */
@@ -1264,11 +1266,11 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 /* The lead's wrap-up of finished work: what changed, what was verified, what is left for the user. */
 .mission-summary { padding: 12px 14px; border-radius: 16px; background: var(--surface-2); }
 .mission-summary .report { font-size: 12.5px; }
-/* Decisions the user made in this mission, each one theirs to drop. */
-.mission-decisions ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-.mission-decisions li { display: flex; align-items: flex-start; gap: 8px; padding: 6px 4px 6px 12px; border-radius: var(--row-radius); background: var(--surface-2); font-size: 12.5px; line-height: 1.45; }
-.mission-decisions li > span { flex: 1 1 auto; min-width: 0; padding-block: 2px; overflow-wrap: anywhere; }
-.mission-decisions li > button { flex: none; }
+/* Decisions the user made in a mission, listed in the detail panel, each one theirs to drop. */
+.decisions { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.decisions li { display: flex; align-items: flex-start; gap: 8px; padding: 6px 4px 6px 12px; border-radius: var(--row-radius); background: var(--surface-2); font-size: 12.5px; line-height: 1.45; }
+.decisions li > span { flex: 1 1 auto; min-width: 0; padding-block: 2px; overflow-wrap: anywhere; }
+.decisions li > button { flex: none; }
 
 /* MissionTrack: numbered markers, evenly spread between end insets, joined by a line, names centered under them. Each
    step is a zero-width anchor its marker and name center on. The insets fit the longer end name (--fit, measured) but stay
@@ -1330,11 +1332,13 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .stage-groups { display: grid; gap: 6px; }
 /* The first stage sits as far under the track as the track sits under the title. */
 .stage-groups > .rows:first-child > .stage-name { padding-top: 0; }
-.stage-name { padding: 10px 4px 2px; color: var(--tertiary); font: 550 10.5px/1.2 var(--text-face); letter-spacing: 0.06em; text-transform: uppercase; }
-/* A folding stage's whole label (name, count, chevron) is its button, padded to an easy target; negative margins keep the text in place. */
-.stage-name > button { gap: 6px; min-height: 28px; margin: -8px -10px; padding: 0 10px; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; }
+.stage-name { padding: 10px 4px 6px; color: var(--tertiary); font: 550 10.5px/1.2 var(--text-face); letter-spacing: 0.06em; text-transform: uppercase; }
+/* A folding stage's whole label (name, count, chevron) is the button, padded to an easy target; negative margins keep the
+   text in place, and the button ends as far above the first row as the rows sit from each other. On hover the label
+   only fades, because a fill would cover the padding and so start left of the rows' edge. */
+.stage-name > button { gap: 6px; min-height: 24px; margin: -6px -10px; padding: 0 10px; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; }
 .stage-name > button svg { width: 12px; height: 12px; }
-@media (hover: hover) { .stage-name > button:not(:disabled):hover { background: var(--fill); color: var(--secondary); } }
+@media (hover: hover) { .stage-name > button:not(:disabled):hover { background: none; color: color-mix(in srgb, var(--tertiary) 65%, transparent); } }
 
 /* Rows */
 .rows { display: grid; gap: 4px; }

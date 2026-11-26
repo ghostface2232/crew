@@ -70,14 +70,17 @@ final class CrewStore {
         didSet { if project != oldValue { closeDetail() } }
     }
     var selectedJob: String?
-    /// A Claude session shown in the detail panel instead of a job; at most one of the two is set.
+    /// A Claude session shown in the detail panel instead of a job; at most one of the three is set.
     var selectedSession: String?
-    var detailOpen: Bool { selectedJob != nil || selectedSession != nil }
-    func closeDetail() { selectedJob = nil; selectedSession = nil }
-    func openSession(_ id: String) { selectedJob = nil; selectedSession = id }
+    /// The mission whose decisions the detail panel lists instead of a job or a session.
+    var selectedDecisions: String?
+    var detailOpen: Bool { selectedJob != nil || selectedSession != nil || selectedDecisions != nil }
+    func closeDetail() { selectedJob = nil; selectedSession = nil; selectedDecisions = nil }
+    func openSession(_ id: String) { closeDetail(); selectedSession = id }
     /// A row clicked again closes the panel it opened.
     func toggleJob(_ id: String) { if selectedJob == id { closeDetail() } else { openJob(id) } }
     func toggleSession(_ id: String) { if selectedSession == id { closeDetail() } else { openSession(id) } }
+    func toggleDecisions(_ mission: String) { if selectedDecisions == mission { closeDetail() } else { closeDetail(); selectedDecisions = mission } }
     var search = ""
     var searchRequest = 0
     var showingDispatch = false
@@ -195,6 +198,7 @@ final class CrewStore {
             selection = "overview"
         }
         selectedSession = nil
+        selectedDecisions = nil
         selectedJob = id
     }
     func start() {

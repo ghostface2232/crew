@@ -111,6 +111,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (body.preset === null) delete mission.preset;
     else if (body.preset) mission.preset = body.preset;
+    if (body.forget) mission.memory = mission.memory?.filter((entry) => !body.forget.includes(entry.key));
     if (body.abandoned) mission.state = 'abandoned';
     if (body.done) mission.state = 'done';
     if (body.done || body.abandoned) {

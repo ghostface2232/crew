@@ -108,6 +108,13 @@ export interface DesktopBridge {
     pending(): Promise<boolean>;
     done(): Promise<void>;
   };
+  /** Opening the app in the tray at sign-in. Absent in an app older than this board. */
+  login?: {
+    /** Whether Windows will open Crew at sign-in; null where this copy cannot (not the installed app). */
+    state(): Promise<boolean | null>;
+    /** Turns it on or off, and answers what Windows then says. */
+    set(open: boolean): Promise<boolean>;
+  };
 }
 
 /** What Crew needs and whether each is in place (`GET /api/setup`). The plugins, `crew` command and Codex hooks can be installed here, and Crew's Codex hooks trusted. */

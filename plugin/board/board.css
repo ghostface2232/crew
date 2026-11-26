@@ -1330,9 +1330,10 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .stage-groups { display: grid; gap: 6px; }
 /* The first stage sits as far under the track as the track sits under the title. */
 .stage-groups > .rows:first-child > .stage-name { padding-top: 0; }
-.stage-name { padding: 10px 4px 2px; color: var(--tertiary); font: 550 10.5px/1.2 var(--text-face); letter-spacing: 0.06em; text-transform: uppercase; }
-/* A folding stage's whole label (name, count, chevron) is its button, padded to an easy target; negative margins keep the text in place. */
-.stage-name > button { gap: 6px; min-height: 28px; margin: -8px -10px; padding: 0 10px; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; }
+.stage-name { padding: 10px 4px 6px; color: var(--tertiary); font: 550 10.5px/1.2 var(--text-face); letter-spacing: 0.06em; text-transform: uppercase; }
+/* A folding stage's whole label (name, count, chevron) is its button, padded to an easy target; negative margins keep the
+   text in place. It ends as far above the first row as the rows sit from each other, so its hover fill never touches one. */
+.stage-name > button { gap: 6px; min-height: 24px; margin: -6px -10px; padding: 0 10px; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; }
 .stage-name > button svg { width: 12px; height: 12px; }
 @media (hover: hover) { .stage-name > button:not(:disabled):hover { background: var(--fill); color: var(--secondary); } }
 

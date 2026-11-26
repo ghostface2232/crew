@@ -55,7 +55,7 @@ export type RouteKind = Role | 'lead';
 
 export interface RouteDecision {
   kind: RouteKind;
-  /** Who should do it. For a role this is its holder or "claude" (the lead does it itself); never an agent the user did not assign. */
+  /** Who should do it. The leading agent means the lead does the work itself. */
   assignee: Agent;
   reason: string;
   /** Who to turn to next if the assignee fails. */

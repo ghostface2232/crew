@@ -59,10 +59,7 @@ export type JobAgent = WorkerAgent | 'claude';
 /** How a job runs: its sandbox, workspace, and base prompt. Each role runs as one of these. */
 export type JobKind = 'delegate' | 'review' | 'polish';
 
-/**
- * Who leads. Only Claude Code can today: the plugin's hooks wake it and record the user's words.
- * docs/roadmap.md describes what another lead would need.
- */
+/** The default lead host when no session host is known. Codex sessions use Codex as the lead. */
 export const LEAD = 'claude' as const;
 /**
  * Who may hold a role. The agent leading a session does a role it holds itself, in its session or a subagent; every
@@ -153,6 +150,7 @@ export interface RoleAssignment {
   /** Who may take the role's work, in HOLDERS order; the lead picks one for each job. */
   agents: Holder[];
   codex?: AgentSettings;
+  claude?: AgentSettings;
   antigravity?: AgentSettings;
 }
 
@@ -192,6 +190,7 @@ export type Language = (typeof LANGUAGES)[number];
 /** Model and effort a preset gives each agent, and the model the lead should give its subagents. */
 export interface Preset {
   codex?: { model?: string; effort?: string };
+  claude?: { model?: string; effort?: string };
   antigravity?: { model?: string; effort?: string };
   /** Passed by the lead as the model of the subagents it starts; "inherit" leaves them on the lead's model. */
   subagentModel?: string;
@@ -292,12 +291,12 @@ export const projectSettings = (config: Pick<Config, 'projects'>, project: strin
 
 /**
  * The built-in presets name no models: which ones an account can use differs, so a model belongs in the
- * user's config. They differ in Codex's effort and in the model the lead gives its subagents.
+ * user's config. They differ in worker effort and in the model the lead gives its subagents.
  */
 export const PRESETS: Record<PresetName, Preset> = {
-  economy: { codex: { effort: 'low' }, subagentModel: 'haiku', subagentMax: 'sonnet', maxTier: 'standard' },
-  balanced: { codex: { effort: 'medium' }, subagentModel: 'sonnet' },
-  best: { codex: { effort: 'high' }, subagentModel: 'inherit' },
+  economy: { codex: { effort: 'low' }, claude: { effort: 'low' }, subagentModel: 'haiku', subagentMax: 'sonnet', maxTier: 'standard' },
+  balanced: { codex: { effort: 'medium' }, claude: { effort: 'medium' }, subagentModel: 'sonnet' },
+  best: { codex: { effort: 'high' }, claude: { effort: 'high' }, subagentModel: 'inherit' },
 };
 export const PRESET_NAMES = Object.keys(PRESETS) as PresetName[];
 export const isPresetName = (value: unknown): value is PresetName => PRESET_NAMES.includes(value as PresetName);
@@ -347,13 +346,21 @@ function resolveRoles(settings: RoleSettings): Record<Role, RoleAssignment> {
     const parent = roleInfo(role).parent;
     const base: RoleAssignment = own.agents ? { agents: own.agents } : parent ? roles[parent] : { agents: BASE_HOLDERS[role]! };
     const resolved: RoleAssignment = { agents: base.agents };
-    for (const agent of workersOf(base)) {
+    for (const agent of base.agents) {
       const merged = { ...base[agent], ...own[agent] };
       if (Object.keys(merged).length) resolved[agent] = merged;
     }
     roles[role] = resolved;
   }
   return roles;
+}
+
+const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+function validateClaudeEffort(value: unknown, setting: string): void {
+  if (typeof value !== 'string' || !CLAUDE_EFFORTS.includes(value)) {
+    throw new Error(`${setting} must be one of: ${CLAUDE_EFFORTS.join(', ')}.`);
+  }
 }
 
 /**
@@ -363,9 +370,9 @@ function resolveRoles(settings: RoleSettings): Record<Role, RoleAssignment> {
 function roleEntry(role: Role, entry: Record<string, unknown>, inherited: RoleAssignment): Partial<RoleAssignment> {
   const holders = HOLDERS.join(', ');
   const legacy = ['agent', 'also', 'model', 'effort'].filter((key) => key in entry);
-  const current = ['agents', 'codex', 'antigravity'].filter((key) => key in entry);
+  const current = ['agents', ...HOLDERS].filter((key) => key in entry);
   for (const key of Object.keys(entry)) {
-    if (!legacy.includes(key) && !current.includes(key)) throw new Error(`roles.${role}.${key} is not a setting; use agents, codex, or antigravity.`);
+    if (!legacy.includes(key) && !current.includes(key)) throw new Error(`roles.${role}.${key} is not a setting; use agents, codex, antigravity, or claude.`);
   }
   if (legacy.length && current.length) throw new Error(`roles.${role} mixes ${legacy.join(', ')} with ${current.join(', ')}; write the agents list and each agent's settings instead.`);
   const result: Partial<RoleAssignment> = {};
@@ -400,7 +407,7 @@ function roleEntry(role: Role, entry: Record<string, unknown>, inherited: RoleAs
     if (new Set(agents).size !== agents.length) throw new Error(`roles.${role}.agents names a holder twice.`);
     result.agents = sortHolders(agents as Holder[]);
   }
-  for (const agent of Object.keys(WORKERS) as WorkerAgent[]) {
+  for (const agent of HOLDERS) {
     const settings = entry[agent];
     if (settings === undefined) continue;
     const allowed = ['model', 'effort'];
@@ -408,6 +415,7 @@ function roleEntry(role: Role, entry: Record<string, unknown>, inherited: RoleAs
     for (const [key, value] of Object.entries(settings)) {
       if (!allowed.includes(key)) throw new Error(`roles.${role}.${agent}.${key} is not a setting; use ${allowed.join(' or ')}.`);
       if (typeof value !== 'string') throw new Error(`roles.${role}.${agent}.${key} must be a string.`);
+      if (agent === 'claude' && key === 'effort') validateClaudeEffort(value, `roles.${role}.claude.effort`);
     }
     result[agent] = settings as AgentSettings;
   }
@@ -492,15 +500,16 @@ function resolvePresets(user: UserConfig): Pick<Config, 'preset' | 'presets'> {
       } else if (key === 'maxTier') {
         if (!TIERS.includes(value as Tier)) throw new Error(`presets.${name}.maxTier must be one of: ${TIERS.join(', ')}.`);
         merged.maxTier = value as Tier;
-      } else if (key === 'codex' || key === 'antigravity') {
+      } else if (isHolder(key)) {
         const allowed = ['model', 'effort'];
         if (!isObject(value)) throw new Error(`presets.${name}.${key} must be an object.`);
         for (const [setting, text] of Object.entries(value)) {
           if (!allowed.includes(setting)) throw new Error(`presets.${name}.${key}.${setting} is not a setting; use ${allowed.join(' or ')}.`);
           if (typeof text !== 'string') throw new Error(`presets.${name}.${key}.${setting} must be a string.`);
+          if (key === 'claude' && setting === 'effort') validateClaudeEffort(text, `presets.${name}.claude.effort`);
         }
         merged[key] = { ...merged[key], ...(value as Record<string, string>) };
-      } else throw new Error(`presets.${name}.${key} is not a setting; use codex, antigravity, subagentModel, subagentMax, or maxTier.`);
+      } else throw new Error(`presets.${name}.${key} is not a setting; use codex, antigravity, claude, subagentModel, subagentMax, or maxTier.`);
     }
     presets[name as PresetName] = merged;
   }
@@ -511,14 +520,13 @@ function resolvePresets(user: UserConfig): Pick<Config, 'preset' | 'presets'> {
  * The agent, model, and effort a job of this role runs with. A setting on the role wins over the preset,
  * and the preset over the agent's own. `preset` is the job's: its mission's when the mission sets one.
  */
-export function effectiveRole(config: Config, role: Role, preset: PresetName | null = config.preset, agent?: WorkerAgent): { agent: WorkerAgent; model?: string; effort?: string } {
+export function effectiveRole(config: Config, role: Role, preset: PresetName | null = config.preset, agent?: JobAgent, lead: Holder = LEAD): { agent: JobAgent; model?: string; effort?: string } {
   const assignment = config.roles[role];
-  // Claude is never a worker here: under a Claude lead it does the work itself, and a Claude worker settles its own model.
-  const holder = agent ?? (workersFor(role, assignment, disabledAgents(config))[0] as WorkerAgent | undefined);
+  const holder = agent ?? workersFor(role, assignment, disabledAgents(config), lead)[0];
   if (!holder) throw new Error(`${role} is held only by Claude, so a lead session takes it: a Claude Code lead does it itself, and a Codex lead starts a Claude worker.`);
   const own: AgentSettings = assignment[holder] ?? {};
   const chosen = preset ? config.presets[preset][holder] : undefined;
-  const effort = own.effort ?? (chosen as { effort?: string } | undefined)?.effort;
+  const effort = own.effort ?? chosen?.effort;
   const model = own.model ?? chosen?.model;
   return { agent: holder, ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
 }

@@ -19,7 +19,7 @@ Usage:
   crew gc [--apply] [--branches]  Preview leftovers; --apply cleans directories and metadata, --branches also deletes branches merged into HEAD
   crew board             Open the status board in the browser, signed in (--url prints the address instead)
   crew doctor            Check that everything Crew needs is in place
-  crew install           Register the plugin with Claude Code (and Codex, from a source checkout) and put crew on PATH
+  crew install           Register with Claude Code and Codex and put crew on PATH
   crew daemon <start|stop|restart|logs>
 `;
 
@@ -27,14 +27,17 @@ async function status(): Promise<void> {
   await ensureDaemon();
   const state = await api('GET', '/api/state');
   const jobs: JobView[] = state.jobs;
-  console.log('Claude');
-  if (state.claude.length === 0) console.log('  no session reporting (sessions appear once the plugin is loaded)');
-  for (const s of state.claude) console.log(`  ${s.state.padEnd(8)} ${s.title} — ${s.waitingFor ?? s.phase}`);
-  for (const [agent, name] of [['codex', 'Codex'], ['antigravity', 'Antigravity']] as const) {
-    console.log(`\n${name}`);
+  for (const [agent, name] of [['claude', 'Claude'], ['codex', 'Codex'], ['antigravity', 'Antigravity']] as const) {
+    console.log(agent === 'claude' ? name : `\n${name}`);
+    let sessions = 0;
+    for (const s of state.claude) {
+      if ((s.host ?? 'claude') !== agent) continue;
+      console.log(`  ${s.state.padEnd(8)} ${s.title} — ${s.waitingFor ?? s.phase}`);
+      sessions++;
+    }
     const mine = jobs.filter((j) => j.agent === agent);
     const shown = [...mine.filter((j) => !j.endedAt), ...mine.filter((j) => j.endedAt).slice(0, 3)];
-    if (shown.length === 0) console.log('  idle');
+    if (sessions === 0 && shown.length === 0) console.log('  idle');
     for (const job of shown) console.log(`  ${summarize(job)}`);
   }
   console.log(`\nBoard: ${baseUrl()}`);
@@ -69,7 +72,11 @@ async function install(): Promise<void> {
   const result = await register(true);
   console.log(`${result.ok ? '✓' : '✗'} ${result.detail}`);
   if (!result.ok) process.exitCode = 1;
-  else console.log(`✓ crew command: ${COMMAND}\n\nRestart Claude Code sessions (or run /reload-plugins) to load the plugin, then try /crew:run.`);
+  else {
+    console.log(`✓ crew command: ${COMMAND}\n`);
+    console.log('Restart Claude Code (or run /reload-plugins), then try /crew:run.');
+    console.log('Start a new Codex session, then try $crew:run.');
+  }
 }
 
 const [command, arg] = process.argv.slice(2);

@@ -42,8 +42,8 @@ Each item confirms what is ready or says what to do next in the app's language. 
 
 | Item | What the app does |
 | --- | --- |
-| Crew plugin and `crew` command | Registers and writes shims automatically; exposes an **Install** repair button when missing |
-| Claude Code (`claude` on `PATH`) | Checks `claude --version`; if missing, tells the user to install from `claude.com/code` |
+| Crew plugin and `crew` command | Registers and writes shims automatically, checking Claude Code's plugin when Claude Code is installed and Codex's when only Codex is (Codex's plugin also keeps its own item below); exposes an **Install** repair button when missing |
+| Claude Code and sign-in | Checks `claude --version` and, when installed, `claude auth status`; installing from `claude.com/code` and signing in (`claude auth login`) are left to the user |
 | Codex CLI and sign-in | Checks `codex --version` and `codex login status`; installing and signing in are left to the user |
 | Crew plugin in Codex | With Codex installed, checks `codex plugin list --marketplace crew` (the whole list also reads remote marketplaces, which can take a minute) for `crew@crew` installed and enabled at this copy's version; **Install** registers it |
 | Crew hooks in Codex | Checked as soon as the Codex plugin item passes, so users can trust hooks before running their first Crew job. It asks a short-lived `codex app-server` for `hooks/list` (`codexHooksItem` in `setup.ts`) and finds Crew's hooks by event, command and hooks file rather than by key, whose spelling of the file's path is Codex's own. It passes when every Crew hook is trusted and enabled. Untrusted or changed hooks offer **Trust Hooks**; hooks missing from the file, or there more than once, offer **Install**, which registers again, unless a source checkout holds Codex's registration, which the app leaves alone: then the item points to `crew install` in that checkout; disabled hooks are left to the user to turn on in Codex. If the request fails or exceeds 10 seconds, the item points to a fresh check or manual review. |

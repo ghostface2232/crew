@@ -1,6 +1,6 @@
 # Delivery
 
-The daemon keeps news for the lead and uses Claude Code hooks to wake an idle session when a job finishes or needs attention. Lead tools and hook digests offer the news until the lead echoes a receipt.
+The daemon keeps news for the lead and wakes an idle session when a job finishes or needs attention, using Claude Code hooks for a Claude lead or a queued note in its thread for a Codex lead. Lead tools and hook digests offer the news until the lead echoes a receipt.
 
 **Key files:** `plugin/bridge/daemon.ts`, `mcp.ts`, `wake.ts`, `report.ts`, `context.ts`, and `codex-lead.ts`. See [jobs.md](jobs.md) for lead tools, [missions.md](missions.md#pull-requests) for PR watches, and [daemon-api.md](daemon-api.md) for hook authentication and event formats.
 

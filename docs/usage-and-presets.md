@@ -65,7 +65,7 @@ A Codex lead asks with `lead=codex`. "The lead" in the table means that session,
 
 `preset` in `~/.crew/config.json` is `economy`, `balanced`, or `best` (unset by default). A role setting overrides the preset, and the preset overrides the agent's global config.
 
-| Preset | Codex effort | Lead's subagents | Worker tier cap (`maxTier`) |
+| Preset | Codex and Claude effort | Lead's subagents | Worker tier cap (`maxTier`) |
 | --- | --- | --- | --- |
 | `economy` | `low` | `haiku`, `sonnet` at most (`subagentMax`) | `standard` |
 | `balanced` | `medium` | `sonnet` | none |
@@ -73,9 +73,9 @@ A Codex lead asks with `lead=codex`. "The lead" in the table means that session,
 
 `subagentModel` and `subagentMax` name Claude models, so a Codex lead is told to keep its subagents on its own model under every preset.
 
-Under `economy`, `maxTier: "standard"` caps worker models at the `standard` tier (Sol for Codex, Hydrogen for Antigravity): a higher tier or larger named model is lowered to it, while the lead may still set a custom effort per job.
+Under `economy`, `maxTier: "standard"` caps worker models at the `standard` tier (Sol for Codex, Hydrogen for Antigravity, Sonnet for Claude): a higher tier or larger named model is lowered to it, while the lead may still set a custom effort per job.
 
-Built-in presets name no worker models because account availability differs. Customize models under `presets`:
+Built-in presets name no worker models because account availability differs. Customize a preset's `codex`, `claude`, or `antigravity` `model` and `effort` under `presets`:
 
 ```json
 {
@@ -103,8 +103,8 @@ A job can name its difficulty via `tier` (`delegate`, `review`, `polish`, `debat
 
 Tiers name model families, not versions. For Codex, Crew picks the newest unhidden model in that family from `$CODEX_HOME/models_cache.json` (falling back to Codex's default). For Antigravity, Crew matches the session's offered model list (skipping orchestrators) and falls back to the agent's default. Because Antigravity element names do not encode rank, families are mapped manually. `Neon` holds `frontier`. The displaced `Argon` stays recorded in `FORMER_FAMILIES` so explicit Argon models still run and preset caps still lower them.
 
-- **Model precedence:** explicit job `model` (a versionless family name such as `"Astra"` resolves as its tier), job `tier`, configured model (role, preset, or `codex.model`/`antigravity.model`), then default tier.
-- **Effort precedence:** job `effort`, role or preset `effort`, then (for Codex) named tier effort, `codex.effort`, or default tier effort. Under `economy`, jobs stay `low` unless the lead overrides `effort`. Antigravity accepts `effort` only from the job, role, or preset (mapped to `thought_level`).
+- **Model precedence:** explicit job `model` (a versionless family name such as `"Astra"` resolves as its tier), job `tier`, configured model (role, preset, or `codex.model`/`antigravity.model`/`claude.model`), then default tier.
+- **Effort precedence:** job `effort`, role or preset `effort`, then for Codex a named tier effort, `codex.effort`, or default tier effort, and for a Claude worker `claude.effort` when no tier is named. Under `economy`, jobs stay `low` unless the lead overrides `effort`. Antigravity accepts `effort` only from the job, role, or preset (mapped to `thought_level`).
 
 ## Tests
 

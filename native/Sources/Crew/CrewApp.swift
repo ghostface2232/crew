@@ -237,7 +237,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         }
         if openedAtLogin, let mainWindow { keepClosedAtLogin(mainWindow) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self, self.mainWindow == nil, !self.openedAtLogin else { return }
+            guard let self, self.mainWindow == nil else { return }
+            // SwiftUI did not open the window, so at login there is nothing to put away, and a window opened later is the user's.
+            if self.openedAtLogin { self.openedAtLogin = false; return }
             self.openMainWindow?(id: "main")
         }
         if ProcessInfo.processInfo.environment["CREW_TEST_MODE"] != "1" {

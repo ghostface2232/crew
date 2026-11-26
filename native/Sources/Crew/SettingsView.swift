@@ -300,9 +300,14 @@ struct CrewSettingsView: View {
                     }
                 }
             }
-            .onAppear { login = LoginItem.state }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in login = LoginItem.state }
+            .onAppear(perform: readLogin)
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in readLogin() }
         }
+    }
+    /// A fresh reading replaces an earlier failure, which may have been settled in System Settings since.
+    private func readLogin() {
+        login = LoginItem.state
+        loginError = nil
     }
     @ViewBuilder private var updateAction: some View {
         switch updater.phase {

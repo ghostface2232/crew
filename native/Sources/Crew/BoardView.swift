@@ -439,7 +439,7 @@ struct MissionPanel: View {
                 // Status and the controls sit on the middle of the title and its meta line together.
                 HStack(alignment: .center, spacing: Space.m) {
                     // The lead's mark sits before the title and meta together, the same for every lead.
-                    // The header starts as far in as the stop names, decisions and outcomes below, which take the same inset
+                    // The header starts as far in as the stop names and outcomes below, which take the same inset
                     // beside their rows: the mark when there is one, else the title.
                     if let leadAgent { AgentMark(agent: leadAgent, size: MarkSize.list).padding(.leading, WorkspaceStyle.rowTitleInset) }
                     VStack(alignment: .leading, spacing: Space.xs) {

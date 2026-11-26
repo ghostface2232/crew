@@ -1254,6 +1254,8 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   .job-row { flex-wrap: wrap; row-gap: 6px; }
   .job-row > .job-row-text { flex-basis: calc(100% - 40px); }
   .job-row-time { margin-inline-start: auto; }
+  /* One word and a count always fit on a line. */
+  .decisions-row { flex-wrap: nowrap; }
 }
 .disclosure { transition: rotate 320ms var(--ease-out), translate 320ms var(--ease-out); translate: 0 0.5px; }
 /* Pointing right, its ink sits left of the box's center, so it moves a pixel that way (translate is not turned by the rotation). */

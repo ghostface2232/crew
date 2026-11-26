@@ -1154,6 +1154,23 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         store.openJob("cx-question", navigate: true)
         #expect(store.selectedJob == "cx-question")
     }
+    @Test func decisionsTakeTheDetailPanelInPlaceOfAJobOrSession() throws {
+        let store = try store()
+        store.toggleDecisions("mission-1")
+        #expect(store.detailOpen && store.selectedDecisions == "mission-1")
+        store.openJob("cx-question")
+        #expect(store.selectedDecisions == nil && store.selectedJob == "cx-question")
+        store.toggleDecisions("mission-1")
+        #expect(store.selectedJob == nil && store.selectedDecisions == "mission-1")
+        store.openSession("lead-1")
+        #expect(store.selectedDecisions == nil && store.selectedSession == "lead-1")
+        // The row clicked again closes the panel it opened, and a page switch closes it as it does a job's.
+        store.toggleDecisions("mission-1"); store.toggleDecisions("mission-1")
+        #expect(!store.detailOpen)
+        store.toggleDecisions("mission-1")
+        store.selection = "history"
+        #expect(!store.detailOpen)
+    }
     @Test func completionLeasePreservesOwnershipAcrossTransientFailure() async throws {
         let calls = Mutex(0)
         let api = api { request in

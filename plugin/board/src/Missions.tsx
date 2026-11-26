@@ -441,7 +441,7 @@ export const MissionPanel = memo(function MissionPanel({
         {active && !!mission.memory?.length && (
           // One row however many there are, so a long mission's card stays short; the panel lists them.
           <button
-            className="job-row"
+            className="job-row decisions-row"
             data-opens-panel=""
             aria-current={selected === `decisions:${mission.id}` || undefined}
             onClick={() => openDecisions(mission.id)}

@@ -479,11 +479,13 @@ test('a Codex lead does the roles Codex holds itself, and a role Claude holds go
   const shared = { ...CODEX_ROLES, delegate: { agents: ['codex' as const, 'claude' as const] } };
   assert.equal(route('delegate', usageOf({ codex: 'ok', claude: 'ok' }), shared, [], 'codex').assignee, 'claude');
   assert.equal(route('delegate', usageOf({ codex: 'tight', claude: 'ok' }), shared).assignee, 'claude');
-  const fix = route('fix', usageOf({}), CODEX_ROLES, [], 'codex');
+  // Fixing held by Claude alone goes to a Claude worker under a Codex lead.
+  const claudeFix = { ...CODEX_ROLES, fix: { agents: ['claude' as const] } };
+  const fix = route('fix', usageOf({}), claudeFix, [], 'codex');
   assert.equal(fix.assignee, 'claude');
   assert.match(fix.reason, /^Claude holds the role/);
   // Claude short of usage gives the work back to the lead, with Claude as the fallback.
-  const tight = route('fix', usageOf({ claude: 'tight', codex: 'ok' }), CODEX_ROLES, [], 'codex');
+  const tight = route('fix', usageOf({ claude: 'tight', codex: 'ok' }), claudeFix, [], 'codex');
   assert.deepEqual([tight.assignee, tight.fallback], ['codex', ['claude']]);
   assert.match(tight.reason, /^Claude is tight: .*Take this work yourself or in subagents/);
 });
@@ -629,11 +631,18 @@ test('with no holder named, wording goes to Antigravity and other work to Codex,
   assert.deepEqual(route('polish', usageOf({}), roles).holders?.map((h) => h.agent), ['antigravity', 'codex', 'claude']);
 });
 
-test('by default Codex and Claude both build, review and fix, so either lead hands that work to the other agent first', () => {
+test('by default Codex and Claude both build, review and fix; either lead hands building and reviewing to the other first and decides how to fix', () => {
   assert.deepEqual([DEFAULT_ROLES.delegate.agents, DEFAULT_ROLES.review.agents, DEFAULT_ROLES.fix.agents, DEFAULT_ROLES.polish.agents],
     [['codex', 'claude'], ['codex', 'claude'], ['codex', 'claude'], ['antigravity']]);
-  assert.equal(route('fix', usageOf({}), DEFAULT_ROLES).assignee, 'codex');
-  assert.equal(route('fix', usageOf({}), DEFAULT_ROLES, [], 'codex').assignee, 'claude');
+  // Fixing follows the lead's triage: the lead decides whether to share it, and shares it when its own usage is short.
+  const claudeLeadFix = route('fix', usageOf({}), DEFAULT_ROLES);
+  assert.deepEqual([claudeLeadFix.assignee, claudeLeadFix.fallback], ['claude', ['codex']]);
+  assert.match(claudeLeadFix.reason, /^Decide whether to fix it yourself or share it with Codex; when there is a lot to fix, consider sharing it first\.$/);
+  const codexLeadFix = route('fix', usageOf({}), DEFAULT_ROLES, [], 'codex');
+  assert.deepEqual([codexLeadFix.assignee, codexLeadFix.fallback], ['codex', ['claude']]);
+  assert.match(codexLeadFix.reason, /share it with Claude/);
+  assert.equal(route('fix', usageOf({ claude: 'tight', codex: 'ok' }), DEFAULT_ROLES).assignee, 'codex');
+  assert.equal(route('fix', usageOf({ codex: 'exhausted' }), DEFAULT_ROLES).reason, 'Fix the findings yourself.');
   const room = usageOf({});
   // A Claude lead hands building and reviewing to Codex, and takes them over only when Codex is short.
   assert.equal(route('delegate', room, DEFAULT_ROLES).assignee, 'codex');

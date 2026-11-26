@@ -439,7 +439,7 @@ export const MissionPanel = memo(function MissionPanel({
         ))}
         <MissionTrack mission={mission} />
         {active && !!mission.memory?.length && (
-          // One row however many there are, so a long mission's card stays short; the panel lists them.
+          // One row however many decisions there are, so a long mission's card stays short; the detail panel lists them.
           <button
             className="job-row decisions-row"
             data-opens-panel=""

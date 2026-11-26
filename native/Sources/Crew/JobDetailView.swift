@@ -417,7 +417,7 @@ struct MissionDecisionsView: View {
     let id: String
     @State private var scrolled = false
     private var mission: Mission? { store.state.missions.first { $0.id == id } }
-    /// Only an active mission still gives its decisions to jobs, as its card shows them only then.
+    /// Only an active mission still gives its decisions to jobs, just as its card shows them only then.
     private var decisions: [MissionMemory] { mission?.state == "active" ? mission?.memory ?? [] : [] }
     private var locked: Bool { !store.connected || mission.map { store.actions[$0.actionKey]?.locked == true } ?? true }
     var body: some View {

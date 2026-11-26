@@ -1006,9 +1006,9 @@ export const SessionDrawer = memo(function SessionDrawer({ id, state, close }: {
 export const DecisionsDrawer = memo(function DecisionsDrawer({ id, state, close }: { id: string; state: Snapshot; close: () => void }) {
   useLanguage();
   const mission = state.missions.find((item) => item.id === id);
-  // Only an active mission still gives its decisions to jobs, as its card shows them only then.
+  // Only an active mission still gives its decisions to jobs, just as its card shows them only then.
   const decisions = mission?.state === 'active' ? mission.memory ?? [] : [];
-  // The card's own key, so the card and the panel lock and report together.
+  // Shares the mission card's action key, so the card and panel lock and show status together.
   const key = `mission:${id}:${mission?.state}`;
   const action = useAction(key);
   const locked = action.pending || action.accepted || state.connection !== 'live';

@@ -274,7 +274,7 @@ test('a mission card keeps its decisions to one row, and the panel lists them an
   await expect(panel.getByRole('listitem')).toHaveText(['Completion text follows sample B.']);
   await expect(card.getByRole('button', { name: 'Decisions 1', exact: true })).toBeVisible();
   expect(await (await request.get('/__requests')).json()).toEqual([{ route: '/api/missions/mission-1', body: { forget: ['buttons'] } }]);
-  // With none left the row goes, and the open panel says so in place of a list.
+  // With none left, the card row disappears and the open panel says so in place of a list.
   await panel.getByRole('button', { name: 'Forget “Completion text follows sample B.”' }).click();
   await expect(card.getByRole('button', { name: /^Decisions/ })).toHaveCount(0);
   await expect(panel.getByText('No decisions to show.')).toBeVisible();

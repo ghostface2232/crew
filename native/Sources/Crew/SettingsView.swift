@@ -290,7 +290,7 @@ struct CrewSettingsView: View {
                     if let loginError { ErrorLabel(message: loginError).settingsFootnote() }
                     if login == .needsApproval {
                         HStack(spacing: Space.l) {
-                            Text("Crew is turned off in Login Items. Allow it there to open Crew at login.").settingsFootnote()
+                            Text("Crew is turned off in Login Items. Turn it on there to open at login.").settingsFootnote()
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Button("Open Login Items") { LoginItem.openSystemSettings() }.pillButton()
                         }

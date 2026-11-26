@@ -6,7 +6,7 @@ The daemon keeps news for the lead and uses Claude Code hooks to wake an idle se
 
 ## News and ownership
 
-The daemon owns delivery state in `jobs.json`. Each job records the starting MCP server's `CLAUDE_CODE_SESSION_ID` as `lead`. Board and legacy jobs start unowned; when a session acts on a job through a Crew tool, the MCP server or wake hook adopts the job before offering news. Completions, failures (including restart recovery), lead questions, decision requests, and updates from [watched pull requests](missions.md#pull-requests) append immutable `News` snapshots with a per-subject `newsSeq`. Routine progress does not create news.
+The daemon owns delivery state in `jobs.json`. Each job records the starting lead session ID as `lead` (`CLAUDE_CODE_SESSION_ID` in Claude Code, or the tool call's `_meta.sessionId` in Codex). Board and legacy jobs start unowned; when a session acts on a job through a Crew tool, the MCP server or wake hook adopts the job before offering news. Completions, failures (including restart recovery), lead questions, decision requests, and updates from [watched pull requests](missions.md#pull-requests) append immutable `News` snapshots with a per-subject `newsSeq`. Routine progress does not create news.
 
 ## Receipts and leases
 

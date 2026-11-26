@@ -16,12 +16,12 @@ A role is a kind of work the user assigns to one or more holders (`ROLE_INFO` in
 | `debate` | `delegate` (read-only) | `delegate` | Tests the lead's position on a hard decision (`debater.md`) |
 | `review` | `review` | | Static cross-review |
 | `verify` | `review` | `review` | Review that runs the app in a snapshot of the change (`unable: ["antigravity"]`) |
-| `fix` | `delegate` | | Fixing accepted review findings in the lead's code or a merged result (`engineer.md` + `fix.md`); held by Claude by default |
+| `fix` | `delegate` | | Fixing accepted review findings in the lead's code or a merged result (`engineer.md` + `fix.md`); held by Codex and Claude by default |
 | `polish` | `polish` | | Wording (`polisher.md`) |
 
 ## Role assignments
 
-Each tool maps to one or more roles, and `roles` in `~/.crew/config.json` names which agents hold each role. Without `roles`, defaults apply (implementation/review/refactor/release/debate/verify to Codex and Claude, fixing to Claude, wording to Antigravity). Both are listed so either lead hands the work to the other agent first, keeping it only as a fallback.
+Each tool maps to one or more roles, and `roles` in `~/.crew/config.json` names which agents hold each role. Without `roles`, defaults apply (implementation/review/refactor/release/debate/verify/fixing to Codex and Claude, wording to Antigravity). Both are listed so either lead hands the work to the other agent first, keeping it only as a fallback.
 
 ```json
 {
@@ -154,7 +154,7 @@ Shared instructions were verified with markers across Codex, Antigravity, and he
 
 ## History
 
-- 2026-11-26: Default holders for `delegate` and `review` (and the roles that follow them: `refactor`, `release`, `debate`, `verify`) changed from Codex alone to both Codex and Claude, while `fix` stayed with Claude and `polish` with Antigravity. Because Codex can now lead too, a Codex-only default left a Codex lead doing building and reviewing itself; naming both lets either lead hand that work to the other agent first.
+- 2026-11-26: Default holders for `delegate` and `review` (and the roles that follow them: `refactor`, `release`, `debate`, `verify`) changed from Codex alone to both Codex and Claude, and `fix` changed from Claude alone to both, while `polish` stayed with Antigravity. Because Codex can now lead too, a Codex-only default left a Codex lead doing building and reviewing itself, and a Claude-only default for `fix` sent a Codex lead's fixes to a Claude worker while meaning "the lead fixes"; naming both lets either lead hand that work to the other agent first.
 - 2026-11-25: Correctness ratings of routine work were capped like routine lines, after gemini-4-hydrogen's eleven fives on wording jobs lifted its score above its build score.
 - 2026-11-25: Builders start at the reference 7.0 rather than at the other models' pooled rate, at the user's request: under the pooled start a model that had done one clean documentation job began at about 8.4, the average of the others, without having shown anything.
 - 2026-11-25: Correctness anchors moved from 5 = "found nothing" and 3 = "real bugs in edge cases" to the scale above, and the lead was given the same anchors, which it previously lacked. Under the old scale, nearly every cross-review rated 3 while the unanchored lead rated its workers 4 to 5. Ratings given before this date keep their old meaning; rater centering absorbs part of the shift.

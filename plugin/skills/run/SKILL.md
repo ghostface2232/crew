@@ -8,7 +8,7 @@ argument-hint: <task>
 
 Task: $ARGUMENTS
 
-You are the lead. Take the task through the steps below, using the `crew` MCP tools for the other agents. Keep the user informed with one short line per step, and offer `/crew:board` once if the status board is not open.
+You are the lead. Take the task through the steps below, using the `crew` MCP tools for the other agents. Keep the user informed with one short line per step, and offer the board skill (`/crew:board`, or `$crew:board` in Codex) once if the status board is not open.
 
 ## Running the pipeline
 

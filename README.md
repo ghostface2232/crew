@@ -11,7 +11,7 @@ A plugin for Claude Code and Codex that runs several coding agents together: Cla
 
 Install and open the desktop app from [Releases](https://github.com/ghostface2232/crew/releases/latest) (macOS 26 or later on Apple silicon, or Windows 10 or later on x64).
 
-You need Claude Code or Codex to lead from, plus signed-in Codex and Antigravity CLIs for the workers (`codex login`; run `agy` once). Every job spends the usage of the plan its agent is signed in to.
+You need Claude Code or Codex to lead from, plus signed-in CLIs for the workers: Codex (`codex login`) and Antigravity (run `agy` once) under a Claude Code lead, or the Claude Code CLI (`claude`) and Antigravity under a Codex lead. Every job spends the usage of the plan its agent is signed in to.
 
 Crew works best alongside [AgentGauge](https://github.com/ghostface2232/AgentGauge). Crew reads each agent's remaining usage and reset times from it, shows them on the agent cards, and routes work by them ([Usage](#usage)). Without it, work follows your role assignments.
 
@@ -85,7 +85,7 @@ If [AgentGauge](https://github.com/ghostface2232/AgentGauge) is installed, each 
 
 Job turns appear as rounds that can be undone or kept one by one. New Job also accepts a read-only question or a piece of information to pin ([docs/jobs.md](docs/jobs.md), [docs/board.md](docs/board.md)).
 
-When a worker asks for approval or has a question, an input dialog pops up in the Claude app; you can also answer on the status board or in the desktop app. A computer-use request about one app or a simple Antigravity command can be allowed for the rest of its job so the worker stops asking on every call. Codex's built-in automatic reviewer answers approval requests first; you are asked only about what it refuses twice ([docs/approvals.md](docs/approvals.md)).
+When a worker asks for approval or has a question, an input dialog pops up in the lead's app; you can also answer on the status board or in the desktop app. A computer-use request about one app or a simple Antigravity command can be allowed for the rest of its job so the worker stops asking on every call. Codex's built-in automatic reviewer answers approval requests first; you are asked only about what it refuses twice ([docs/approvals.md](docs/approvals.md)).
 
 ## Desktop app
 

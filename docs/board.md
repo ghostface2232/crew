@@ -1,6 +1,6 @@
 # Board
 
-The React web board lets users inspect work and act on it directly, as does the native macOS app (requirement R10, roadmap item B1). The web board is supported on all platforms and also runs in the Windows Electron shell. Claude remains the pipeline lead; Cursor, alternate leads, and automatic merges remain separate work.
+The React web board lets users inspect work and act on it directly, as does the native macOS app (requirement R10, roadmap item B1). The web board is supported on all platforms and also runs in the Windows Electron shell. Either Claude Code or Codex can lead the pipeline; Cursor and automatic merges remain separate work.
 
 **Key files:** `plugin/board/src/store.ts`, `plugin/board/src/api.ts`, `plugin/board/src/model.ts`, `plugin/board/src/ui.tsx`, `plugin/board/board.css`, and `plugin/bridge/assets.ts`. See [daemon-api.md](daemon-api.md) for HTTP and SSE, [missions.md](missions.md#display) for mission display, [approvals.md](approvals.md) for approvals and questions, and [usage-and-presets.md](usage-and-presets.md) for usage routing and presets. The current desktop apps are documented in [windows-app.md](windows-app.md) and [macos-app.md](macos-app.md).
 

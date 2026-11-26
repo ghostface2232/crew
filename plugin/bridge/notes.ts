@@ -300,9 +300,12 @@ export function addEvidence(home: string, input: Omit<Evidence, 'id' | 'at'> & {
   // Noting a job again (a retried call, a resumed session, a model the session reported later) replaces its line
   // rather than counting the job twice; the line moves to the model named now, and a model it leaves empty goes.
   if (input.job) for (const other of Object.values(file.models)) {
-    // The lead's rating of the job stays with it when a later note of the same line brings none.
-    const earlier = other.evidence.find((e) => e.job === input.job && e.role === input.role)?.rating;
-    if (earlier && !evidence.rating) evidence.rating = earlier;
+    // The lead's rating of the job stays with it when a later note of the same line brings none, and so does who gave it.
+    const earlier = other.evidence.find((e) => e.job === input.job && e.role === input.role);
+    if (earlier?.rating && !evidence.rating) {
+      evidence.rating = earlier.rating;
+      if (earlier.ratedBy) evidence.ratedBy = earlier.ratedBy;
+    }
     const before = other.evidence.length;
     other.evidence = other.evidence.filter((e) => !(e.job === input.job && e.role === input.role));
     if (before && !other.evidence.length && other !== existing) delete file.models[other.model];

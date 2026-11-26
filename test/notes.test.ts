@@ -593,6 +593,10 @@ test('ratings are validated, replaced per job, kept through a later note of the 
   addEvidence(dir, { ...input, job: 'cx-1', rating: { correctness: 4, brief: 5 } });
   assert.deepEqual(addEvidence(dir, { ...input, job: 'cx-1', text: 'Corrected.' }).evidence.rating, { correctness: 4, brief: 5 });
   assert.deepEqual(addEvidence(dir, { ...input, job: 'cx-1', rating: { brief: 2 } }).evidence.rating, { brief: 2 });
+  // A Codex lead's rating keeps its rater when the line is noted again without one.
+  addEvidence(dir, { ...input, job: 'cx-2', rating: { correctness: 4 }, ratedBy: 'codex' });
+  const kept = addEvidence(dir, { ...input, job: 'cx-2', text: 'Corrected.' }).evidence;
+  assert.deepEqual([kept.rating, kept.ratedBy], [{ correctness: 4 }, 'codex']);
   // A rating a hand edit left without its fact is skipped on load, and the file is copied before a save erases it.
   const saved = JSON.parse(fs.readFileSync(notesFile(dir), 'utf8'));
   saved.ratings[0].fact = ' ';

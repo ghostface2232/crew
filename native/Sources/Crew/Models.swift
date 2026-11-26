@@ -420,23 +420,30 @@ struct WorkflowRun: Codable, Sendable, Identifiable, Equatable {
 }
 struct ModelChoice: Codable, Sendable, Identifiable, Equatable { var id: String; var name: String; var efforts: [String]? }
 struct Worker: Codable, Sendable, Equatable { var name: String; var resume: String; var enabled: Bool; var models: [ModelChoice]? }
+/// Claude Code's aliases for its newest model of each family, and the efforts `claude --effort` takes, as the daemon
+/// validates them. The daemon lists no Claude models: Claude Code has no listing to read.
+let claudeModels = [("haiku", "Haiku"), ("sonnet", "Sonnet"), ("opus", "Opus")]
+    .map { ModelChoice(id: $0.0, name: $0.1, efforts: ["low", "medium", "high", "xhigh", "max"]) }
 struct RoleAssignment: Codable, Sendable, Equatable {
     static let holderOrder = ["codex", "antigravity", "claude"]
     var agents: [String]
     var codex: RoleAgentSettings?
     var antigravity: RoleAgentSettings?
+    /// Claude's settings apply when it runs as a worker, under a Codex lead; a Claude Code lead does the work itself.
+    var claude: RoleAgentSettings?
     var holders: [String] { Self.holderOrder.filter { agents.contains($0) } }
-    var workerHolders: [String] { holders.filter { $0 == "codex" || $0 == "antigravity" } }
-    init(agents: [String], codex: RoleAgentSettings? = nil, antigravity: RoleAgentSettings? = nil) {
+    /// The holders a role can set a model and effort for: every one of them.
+    var workerHolders: [String] { holders }
+    init(agents: [String], codex: RoleAgentSettings? = nil, antigravity: RoleAgentSettings? = nil, claude: RoleAgentSettings? = nil) {
         self.agents = Self.holderOrder.filter { agents.contains($0) }
-        self.codex = codex; self.antigravity = antigravity
+        self.codex = codex; self.antigravity = antigravity; self.claude = claude
     }
     init(from decoder: Decoder) throws {
         let setting = try RoleSetting(from: decoder)
         guard let agents = setting.agents, !agents.isEmpty else {
             throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: String(localized: "A resolved role needs at least one holder.")))
         }
-        self.init(agents: agents, codex: setting.codex, antigravity: setting.antigravity)
+        self.init(agents: agents, codex: setting.codex, antigravity: setting.antigravity, claude: setting.claude)
     }
     func encode(to encoder: Encoder) throws { try RoleSetting(self).encode(to: encoder) }
 }
@@ -452,34 +459,43 @@ struct RoleSetting: Codable, Sendable, Equatable {
     var agents: [String]?
     var codex: RoleAgentSettings?
     var antigravity: RoleAgentSettings?
-    init(agents: [String]? = nil, codex: RoleAgentSettings? = nil, antigravity: RoleAgentSettings? = nil) {
-        self.agents = agents; self.codex = codex; self.antigravity = antigravity
+    var claude: RoleAgentSettings?
+    init(agents: [String]? = nil, codex: RoleAgentSettings? = nil, antigravity: RoleAgentSettings? = nil, claude: RoleAgentSettings? = nil) {
+        self.agents = agents; self.codex = codex; self.antigravity = antigravity; self.claude = claude
     }
     init(_ assignment: RoleAssignment) {
-        agents = assignment.holders; codex = assignment.codex; antigravity = assignment.antigravity
+        agents = assignment.holders; codex = assignment.codex; antigravity = assignment.antigravity; claude = assignment.claude
     }
     subscript(agent: String) -> RoleAgentSettings? {
-        get { agent == "codex" ? codex : agent == "antigravity" ? antigravity : nil }
-        set { if agent == "codex" { codex = newValue } else if agent == "antigravity" { antigravity = newValue } }
+        get { agent == "codex" ? codex : agent == "antigravity" ? antigravity : agent == "claude" ? claude : nil }
+        set {
+            switch agent {
+            case "codex": codex = newValue
+            case "antigravity": antigravity = newValue
+            case "claude": claude = newValue
+            default: break
+            }
+        }
     }
     var normalized: Self {
         Self(agents: agents.map { agents in RoleAssignment.holderOrder.filter { agents.contains($0) } },
-             codex: codex?.normalized(), antigravity: antigravity?.normalized())
+             codex: codex?.normalized(), antigravity: antigravity?.normalized(), claude: claude?.normalized())
     }
-    private enum CodingKeys: String, CodingKey { case agents, codex, antigravity, agent, also, model, effort }
+    private enum CodingKeys: String, CodingKey { case agents, codex, antigravity, claude, agent, also, model, effort }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         agents = try values.decodeIfPresent([String].self, forKey: .agents)
         codex = try values.decodeIfPresent(RoleAgentSettings.self, forKey: .codex)
         antigravity = try values.decodeIfPresent(RoleAgentSettings.self, forKey: .antigravity)
+        claude = try values.decodeIfPresent(RoleAgentSettings.self, forKey: .claude)
         if agents == nil, let agent = try values.decodeIfPresent(String.self, forKey: .agent) {
             agents = [agent] + (try values.decodeIfPresent([String].self, forKey: .also) ?? [])
         }
         if values.contains(.model) || values.contains(.effort) {
             // Legacy entries without an agent used the role's default worker, or Codex for a following child.
             let owner = try values.decodeIfPresent(String.self, forKey: .agent) ?? (decoder.codingPath.last?.stringValue == "polish" ? "antigravity" : "codex")
-            // A legacy effort was Codex's alone, as the daemon reads it.
-            self[owner] = try RoleAgentSettings(model: values.decodeIfPresent(String.self, forKey: .model), effort: owner == "codex" ? values.decodeIfPresent(String.self, forKey: .effort) : nil)
+            // A legacy effort was Codex's alone, and a legacy model never Claude's, as the daemon reads them.
+            if owner != "claude" { self[owner] = try RoleAgentSettings(model: values.decodeIfPresent(String.self, forKey: .model), effort: owner == "codex" ? values.decodeIfPresent(String.self, forKey: .effort) : nil) }
         }
         self = normalized
     }
@@ -489,6 +505,7 @@ struct RoleSetting: Codable, Sendable, Equatable {
         try values.encodeIfPresent(clean.agents, forKey: .agents)
         try values.encodeIfPresent(clean.codex, forKey: .codex)
         try values.encodeIfPresent(clean.antigravity, forKey: .antigravity)
+        try values.encodeIfPresent(clean.claude, forKey: .claude)
     }
 }
 struct RoleInfo: Codable, Sendable, Identifiable, Equatable {
@@ -593,6 +610,7 @@ extension KeyedDecodingContainer {
 struct Preset: Codable, Sendable, Equatable {
     struct Agent: Codable, Sendable, Equatable { var model: String?; var effort: String? }
     var codex: Agent?
+    var claude: Agent?
     var antigravity: Agent?
     var subagentModel: String?
     var subagentMax: String?
@@ -600,7 +618,7 @@ struct Preset: Codable, Sendable, Equatable {
     /// Structured rows for the Model Presets settings page.
     var details: [(label: String, value: String)] {
         var rows: [(String, String)] = []
-        for (name, agent) in [("Codex", codex), ("Antigravity", antigravity)] {
+        for (name, agent) in [("Codex", codex), ("Claude", claude), ("Antigravity", antigravity)] {
             guard let agent else { continue }
             let value = [agent.model ?? String(localized: "Default model"), agent.effort.map { String(localized: "\(localizedCrewLabel($0.capitalized)) effort") }].compactMap { $0 }.joined(separator: " · ")
             rows.append((name, value))

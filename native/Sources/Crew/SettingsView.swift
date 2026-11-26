@@ -406,7 +406,7 @@ struct CrewSettingsView: View {
     }
     @ViewBuilder private func roleField(_ role: RoleInfo, agent: String, _ key: WritableKeyPath<RoleAgentSettings, String?>) -> some View {
         let title = key == \.model ? String(localized: "\(agentName(agent)) model") : String(localized: "\(agentName(agent)) reasoning effort")
-        let offered = store.state.agents[agent]?.models ?? []
+        let offered = agent == "claude" ? claudeModels : store.state.agents[agent]?.models ?? []
         let blank = model.blankTitle(role.role, agent: agent, key, models: offered)
         let binding = roleBinding(role, agent: agent, key)
         if offered.isEmpty {

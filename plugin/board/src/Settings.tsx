@@ -9,7 +9,7 @@ import type { AgentSettings, Holder, JobKind, Role, RoleAssignment, RoleInfo, Ro
 import { formatDate, timeOfDay } from './dates.ts';
 import { request } from './api.ts';
 import { board } from './store.ts';
-import { agentSettings, HOLDERS, knownProjects, NAMES, projectNames, resolveDraft, rolesOf, sortHolders } from './model.ts';
+import { agentSettings, CLAUDE_MODELS, HOLDERS, knownProjects, NAMES, projectNames, resolveDraft, rolesOf, sortHolders } from './model.ts';
 import { AgentMark, ask, CloseButton, Dialog, Icon, Select, useFade } from './ui.tsx';
 import { Scores } from './Scores.tsx';
 import { desktop } from './desktop.ts';
@@ -38,7 +38,7 @@ function formatModelName(name: string) {
 
 /** Structured rows for the Model Presets settings page. */
 function presetDetails(preset: Preset): [string, string][] {
-  const agents: [string, { model?: string; effort?: string } | undefined][] = [['Codex', preset.codex], ['Antigravity', preset.antigravity]];
+  const agents: [string, { model?: string; effort?: string } | undefined][] = [['Codex', preset.codex], ['Claude', preset.claude], ['Antigravity', preset.antigravity]];
   const cap = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
   const subagent = formatModelName(preset.subagentModel ?? 'inherit');
   return [
@@ -113,7 +113,7 @@ const editableRoles = (state: Snapshot): RoleSettings => structuredClone(state.r
 /** A role's entry as the daemon would store it: holders in order, blank fields and empty settings left out. */
 function cleanEntry(entry: Partial<RoleAssignment> = {}): Partial<RoleAssignment> {
   const clean: Partial<RoleAssignment> = entry.agents ? { agents: sortHolders(entry.agents) } : {};
-  for (const agent of ['codex', 'antigravity'] as const) {
+  for (const agent of ['codex', 'antigravity', 'claude'] as const) {
     const settings = agentSettings(entry[agent]);
     if (settings) clean[agent] = settings;
   }
@@ -387,7 +387,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       const parent = resolved[role.parent!]?.agents;
       return on ? rest : parent?.length ? { ...rest, agents: parent } : own;
     });
-  const editSetting = (role: Role, agent: WorkerAgent, key: keyof AgentSettings, value: string) =>
+  const editSetting = (role: Role, agent: Holder, key: keyof AgentSettings, value: string) =>
     setEntry(role, (own) => {
       const settings = { ...own[agent], [key]: value };
       // A new model drops an effort it does not accept, rather than send the pair.
@@ -523,7 +523,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   };
   // An older daemon may not know every agent; Claude is always one.
   const holders = HOLDERS.filter((holder) => holder === 'claude' || holder in state.agents);
-  const models = (agent: WorkerAgent) => state.agents[agent]?.models ?? [];
+  const models = (agent: Holder) => (agent === 'claude' ? CLAUDE_MODELS : state.agents[agent]?.models ?? []);
   const holderLabel = (holder: Holder) =>
     holder === 'claude' ? 'Claude' : state.agents[holder].enabled ? state.agents[holder].name : t('{name} (disabled)', { name: state.agents[holder].name });
   const roleGroup = (role: RoleInfo) => {
@@ -533,8 +533,8 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     const following = Boolean(role.parent && !own.agents);
     const shown = resolved[role.role];
     // What a field means when left blank: the parent's setting for that agent while the role follows it.
-    const inherited = (agent: WorkerAgent, key: keyof AgentSettings) => (following ? resolved[role.parent!]?.[agent]?.[key] : undefined);
-    const blank = (agent: WorkerAgent, key: keyof AgentSettings) => {
+    const inherited = (agent: Holder, key: keyof AgentSettings) => (following ? resolved[role.parent!]?.[agent]?.[key] : undefined);
+    const blank = (agent: Holder, key: keyof AgentSettings) => {
       const value = inherited(agent, key);
       return value
         ? t('{model} (same as {role})', { model: models(agent).find((model) => model.id === value)?.name ?? value, role: parentLabel })
@@ -544,7 +544,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
      * A model or effort picked from what the agent offers, or typed when the daemon offers nothing. A value written by
      * hand that is not offered stays a choice, so opening the settings never changes it.
      */
-    const field = (agent: WorkerAgent, key: keyof AgentSettings) => {
+    const field = (agent: Holder, key: keyof AgentSettings) => {
       const label = key === 'model'
         ? t('{role} {agent} model', { role: roleLabel, agent: NAMES[agent] })
         : t('{role} {agent} reasoning effort', { role: roleLabel, agent: NAMES[agent] });
@@ -562,7 +562,8 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
         <Select label={label} value={value} options={[['', blank(agent, key)], ...(options as [string, string][])]} onChange={change} />
       );
     };
-    const workers = (shown?.agents ?? []).filter((holder): holder is WorkerAgent => holder !== 'claude' && holder in state.agents);
+    // Claude's settings apply when it runs as a worker, under a Codex lead; a Claude Code lead does the work itself.
+    const workers = (shown?.agents ?? []).filter((holder) => holder === 'claude' || holder in state.agents);
     return (
       <section className={styles.group} key={role.role} aria-label={roleLabel}>
         <header className={styles.groupHead}>

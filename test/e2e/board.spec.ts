@@ -773,6 +773,17 @@ test('project filtering scopes requests and New Job follows roles', async ({ pag
   });
 });
 
+test('a role Claude holds offers Claude\'s models and efforts, and presets show Claude\'s effort', async ({ page, request }) => {
+  await openSettings(page);
+  // Building is held by Codex and Claude by default; Claude's settings apply when it runs as a worker for a Codex lead.
+  const model = page.getByRole('combobox', { name: 'Implementation Claude model' });
+  await pick(model, 'Opus');
+  await pick(page.getByRole('combobox', { name: 'Implementation Claude reasoning effort' }), 'xhigh');
+  await lastBody(request, '/api/roles').toEqual({ roles: { delegate: { claude: { model: 'opus', effort: 'xhigh' } } } });
+  await settingsPage(page, 'Model Presets');
+  await expect(page.getByText('Claude', { exact: true }).first()).toBeVisible();
+});
+
 test('roles settings group every role, let one follow its parent, and store what the user wrote as it is changed', async ({ page, request }) => {
   await openSettings(page);
   const nav = page.getByRole('navigation', { name: 'Settings pages' });
@@ -796,7 +807,7 @@ test('roles settings group every role, let one follow its parent, and store what
   // Nothing to press: the roles pages have no save, and the last change is the table that is stored.
   await expect(page.getByRole('button', { name: /^Save/ })).toHaveCount(0);
   await lastBody(request, '/api/roles').toEqual({
-    roles: { delegate: { codex: { effort: 'high' } }, verify: { agents: ['codex'] }, review: { agents: ['antigravity'] } },
+    roles: { delegate: { codex: { effort: 'high' } }, verify: { agents: ['codex', 'claude'] }, review: { agents: ['antigravity', 'claude'] } },
   });
   await settingsPage(page, 'Build');
   await expect(refactor.getByRole('checkbox', { name: 'Same as Implementation' })).toBeChecked();
@@ -857,7 +868,7 @@ test('Settings wait for a change still being stored before they close, and stay 
   await expect(settings).toBeVisible();
   release();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await lastBody(request, '/api/roles').toEqual({ roles: { delegate: { agents: ['codex', 'antigravity'] } } });
+  await lastBody(request, '/api/roles').toEqual({ roles: { delegate: { agents: ['codex', 'antigravity', 'claude'] } } });
 });
 
 test('instructions typed while Settings wait to close are still asked about', async ({ page }) => {
@@ -895,11 +906,14 @@ test('on a phone, settings move between the list and a page with focus kept, and
 test('a role can hold Claude and several workers, each with its own settings, and keeps at least one', async ({ page, request }) => {
   await openSettings(page, 'Review');
   const claude = page.getByRole('checkbox', { name: 'Cross-review: Claude' });
-  await claude.check();
-  await lastBody(request, '/api/roles').toEqual({ roles: { review: { agents: ['codex', 'claude'] } } });
+  // Reviewing is held by Codex and Claude by default; coming back to that writes nothing.
+  await expect(claude).toBeChecked();
   await claude.uncheck();
+  await lastBody(request, '/api/roles').toEqual({ roles: { review: { agents: ['codex'] } } });
+  await claude.check();
   await lastBody(request, '/api/roles').toEqual({ roles: {} });
   // The only holder cannot be turned off.
+  await claude.uncheck();
   await expect(page.getByRole('checkbox', { name: 'Cross-review: Codex' })).toBeDisabled();
   // The verify role follows review, its holders included, until it is given its own.
   await claude.check();
@@ -962,7 +976,7 @@ test('models and efforts are picked from what each agent offers, and a hand-writ
   await verify.getByRole('checkbox', { name: 'Same as Cross-review' }).uncheck();
   await expect(page.getByRole('checkbox', { name: 'Review that runs the app: Antigravity' })).toBeDisabled();
   await lastBody(request, '/api/roles').toEqual({
-    roles: { delegate: { agents: ['codex', 'antigravity'], codex: { model: 'gpt-luna', effort: 'low' }, antigravity: { model: 'argon' } }, verify: { agents: ['codex'] } },
+    roles: { delegate: { agents: ['codex', 'antigravity'], codex: { model: 'gpt-luna', effort: 'low' }, antigravity: { model: 'argon' } }, verify: { agents: ['codex', 'claude'] } },
   });
 });
 

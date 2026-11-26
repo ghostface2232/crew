@@ -543,7 +543,9 @@ export async function checks(): Promise<SetupItem[]> {
   if (claudeLogin) items.push(claudeLogin);
   const plugin = plugins?.find((entry) => entry.id === 'crew@crew');
   const here = plugin?.readFromFolder && samePath(plugin.readFromFolder, path.join(registeredRoot(), 'plugin'));
-  const pluginOk = (!claude.ok || Boolean(plugin)) && (!codexLead || codexLead.registered);
+  // Claude Code's plugin when Claude Code is here; for a user who leads only from Codex, Codex's. Codex's own plugin has its
+  // own item below, so a Claude Code lead with Codex only as a worker is not asked for it twice.
+  const pluginOk = claude.ok ? Boolean(plugin) : Boolean(codexLead?.registered);
   const pluginDetails: string[] = [];
   if (claude.ok) {
     const detail = !plugin ? 'Not installed.' : here ? `Installed (${plugin.version})` : `Installed from ${plugin.readFromFolder ?? 'another copy'} (${plugin.version})`;

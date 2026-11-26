@@ -1160,8 +1160,8 @@ test('a role assigned to a disabled or unknown agent fails with the reason, and 
   assert.throws(() => resolveConfig({ roles: { review: { agent: 'cursor' as never } } }), /roles\.review\.agent is "cursor"; use one of: codex, antigravity/);
   // Unset roles keep their defaults, and roles added later follow their parents.
   assert.deepEqual(resolveConfig({ roles: { polish: { antigravity: { model: 'm' } } } }).roles, {
-    delegate: { agents: ['codex'] }, refactor: { agents: ['codex'] }, release: { agents: ['codex'] }, debate: { agents: ['codex'] },
-    review: { agents: ['codex'] }, verify: { agents: ['codex'] }, fix: { agents: ['claude'] }, polish: { agents: ['antigravity'], antigravity: { model: 'm' } },
+    delegate: { agents: ['codex', 'claude'] }, refactor: { agents: ['codex', 'claude'] }, release: { agents: ['codex', 'claude'] }, debate: { agents: ['codex', 'claude'] },
+    review: { agents: ['codex', 'claude'] }, verify: { agents: ['codex', 'claude'] }, fix: { agents: ['claude'] }, polish: { agents: ['antigravity'], antigravity: { model: 'm' } },
   });
 
   // A table that is not exactly right must not quietly fall back to the defaults.
@@ -1705,10 +1705,17 @@ test('the lead picks one of a role\'s holders per job, and a role Claude holds s
   await assert.rejects(jobs.create({ ...delegate, agent: 'codex', lead: codexLead }), /held by Codex, the lead's own agent, which starts no Codex worker/);
   assert.equal((await jobs.create({ ...delegate, lead: codexLead })).agent, 'antigravity');
   assert.equal((await jobs.create({ ...delegate, lead: claudeLead })).agent, 'codex');
-  // Held by Codex alone, the role is the Codex lead's own work, while a board-started job still goes to Codex.
+  // By default Claude builds too, so a Codex lead's job goes to a Claude worker, and a board-started one to Codex.
   plain.jobs.delivery.host(codexLead, 'codex');
-  await assert.rejects(plain.jobs.create({ ...delegate, lead: codexLead }), /held by Codex, the lead's own agent/);
+  assert.equal((await plain.jobs.create({ ...delegate, lead: codexLead })).agent, 'claude');
   assert.equal((await plain.jobs.create(delegate)).agent, 'codex');
+  // Held by Codex alone, the role is the Codex lead's own work, while a board-started job still goes to Codex.
+  const codexOnly = resolveConfig({ notify: false, codex: config.codex, roles: { delegate: { agents: ['codex'] } } });
+  const alone = harness((ctl) => ctl.done('ok'), () => codexOnly);
+  t.after(() => { alone.jobs.flush(); fs.rmSync(alone.home, { recursive: true, force: true, maxRetries: 5 }); });
+  alone.jobs.delivery.host(codexLead, 'codex');
+  await assert.rejects(alone.jobs.create({ ...delegate, lead: codexLead }), /held by Codex, the lead's own agent/);
+  assert.equal((await alone.jobs.create(delegate)).agent, 'codex');
 });
 
 test('a job runs under the preset it was given and keeps it, capping its tier by that preset', async (t) => {

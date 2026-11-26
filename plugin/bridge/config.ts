@@ -303,10 +303,11 @@ export const PRESET_NAMES = Object.keys(PRESETS) as PresetName[];
 export const isPresetName = (value: unknown): value is PresetName => PRESET_NAMES.includes(value as PresetName);
 
 /**
- * Holders of the roles that have no parent, when the user names none. Fixing stays with the lead, as it was before it
- * became a role: triage needs the conversation, and the fix often does too.
+ * Holders of the roles that have no parent, when the user names none. Building and reviewing name both Codex and
+ * Claude, so either lead hands that work to the other agent and keeps it only as a fallback. Fixing stays with the
+ * lead, as it was before it became a role: triage needs the conversation, and the fix often does too.
  */
-const BASE_HOLDERS: Partial<Record<Role, Holder>> = { delegate: 'codex', review: 'codex', fix: LEAD, polish: 'antigravity' };
+const BASE_HOLDERS: Partial<Record<Role, Holder[]>> = { delegate: ['codex', LEAD], review: ['codex', LEAD], fix: [LEAD], polish: ['antigravity'] };
 const sortHolders = (agents: Holder[]) => HOLDERS.filter((holder) => agents.includes(holder));
 
 const defaults: Config = {
@@ -345,7 +346,7 @@ function resolveRoles(settings: RoleSettings): Record<Role, RoleAssignment> {
   for (const role of ROLES) {
     const own = settings[role] ?? {};
     const parent = roleInfo(role).parent;
-    const base: RoleAssignment = own.agents ? { agents: own.agents } : parent ? roles[parent] : { agents: [BASE_HOLDERS[role]!] };
+    const base: RoleAssignment = own.agents ? { agents: own.agents } : parent ? roles[parent] : { agents: BASE_HOLDERS[role]! };
     const resolved: RoleAssignment = { agents: base.agents };
     for (const agent of workersOf(base)) {
       const merged = { ...base[agent], ...own[agent] };
@@ -387,7 +388,7 @@ function roleEntry(role: Role, entry: Record<string, unknown>, inherited: RoleAs
       Object.assign(result, structuredClone(inherited), { agents: sortHolders([...inherited.agents, ...(also as Holder[])]) });
     }
     // The settings were the default's: the agent named, else the role's own default, else (only effort may follow a parent) Codex's.
-    const owner = (agent ?? BASE_HOLDERS[role] ?? 'codex') as Holder;
+    const owner = (agent ?? BASE_HOLDERS[role]?.[0] ?? 'codex') as Holder;
     if (owner !== LEAD && (model !== undefined || effort !== undefined)) {
       const settings: AgentSettings = { ...(model !== undefined ? { model: model as string } : {}), ...(effort !== undefined && owner === 'codex' ? { effort: effort as string } : {}) };
       if (Object.keys(settings).length) result[owner] = { ...result[owner], ...settings };

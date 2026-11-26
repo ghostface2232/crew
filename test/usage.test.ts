@@ -193,7 +193,7 @@ test('Antigravity accounts for both its account-wide and applicable family windo
   assert.deepEqual(room.decidingKeys, ['weekly', 'g']);
   const blocked = of(0.2, 1, 0.1);
   const usage = { ...new UsageTracker().classify(null, none, NOW), providers: [blocked] };
-  assert.equal(route('polish', usage, CODEX_ROLES).deferUntil, NOW + 30 * MIN);
+  assert.equal(route('polish', usage, DEFAULT_ROLES).deferUntil, NOW + 30 * MIN);
   tracker.reportLimit('antigravity', 'family limit', NOW);
   assert.equal(of(0.2, 1, 0.1, NOW + MIN).status, 'exhausted');
   assert.equal(of(0.2, 0.2, 1, NOW + 2 * MIN).status, 'ok');
@@ -270,23 +270,23 @@ test('a cross-check waits for all exhausted deciding windows to reset within hal
   const last = { ...codex.windows[0], key: 'weekly', resetTime: NOW + 30 * MIN };
   codex.windows.push(last);
   for (const kind of ['review', 'verify', 'debate'] as const) {
-    const decision = route(kind, usage, CODEX_ROLES);
+    const decision = route(kind, usage, DEFAULT_ROLES);
     assert.deepEqual([decision.assignee, decision.degraded, decision.deferUntil], ['codex', false, last.resetTime]);
     assert.match(decision.reason, /after the reset/);
     assert.ok(decision.reason.includes(iso(last.resetTime)));
   }
-  assert.equal(route('delegate', usage, CODEX_ROLES).assignee, 'claude');
+  assert.equal(route('delegate', usage, DEFAULT_ROLES).assignee, 'claude');
   last.resetTime++;
-  assert.equal(route('review', usage, CODEX_ROLES).degraded, true);
+  assert.equal(route('review', usage, DEFAULT_ROLES).degraded, true);
   t.mock.timers.tick(1);
-  assert.equal(route('review', usage, CODEX_ROLES).degraded, false);
+  assert.equal(route('review', usage, DEFAULT_ROLES).degraded, false);
   codex.windows[1].resetTime = null;
-  assert.equal(route('review', usage, CODEX_ROLES).degraded, true);
+  assert.equal(route('review', usage, DEFAULT_ROLES).degraded, true);
   codex.decidingKeys = [codex.windows[0].key];
-  assert.equal(route('review', usage, CODEX_ROLES).deferUntil, NOW + MIN);
+  assert.equal(route('review', usage, DEFAULT_ROLES).deferUntil, NOW + MIN);
 });
 
-test('a cross-check goes to a tight usable holder before waiting for an exhausted holder', (t) => {
+test('a cross-check goes to a tight usable worker before waiting for an exhausted one, and the lead is no cross-check', (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: NOW });
   const usage = usageOf({ codex: 'exhausted', antigravity: 'tight', claude: 'tight' });
   usage.providers.find((p) => p.agent === 'codex')!.windows[0].resetTime = NOW + 20 * MIN;
@@ -296,7 +296,8 @@ test('a cross-check goes to a tight usable holder before waiting for an exhauste
   } }).roles;
   for (const kind of ['review', 'debate', 'verify'] as const) {
     const decision = route(kind, usage, roles);
-    assert.deepEqual([decision.assignee, decision.deferUntil], [kind === 'verify' ? 'claude' : 'antigravity', null]);
+    // The lead holding verify too is only a fallback: the check waits for Codex's reset rather than becoming a self-review.
+    assert.deepEqual([decision.assignee, decision.deferUntil], kind === 'verify' ? ['codex', NOW + 20 * MIN] : ['antigravity', null]);
   }
 });
 
@@ -314,7 +315,7 @@ test('only remaining quota and time in the longest applicable window break holde
   long.usedRatio = 0.81;
   assert.equal(review().assignee, 'antigravity');
   assert.match(review().reason, /longest window/);
-  assert.equal(route('review', usage, CODEX_ROLES).assignee, 'codex');
+  assert.equal(route('review', usage, DEFAULT_ROLES).assignee, 'codex');
   assert.equal(review().holders?.[0].status, 'ok');
   codex.decidingKeys = [codex.windows[0].key];
   codex.windows[0].usedRatio = 0.5;
@@ -331,12 +332,12 @@ test('only remaining quota and time in the longest applicable window break holde
 
 test('with room everywhere, and with stale or unknown readings, the roles are followed', () => {
   for (const usage of [usageOf({}), usageOf({ codex: 'stale', antigravity: 'unknown', claude: 'stale' })]) {
-    assert.equal(route('delegate', usage, CODEX_ROLES).assignee, 'codex');
-    assert.equal(route('review', usage, CODEX_ROLES).assignee, 'codex');
-    assert.equal(route('polish', usage, CODEX_ROLES).assignee, 'antigravity');
-    assert.equal(route('lead', usage, CODEX_ROLES).assignee, 'claude');
+    assert.equal(route('delegate', usage, DEFAULT_ROLES).assignee, 'codex');
+    assert.equal(route('review', usage, DEFAULT_ROLES).assignee, 'codex');
+    assert.equal(route('polish', usage, DEFAULT_ROLES).assignee, 'antigravity');
+    assert.equal(route('lead', usage, DEFAULT_ROLES).assignee, 'claude');
     for (const kind of ['delegate', 'review', 'polish', 'lead'] as const) {
-      const decision = route(kind, usage, CODEX_ROLES);
+      const decision = route(kind, usage, DEFAULT_ROLES);
       assert.equal(decision.degraded, false);
       assert.equal(decision.deferUntil, null);
     }
@@ -345,18 +346,18 @@ test('with room everywhere, and with stale or unknown readings, the roles are fo
 
 test('a tight engineer keeps its usage for the review, and an exhausted one loses the cross-review', () => {
   const tight = usageOf({ codex: 'tight' });
-  const implement = route('delegate', tight, CODEX_ROLES);
+  const implement = route('delegate', tight, DEFAULT_ROLES);
   assert.equal(implement.assignee, 'claude');
   assert.match(implement.reason, /keep what Codex has left for the cross-review/);
   assert.deepEqual(implement.fallback, ['codex']);
-  assert.equal(route('review', tight, CODEX_ROLES).assignee, 'codex');
+  assert.equal(route('review', tight, DEFAULT_ROLES).assignee, 'codex');
   // A further review holder saves its usage too.
   const furtherReviewer = { ...CODEX_ROLES, review: { agents: ['codex' as const, 'antigravity' as const] } };
   assert.match(route('delegate', tight, furtherReviewer).reason, /keep what Codex has left for the cross-review/);
 
   const gone = usageOf({ codex: 'exhausted' });
-  assert.equal(route('delegate', gone, CODEX_ROLES).assignee, 'claude');
-  const review = route('review', gone, CODEX_ROLES);
+  assert.equal(route('delegate', gone, DEFAULT_ROLES).assignee, 'claude');
+  const review = route('review', gone, DEFAULT_ROLES);
   assert.deepEqual([review.assignee, review.degraded, review.deferUntil], ['claude', true, NOW + 60 * MIN]);
 
   // When the lead is short too, a tight engineer still takes what separates.
@@ -382,21 +383,21 @@ test('polish waits for the reset, and routing never hands a role to an agent the
       const { assignee, fallback } = route(kind, usage, roles);
       for (const agent of [assignee, ...fallback]) assert.ok(agent === 'claude' || roles[kind].agents.includes(agent), `${kind} went to ${agent}`);
     }
-    assert.notEqual(route('lead', usage, CODEX_ROLES).assignee, 'antigravity');
+    assert.notEqual(route('lead', usage, DEFAULT_ROLES).assignee, 'antigravity');
   }
 });
 
 test('every role has its own policy when its holder runs out', () => {
   const gone = usageOf({ codex: 'exhausted' });
-  const verify = route('verify', gone, CODEX_ROLES);
+  const verify = route('verify', gone, DEFAULT_ROLES);
   assert.deepEqual([verify.assignee, verify.degraded], ['claude', true]);
   assert.match(verify.reason, /Run the app in your own self-review/);
-  const debate = route('debate', gone, CODEX_ROLES);
+  const debate = route('debate', gone, DEFAULT_ROLES);
   assert.deepEqual([debate.assignee, debate.degraded], ['claude', true]);
   assert.match(debate.reason, /Decide yourself, and say that the debate was skipped/);
   // The lead taking release work over keeps it to preparation.
-  assert.match(route('release', gone, CODEX_ROLES).reason, /publish or deploy nothing/);
-  assert.equal(route('refactor', gone, CODEX_ROLES).degraded, false);
+  assert.match(route('release', gone, DEFAULT_ROLES).reason, /publish or deploy nothing/);
+  assert.equal(route('refactor', gone, DEFAULT_ROLES).degraded, false);
   // Fixing stays with the lead unless the user gives it to a worker; a worker out of usage hands it back.
   assert.equal(route('fix', usageOf({}), CODEX_ROLES).assignee, 'claude');
   const given = { ...CODEX_ROLES, fix: { agents: ['codex' as const] } };
@@ -414,8 +415,10 @@ test('a role\'s workers are tried before the lead, and Claude holding it alone m
   assert.match(moved.reason, /^Codex is exhausted[^]*Antigravity holds the role and has room\.$/);
   assert.deepEqual(moved.holders, [{ agent: 'codex', status: 'exhausted' }, { agent: 'antigravity', status: 'ok' }]);
   assert.equal(route('polish', usageOf({}), roles).assignee, 'antigravity');
+  // The lead holding it too is a fallback: an exhausted worker keeps its role's policy, here waiting for the reset.
   const lead = route('polish', usageOf({ antigravity: 'exhausted' }), roles);
-  assert.deepEqual([lead.assignee, lead.reason], ['claude', 'Antigravity is exhausted: antigravity reason. Claude holds the role: do the work yourself, or in a subagent.']);
+  assert.deepEqual([lead.assignee, lead.fallback], ['antigravity', ['claude']]);
+  assert.match(lead.reason, /Polish can wait until its usage resets/);
   const own = route('debate', usageOf({}), roles);
   assert.deepEqual([own.assignee, own.reason], ['claude', 'Claude holds the role: do the work yourself, or in a subagent.']);
 });
@@ -591,7 +594,7 @@ test('a 57% Argon window does not change routing as projection samples age out',
   const first = tracker.classify(raw, (_agent, key) => key === 'a' ? samples : [], NOW);
   assert.ok(first.providers.find((p) => p.agent === 'antigravity')!.windows[1].projectedExhaustion! < reset);
   const later = tracker.classify(raw, none, NOW + 2 * MIN);
-  for (const usage of [first, later]) assert.match(route('polish', usage, CODEX_ROLES).reason, /has room/);
+  for (const usage of [first, later]) assert.match(route('polish', usage, DEFAULT_ROLES).reason, /has room/);
 });
 
 
@@ -635,6 +638,17 @@ test('by default Codex and Claude both build and review, so either lead hands th
   assert.equal(route('review', room, DEFAULT_ROLES).assignee, 'codex');
   const out = route('delegate', usageOf({ codex: 'exhausted' }), DEFAULT_ROLES);
   assert.deepEqual([out.assignee, out.degraded], ['claude', false]);
+  // The lead is a fallback, not a peer: a short Codex keeps each role's own policy.
+  const tight = usageOf({ codex: 'tight' });
+  assert.match(route('review', tight, DEFAULT_ROLES).reason, /The cross-review still goes to it; keep it to one round/);
+  assert.equal(route('verify', tight, DEFAULT_ROLES).assignee, 'codex');
+  assert.match(route('debate', tight, DEFAULT_ROLES).reason, /Keep the debate to one or two rounds/);
+  const gone = usageOf({ codex: 'exhausted' });
+  for (const kind of ['review', 'verify', 'debate'] as const) assert.equal(route(kind, gone, DEFAULT_ROLES).degraded, true, kind);
+  assert.match(route('release', gone, DEFAULT_ROLES).reason, /publish or deploy nothing/);
+  // Under a Codex lead the same holds for its Claude worker.
+  const claudeOut = route('review', usageOf({ claude: 'exhausted' }), DEFAULT_ROLES, [], 'codex');
+  assert.deepEqual([claudeOut.assignee, claudeOut.degraded], ['codex', true]);
   // A Codex lead hands them to a Claude worker.
   assert.equal(route('delegate', room, DEFAULT_ROLES, [], 'codex').assignee, 'claude');
   assert.equal(route('review', room, DEFAULT_ROLES, [], 'codex').assignee, 'claude');

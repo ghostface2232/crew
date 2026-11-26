@@ -448,8 +448,10 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
   const holders = [...workersFor(kind, roles[kind], [], you), ...roles[kind].agents.filter((agent) => agent === you || (agent !== LEAD && roleInfo(kind).unable?.includes(agent)))];
   const listed = holders.map((agent) => ({ agent, status: status(agent) }));
   // A holder that cannot do this kind of work is never suggested: a disabled agent, or one that cannot run the app for verify.
+  // The lead's own agent is a fallback, not a peer: a worker that is short keeps its role's policy, so a cross-check stays
+  // one or is reported as skipped, and the lead takes the work as a holder only when no worker can.
   const usable: Agent[] = workersFor(kind, roles[kind], disabled, you);
-  if (roles[kind].agents.includes(you)) usable.push(you);
+  if (!usable.length && roles[kind].agents.includes(you)) usable.push(you);
   const able = (agent: Agent) => usable.includes(agent);
   if (!usable.length) {
     const who = holders.map(name).join(' and ');

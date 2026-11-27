@@ -54,8 +54,8 @@ struct BoardView: View {
                 if !store.connected { connectionBanner }
                 heading(pending: pending)
                 if store.connected && store.project.isEmpty && overview { SetupCard(api: store.api) }
-                // All projects' overview puts the compact banner in its heading instead.
-                if pending > 0 && store.selection != "needs" && !(overview && store.project.isEmpty) { attentionBanner(pending: pending).transition(.card) }
+                // Overview puts the compact banner in its heading instead.
+                if pending > 0 && store.selection != "needs" && !overview { attentionBanner(pending: pending).transition(.card) }
                 if store.selection == "needs" { NeedsYouView(store: store) }
                 else if store.selection == "activity" { activity }
                 else { workspace }
@@ -164,7 +164,7 @@ struct BoardView: View {
         }.padding(WorkspaceStyle.bannerPadding).background(Palette.attention(Palette.warning), in: RoundedRectangle(cornerRadius: WorkspaceStyle.cardRadius))
     }
     /// Requests waiting on the user, opening Needs You. `compact` draws it a size down to sit under the title in
-    /// all projects' overview heading.
+    /// Overview's heading.
     private func attentionBanner(pending: Int, compact: Bool = false) -> some View {
         Button { store.selection = "needs"; store.search = "" } label: {
             HStack {
@@ -180,8 +180,8 @@ struct BoardView: View {
         }.buttonStyle(.plain).glassEffect(.regular, in: .rect(cornerRadius: compact ? WorkspaceStyle.rowRadius : WorkspaceStyle.cardRadius))
     }
     private func heading(pending: Int) -> some View {
-        // Only all projects' overview: elsewhere the banner runs across the page under the heading.
-        let review = overview && store.project.isEmpty ? pending : 0
+        // Only Overview, of all projects or of one: on the other pages the banner runs across the page under the heading.
+        let review = overview ? pending : 0
         return ViewThatFits(in: .horizontal) {
             if overview {
                 HStack(alignment: .top, spacing: Space.x5l) {

@@ -370,7 +370,7 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
   const replies: any[] = [];
   const order: string[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(handler)}; handle`, {
-    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude',
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude', showsCards: false, CARD_TOOLS: [],
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),
     imageContent: () => [{ type: 'image', data: 'x'.repeat(900_000), mimeType: 'image/png' }],
     api: async (_method: string, route: string, body: any) => {
@@ -419,6 +419,42 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
   // However long a bad echo, the call it rode on still succeeds.
   await call({ ack: ['x'.repeat(30_000)] });
   assert.equal(replies.at(-1).result.isError, undefined);
+});
+
+test('on a host that draws cards, mission and status carry the card, and the card\'s own refresh reads news of nothing', async () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
+  const handler = source.slice(source.indexOf('async function handle('), source.indexOf('readline.createInterface'));
+  const replies: any[] = [];
+  const routes: string[] = [];
+  let failCard = false;
+  const handle = (showsCards: boolean) => vm.runInNewContext(`${stripTypeScriptTypes(handler)}; handle`, {
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude',
+    showsCards, CARD_TOOLS: ['mission', 'status'], CARD_URI: 'ui://crew/progress.html', CARD_MIME: 'text/html;profile=mcp-app', cardHtml: () => '<html>',
+    clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg), imageContent: () => [],
+    api: async (_method: string, route: string) => { routes.push(route); return {}; },
+    callTool: async (name: string) => `${name} text`,
+    progressCard: async () => { if (failCard) throw new Error('daemon away'); return { asOf: 1, missions: [], jobs: [] }; },
+  });
+  const call = async (on: boolean, name: string) => {
+    await handle(on)({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: {} } });
+    return replies.at(-1).result;
+  };
+  assert.equal(JSON.stringify((await call(true, 'status')).structuredContent), JSON.stringify({ asOf: 1, missions: [], jobs: [] }));
+  assert.equal((await call(true, 'route')).structuredContent, undefined);
+  assert.equal((await call(false, 'status')).structuredContent, undefined);
+  // A card that cannot be built leaves the call's own answer as it was.
+  failCard = true;
+  assert.equal(JSON.stringify(await call(true, 'mission')), JSON.stringify({ content: [{ type: 'text', text: 'mission text' }] }));
+  failCard = false;
+  routes.length = 0;
+  const refreshed = await call(true, 'progress');
+  assert.equal(refreshed.structuredContent.asOf, 1);
+  assert.deepEqual(routes, []);
+  // Without cards the resource methods stay unknown, as before.
+  await handle(false)({ jsonrpc: '2.0', id: 2, method: 'resources/read', params: { uri: 'ui://crew/progress.html' } });
+  assert.equal(replies.at(-1).error.code, -32601);
+  await handle(true)({ jsonrpc: '2.0', id: 3, method: 'resources/read', params: { uri: 'ui://crew/progress.html' } });
+  assert.equal(replies.at(-1).result.contents[0].mimeType, 'text/html;profile=mcp-app');
 });
 
 test('status pages the latest full report during a follow-up and retained debate turns', async () => {
@@ -595,7 +631,7 @@ test('status and mission explicitly read this session\'s watch news without any 
   const missions: object[] = [];
   const offered: (string[] | undefined)[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(standing + tool + handler)}; handle`, {
-    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude', PROJECT: '/project', projectUnknown: false,
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude', PROJECT: '/project', projectUnknown: false, showsCards: false, CARD_TOOLS: [],
     fresh: false, missionId: null, costMission: null, closedElsewhere: null,
     missionHead: () => 'Current mission', missionDetail: () => '', currentPolicy: () => '', globalPreset: () => null,
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),

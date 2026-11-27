@@ -117,12 +117,13 @@ test('serves only built assets with explicit types and a renderer security polic
 test('the bundled plugin runs as ES modules under a home folder whose package.json says CommonJS', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-bundle-'));
   try {
-    // The bundle reads the checkout it runs in; this one has the source's plugin and a stand-in for the built board.
+    // The bundle reads the checkout it runs in; this one has the source's plugin and stand-ins for the board files it carries.
     const checkout = path.join(dir, 'checkout');
     const plugin = fileURLToPath(new URL('../plugin', import.meta.url));
     fs.cpSync(plugin, path.join(checkout, 'plugin'), { recursive: true, filter: (source) => source !== path.join(plugin, 'board') });
     fs.cpSync(fileURLToPath(new URL('../.claude-plugin', import.meta.url)), path.join(checkout, '.claude-plugin'), { recursive: true });
     fs.mkdirSync(path.join(checkout, 'plugin/board/dist'), { recursive: true });
+    fs.mkdirSync(path.join(checkout, 'plugin/board/src/icons'), { recursive: true });
     fs.writeFileSync(path.join(checkout, 'package.json'), '{"type":"module"}\n');
     // What `npm init -y` leaves in a home folder, above the copy the Windows app registers.
     const home = path.join(dir, 'home');

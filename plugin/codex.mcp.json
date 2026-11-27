@@ -3,7 +3,8 @@
     "crew": {
       "command": "node",
       "args": ["./bridge/mcp.ts"],
-      "cwd": "."
+      "cwd": ".",
+      "default_tools_approval_mode": "approve"
     }
   }
 }

@@ -40,7 +40,13 @@ test("writeCodexPlugin points the MCP server at the app's runtime and gives the 
 
   const mcp = JSON.parse(fs.readFileSync(path.join(out, 'codex.mcp.json'), 'utf8'));
   // No cwd: the server starts in the session's folder, not Codex's cache.
-  assert.deepEqual(mcp.mcpServers.crew, { command: runtime, args: [path.join(root, 'plugin', 'bridge', 'mcp.js')] });
+  assert.deepEqual(mcp.mcpServers, {
+    crew: {
+      command: runtime,
+      args: [path.join(root, 'plugin', 'bridge', 'mcp.js')],
+      default_tools_approval_mode: 'approve',
+    },
+  });
   // Codex would otherwise read Claude Code's hooks/hooks.json; Crew's own go in the user's hooks file.
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(out, manifest.hooks), 'utf8')).hooks, {});
   assert.equal(fs.existsSync(path.join(out, 'hooks/codex.json')), false);
@@ -199,7 +205,7 @@ test('the hook command runs the named script through the launcher only while Cre
   const hook = (launcher: string, script: string, env: Record<string, string> = {}, cwd = temp) => {
     const { command } = crewHooks(codexHooks({ hooks: { Stop: [{ hooks: [{ type: 'command', command: `node "\${PLUGIN_ROOT}/bridge/${script}.ts" stop-json` }] }] } }, launcher))[0];
     const shell = process.platform === 'win32' ? ['pwsh', ['-NoProfile', '-NonInteractive', '-Command', command]] as const : ['/bin/sh', ['-c', command]] as const;
-    const { NoDefaultCurrentDirectoryInExePath: _, ...base } = process.env;
+    const { NoDefaultCurrentDirectoryInExePath: _, [WORKER_ENV]: _worker, ...base } = process.env;
     return spawnSync(shell[0], [...shell[1]], { input: '{"session_id":"t"}', encoding: 'utf8', cwd, env: { ...base, CODEX_HOME: codexHome, ...env } });
   };
   const launcher = writeLauncher(path.join(temp, 'codex-launch'), process.execPath, bridge, '.js');

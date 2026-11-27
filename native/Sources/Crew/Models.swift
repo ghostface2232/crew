@@ -72,9 +72,9 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     var debateConcluded: Bool { debate.map { state != "running" && state != "waiting" && turns >= $0.rounds } ?? false }
     /// Ended, but its worktree still awaits a merge or discard, or the lead has not read its result.
     var isUnsettled: Bool { worktree != nil || seq > (delivered ?? seq) }
-    /// The job without what a running turn rewrites as it goes; see `BoardState.rearranges`. Whether each is there
-    /// at all stays, since a line or a section shows only once it is, and so does whether the job is unsettled, as
-    /// the summary counts it.
+    /// The job with fields rewritten during a running turn cleared; see `BoardState.rearranges`.
+    /// Whether each field is present stays, since appearing for the first time adds a line or section,
+    /// and whether the job is unsettled stays, since the summary counts it.
     var placed: Job {
         var job = self
         job.seq = isUnsettled ? 1 : 0; job.delivered = 0
@@ -773,9 +773,9 @@ struct BoardState: Codable, Sendable, Equatable {
     var waitingSessions: [ClaudeSession] { claude.filter { $0.state == "waiting" } }
     var pendingCount: Int { waitingJobs.count + waitingSessions.count }
 
-    /// Whether this differs from `old` in what is shown where. A running job or session rewrites its status line,
-    /// clock and counters many times a second, and those change in place; anything else may add, remove or move
-    /// something, and counts.
+    /// Whether this differs from `old` in what is shown where. Running jobs and sessions rewrite their
+    /// status line, clock, and counters many times a second in place; any other change may add, remove, or
+    /// move something.
     func rearranges(_ old: BoardState) -> Bool {
         guard jobs.count == old.jobs.count, claude.count == old.claude.count else { return true }
         if zip(jobs, old.jobs).contains(where: { $0 != $1 && $0.placed != $1.placed }) { return true }

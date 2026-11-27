@@ -45,8 +45,8 @@ struct PresetSelection: Encodable, Sendable {
 
 @MainActor @Observable
 final class CrewStore {
-    /// The daemon's state as last heard. Whatever writes it, news that changes what is shown where arrives as one
-    /// animated change (`Motion.arrive`), so no view keeps a list of the changes it should animate for.
+    /// The daemon's state as last heard. Updates that change what is shown where run inside `Motion.arrive`,
+    /// so views need not track which changes to animate.
     var state: BoardState {
         get { board }
         set {

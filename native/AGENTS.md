@@ -7,7 +7,7 @@ The macOS app: SwiftUI and AppKit in Swift 6 language mode, macOS 26 and later, 
 - The app and the React board (`plugin/board/src/`) show the same state and offer the same actions. A change to what one shows or offers usually needs the same change in the other.
 - Every size, gap, color, type style, and animation comes from `Sources/Crew/DesignTokens.swift`. When no token fits, add one there and in `docs/design-tokens.md`; do not hardcode raw numbers in the view. The exceptions are listed in that doc.
 - A repeating SwiftUI animation re-renders the window's entire view graph on every frame, so run one only while its cause lasts (such as the workflow strip while its session panel is open). A turning symbol uses a layer animation (`Turning`) and stays still under Reduce Motion.
-- News moves the app from one place. `CrewStore` applies what the daemon sends under `Motion.arrive`, and state that arrives any other way is set inside `Motion.arrive` too. Do not add an `.animation(_:value:)` keyed on store data to make something new animate: give a block that comes and goes `.transition(.card)` instead ([docs/design-tokens.md](../docs/design-tokens.md#motion--motion)).
+- Arrival motion starts from one place. `CrewStore` applies layout-changing daemon updates under `Motion.arrive`, and state arriving any other way is set inside `Motion.arrive` too. Do not add an `.animation(_:value:)` keyed on store data to animate new UI: give a block that comes and goes `.transition(.card)` instead ([docs/design-tokens.md](../docs/design-tokens.md#motion--motion)).
 - `Sources/Crew/Models.swift` decodes the daemon's JSON. Fields an older daemon does not send are optional.
 
 ## Where things are

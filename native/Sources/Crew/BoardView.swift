@@ -116,15 +116,14 @@ struct BoardView: View {
     /// The heading's copy and summary side by side: below these the summary moves under the title.
     private static let headingCopyWidth: CGFloat = 340
     private static let summaryWidth: ClosedRange<CGFloat> = 430...500
-    /// The page's cards in two columns on a wide page, each stacked on its own, so a card that grows moves only
-    /// the cards below it in its own column. Cards alternate left and right in order: filling the shorter column
-    /// instead would move cards across whenever one opens or closes. `left` and `right` end their columns whatever
-    /// the count above, in the order a single column shows them. With one column's worth of cards, they keep the
-    /// full width.
+    /// Arranges cards in two independent columns on a wide page, so a card that grows only shifts cards below
+    /// it in that column. Cards alternate left and right in order rather than filling the shorter column, which
+    /// would move cards across whenever one opens or closes. `left` and `right` end their respective columns
+    /// regardless of the count above, and follow them in that order in a single column. When all cards belong
+    /// to one column, they take the full width.
     ///
-    /// A card is one view wherever it is placed (`Columns`), so one that changes column or width as others come and
-    /// go moves there as itself and keeps its state. The layout builds every card, which is why History shows its
-    /// missions a page at a time.
+    /// Each card stays a single view inside `Columns`, so changing column or width moves it as itself and keeps
+    /// its state. `Columns` builds every card at once, which is why History pages its missions.
     private func masonry<Card: View>(_ tiles: [Tile], left: Tile?, right: Tile?, @ViewBuilder card: @escaping (Tile) -> Card) -> some View {
         let all = tiles + [left, right].compactMap { $0 }
         let second = Set(stride(from: 1, to: tiles.count, by: 2).map { tiles[$0].id } + [right].compactMap { $0?.id })
@@ -135,7 +134,7 @@ struct BoardView: View {
                 card(tile).layoutValue(key: Columns.Column.self, value: second.contains(tile.id) ? 1 : 0).transition(.card)
             }
         }
-        // Empty, it takes no room in the page's stack either, so an empty state sits where it does without it.
+        // When empty, offset the stack's gap so the empty state sits where it would without this view.
         .padding(.bottom, all.isEmpty ? -WorkspaceStyle.cardGap : 0)
     }
     private var title: String {
@@ -688,8 +687,8 @@ struct NeedsYouView: View {
     private var sessions: [ClaudeSession] { store.scopedWaitingSessions.filter { matches("\($0.title) \($0.projectPath) \(agentName($0.agent)) \($0.waitingFor ?? "")") } }
     var body: some View {
         let jobs = jobs, sessions = sessions
-        // The empty state lies over the cards' place, not above it, so the last card leaves where it is and the first
-        // arrives there, instead of travelling the empty state's height.
+        // Overlay the empty state on the grid instead of stacking it above, so the last leaving card and first
+        // arriving card stay in place rather than shifting by the empty state's height.
         ZStack(alignment: .top) {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.requestWidth.lowerBound, maximum: Self.requestWidth.upperBound), spacing: WorkspaceStyle.cardGap, alignment: .top)], alignment: .leading, spacing: WorkspaceStyle.cardGap) {
                 ForEach(jobs) { job in

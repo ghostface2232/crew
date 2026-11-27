@@ -39,6 +39,8 @@ export interface BoardState {
   presets?: Record<PresetName, Preset>;
   /** Whether the lead and the workers rate each other's work; absent from a daemon that predates peer ratings. */
   peerRatings?: boolean;
+  /** Whether a lead's chat shows mission progress as a card; absent from a daemon that predates the setting. */
+  progressCards?: boolean;
   /** The interface language, or null to follow the browser; absent from a daemon that predates the setting. */
   language?: Config['language'];
   /** Each model's score from its review notes; absent from a daemon that predates model notes. */

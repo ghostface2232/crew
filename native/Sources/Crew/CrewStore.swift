@@ -378,6 +378,15 @@ final class CrewStore {
             state.peerRatings = saved.peerRatings
         }
     }
+    static let progressCardsKey = "progress-cards"
+    func setProgressCards(_ enabled: Bool) async {
+        struct Change: Encodable, Sendable { var enabled: Bool }
+        struct Saved: Decodable, Sendable { var progressCards: Bool }
+        await run(Self.progressCardsKey) {
+            let saved: Saved = try await api.post("/api/progress-cards", Change(enabled: enabled))
+            state.progressCards = saved.progressCards
+        }
+    }
     static let turnTokenBudgetKey = "turn-token-budget"
     /// Counts budgets received from the daemon, so a save's reply does not undo a newer one that arrived meanwhile.
     private var turnTokenBudgetRevision = 0

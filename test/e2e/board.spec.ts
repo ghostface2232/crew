@@ -327,11 +327,11 @@ test('choosing a language switches the board in place, so a browser tab stays si
   await page.goto(`/#ticket=${TEST_TICKET}`);
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
   await request.post('/__push', { data: { type: 'language', data: { language: null } } });
-  await openSettings(page, 'Language');
+  await openSettings(page, 'General');
   await pick(page.getByRole('combobox', { name: 'Language' }), '한국어');
-  // Settings comes back on its Language page, and text kept in tables, such as the page names, switches too.
+  // Settings comes back on its General page, and text kept in tables, such as the page names, switches too.
   const pages = page.getByRole('navigation', { name: '설정 페이지' });
-  await expect(pages.getByRole('button', { name: '언어', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(pages.getByRole('button', { name: '일반', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('combobox', { name: '언어' })).toContainText('한국어');
   await expect(page.locator('html')).toHaveAttribute('lang', 'ko');
   await page.keyboard.press('Escape');
@@ -2134,7 +2134,7 @@ test('About Crew puts the check on the status row and an update action beside th
   expect(Math.abs(noteBox!.y + noteBox!.height / 2 - (installBox!.y + installBox!.height / 2))).toBeLessThan(12);
 });
 
-test('About Crew shows Open at Login as Windows has it, and only where the app can open at sign-in', async ({ page }) => {
+test('General shows Open at Login as Windows has it, and only where the app can open at sign-in', async ({ page }) => {
   const stub = (supported: boolean) => {
     // Windows may refuse, as a policy can: the switch shows what it then says, not what was asked.
     let open: boolean | null = supported ? false : null;
@@ -2151,7 +2151,7 @@ test('About Crew shows Open at Login as Windows has it, and only where the app c
   };
   await page.addInitScript(stub, true);
   await page.goto('/');
-  await openSettings(page, 'About Crew');
+  await openSettings(page, 'General');
   const toggle = page.getByRole('checkbox', { name: 'Open at Login' });
   await expect(toggle).not.toBeChecked();
   await expect(toggle).toHaveAccessibleDescription(/starts in the tray when you sign in/);
@@ -2168,7 +2168,24 @@ test('About Crew shows Open at Login as Windows has it, and only where the app c
   await unpacked.goto('/');
   await openSettings(unpacked, 'About Crew');
   await expect(unpacked.getByText('Crew 0.7.2', { exact: true })).toBeVisible();
+  await settingsPage(unpacked, 'General');
   await expect(unpacked.getByRole('checkbox', { name: 'Open at Login' })).toHaveCount(0);
+});
+
+test('General puts the progress card switch beside the language, and it saves as it is flipped', async ({ page, request }) => {
+  await page.goto('/');
+  await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  await request.post('/__push', { data: { type: 'progressCards', data: true } });
+  await openSettings(page, 'General');
+  const pages = page.getByRole('navigation', { name: 'Settings pages' });
+  // General comes first, above the roles.
+  const top = async (name: string) => (await pages.getByRole('button', { name, exact: true }).boundingBox())!.y;
+  expect(await top('General')).toBeLessThan(await top('Build'));
+  const toggle = page.getByRole('checkbox', { name: 'Progress cards in chat' });
+  await expect(toggle).toBeChecked();
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+  await expect.poll(async () => (await (await request.get('/__requests')).json()).some((r: { route: string; body: { enabled?: boolean } }) => r.route === '/api/progress-cards' && r.body.enabled === false)).toBe(true);
 });
 
 test('job details name whose instructions a job got and end Changes with Diff Command', async ({ page, request }) => {

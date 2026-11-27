@@ -259,6 +259,8 @@ export interface Config {
    * worker is asked to rate and the scores come from the review evidence alone; ratings already given are kept.
    */
   peerRatings: boolean;
+  /** Whether a lead's chat shows mission progress as a card, on hosts that draw one (docs/jobs.md#progress-card). */
+  progressCards: boolean;
   /** The interface language of the board and the apps; null, the default, follows the system's or the browser's. */
   language: Language | null;
   /** The preset in effect; none by default, so an unconfigured install runs each agent's own settings. */
@@ -318,6 +320,7 @@ const defaults: Config = {
   roles: resolveRoles({}),
   roleSettings: {},
   peerRatings: true,
+  progressCards: true,
   language: null,
   preset: null,
   presets: PRESETS,
@@ -446,6 +449,7 @@ export function resolveConfig(user: UserConfig): Config {
   }
   // Any other value would read as on, and "false" in quotes is the likely one.
   if (user.peerRatings !== undefined && typeof user.peerRatings !== 'boolean') throw new Error('peerRatings must be true or false.');
+  if (user.progressCards !== undefined && typeof user.progressCards !== 'boolean') throw new Error('progressCards must be true or false.');
   if (user.turnTokenBudget !== undefined && !validTurnTokenBudget(user.turnTokenBudget)) throw new Error(`turnTokenBudget is ${JSON.stringify(user.turnTokenBudget)}; use one of ${TURN_TOKEN_CHOICES.join(', ')}, or "unlimited", or leave it out to set it by job difficulty.`);
   if (user.language != null && !LANGUAGES.includes(user.language)) throw new Error(`language is "${String(user.language)}"; use one of: ${LANGUAGES.join(', ')}, or leave it out to follow the system.`);
   return {

@@ -428,7 +428,9 @@ test('the card goes with mission calls, under Codex only with those that move a 
   const replies: any[] = [];
   const routes: string[] = [];
   let failCard = false;
+  let switchedOn = true;
   const handle = (showsCards: boolean, host = 'claude') => vm.runInNewContext(`${stripTypeScriptTypes(rule + handler)}; handle`, {
+    loadConfig: () => ({ progressCards: switchedOn }),
     AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host,
     showsCards, CARD_URI: 'ui://crew/progress.html', CARD_MIME: 'text/html;profile=mcp-app', cardHtml: () => '<html>', codexSession: async () => {},
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg), imageContent: () => [],
@@ -447,6 +449,11 @@ test('the card goes with mission calls, under Codex only with those that move a 
   // Codex draws the card a result names, so only a call that starts, moves or ends a mission carries one.
   assert.equal((await call(true, 'mission', { tasks: [] }, 'codex')).structuredContent, undefined);
   for (const args of [{ title: 'x' }, { stage: 'fix' }, { done: true }, { abandoned: true }]) assert.ok((await call(true, 'mission', args, 'codex')).structuredContent);
+  // The user's switch holds from the next call.
+  switchedOn = false;
+  assert.equal((await call(true, 'mission', { stage: 'fix' }, 'codex')).structuredContent, undefined);
+  assert.equal((await call(true, 'mission', { stage: 'fix' })).structuredContent, undefined);
+  switchedOn = true;
   // A card that cannot be built leaves the call's own answer as it was.
   failCard = true;
   assert.equal(JSON.stringify(await call(true, 'mission', { stage: 'fix' })), JSON.stringify({ content: [{ type: 'text', text: 'mission text' }] }));

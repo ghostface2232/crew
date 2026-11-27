@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import {
   ChevronLeftRegular, ChevronRightRegular, DocumentText16Regular, ErrorCircle16Regular, Folder16Regular, Gauge16Regular, Info16Regular,
-  LocalLanguage16Regular, Options16Regular, ShieldCheckmark16Regular, TextFont16Regular, Wrench16Regular,
+  Options16Regular, Settings16Regular, ShieldCheckmark16Regular, TextFont16Regular, Wrench16Regular,
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { AppUpdate, Preset, PresetName, ProjectSettings, Snapshot } from './types.ts';
@@ -50,16 +50,16 @@ function presetDetails(preset: Preset): [string, string][] {
 }
 
 /** One page of settings, listed in the sidebar: the roles by kind of work, what every agent shares, each project's own instructions, then the desktop app. */
-type Fixed = 'build' | 'review' | 'edit' | 'presets' | 'models' | 'instructions' | 'language' | 'about';
+type Fixed = 'general' | 'build' | 'review' | 'edit' | 'presets' | 'models' | 'instructions' | 'about';
 type Pane = Fixed | `project:${string}`;
 const PANES = translated((): Record<Fixed, { title: string; icon: FluentIcon; kind?: JobKind }> => ({
+  general: { title: t('General'), icon: Settings16Regular },
   build: { title: t('Build'), icon: Wrench16Regular, kind: 'delegate' },
   review: { title: t('Review'), icon: ShieldCheckmark16Regular, kind: 'review' },
   edit: { title: t('Edit'), icon: TextFont16Regular, kind: 'polish' },
   presets: { title: t('Model Presets'), icon: Options16Regular },
   models: { title: t('Model Scores'), icon: Gauge16Regular },
   instructions: { title: t('Instructions'), icon: DocumentText16Regular },
-  language: { title: t('Language'), icon: LocalLanguage16Regular },
   about: { title: t('About Crew'), icon: Info16Regular },
 }));
 
@@ -405,20 +405,29 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       setRatingsStatus((error as Error).message);
     }
   };
-  // Windows keeps whether the app opens at sign-in, and the user can change it there too, so it is read each time About
-  // opens. Null until the app answers, and where this copy cannot open at sign-in.
+  const [cardsStatus, setCardsStatus] = useState('');
+  const setProgressCards = async (enabled: boolean) => {
+    setCardsStatus('');
+    try {
+      board.receive('progressCards', (await request<{ progressCards: boolean }>('/api/progress-cards', { enabled })).progressCards);
+    } catch (error) {
+      setCardsStatus(t('Not saved: {error}', { error: (error as Error).message }));
+    }
+  };
+  // Windows keeps whether the app opens at sign-in, and the user can change it there too, so it is read each time
+  // General opens. Null until the app answers, and where this copy cannot open at sign-in.
   const [openAtLogin, setOpenAtLogin] = useState<boolean | null>(null);
   const [loginSaving, setLoginSaving] = useState(false);
   const [loginStatus, setLoginStatus] = useState('');
-  const aboutShown = pane === 'about';
+  const generalShown = pane === 'general';
   useEffect(() => {
-    if (!aboutShown || !desktop?.login) return;
+    if (!generalShown || !desktop?.login) return;
     let live = true;
     void desktop.login.state().then((open) => live && setOpenAtLogin(open), () => {});
     return () => {
       live = false;
     };
-  }, [aboutShown]);
+  }, [generalShown]);
   const changeOpenAtLogin = async (open: boolean) => {
     setLoginStatus('');
     setLoginSaving(true);
@@ -484,9 +493,10 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       }
     }
   };
-  // A daemon without presets, notes, or the language setting has no page for them.
+  // A daemon without presets, notes, or any general setting, in a browser that cannot open at sign-in, has no page for them.
+  const hasGeneral = state.language !== undefined || state.progressCards !== undefined || Boolean(desktop?.login);
   const current: Pane =
-    (pane === 'presets' && !state.presets) || (pane === 'models' && !state.modelScores) || (pane === 'language' && state.language === undefined) ||
+    (pane === 'presets' && !state.presets) || (pane === 'models' && !state.modelScores) || (pane === 'general' && !hasGeneral) ||
     (pane === 'about' && !update) ? 'build' : pane;
   useEffect(() => {
     if (current === 'about' && update?.installError) shownInstallError.current = true;
@@ -658,13 +668,13 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
             <h2 className={styles.windowTitle} id="settings-title">{t('Settings')}</h2>
             <span className={styles.listClose}><CloseButton label={t('Close settings')} onClose={closeSettings} /></span>
           </header>
+          {hasGeneral && <div className={styles.section}>{item('general')}</div>}
           <p className={styles.sectionLabel}>{t('Roles')}</p>
           <div className={styles.section}>{(['build', 'review', 'edit'] as Pane[]).map(item)}</div>
           <p className={styles.sectionLabel}>{t('Shared')}</p>
           <div className={styles.section}>
             {([
               ...(state.presets ? ['presets'] : []), ...(state.modelScores ? ['models'] : []), 'instructions',
-              ...(state.language !== undefined ? ['language'] : []),
             ] as Pane[]).map(item)}
           </div>
           {dirs.length > 0 && (
@@ -814,7 +824,62 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                   </div>}
                 </section>
               )}
-              {current === 'about' && openAtLogin !== null && (
+              {current === 'models' && (
+                <section className={styles.group}>
+                  <Scores scores={state.modelScores!} />
+                </section>
+              )}
+              {current === 'models' && state.peerRatings !== undefined && (
+                <section className={styles.group}>
+                  <div className={styles.rows}>
+                    <label className={styles.row}>
+                      <span>{t('Peer ratings')}</span>
+                      <input type="checkbox" className="switch" checked={state.peerRatings} onChange={(event) => void setPeerRatings(event.target.checked)} />
+                    </label>
+                  </div>
+                  {ratingsStatus && <p className={styles.footnote} role="alert">{ratingsStatus}</p>}
+                </section>
+              )}
+              {current === 'general' && state.language !== undefined && (
+                <section className={styles.group}>
+                  <div className={styles.rows}>
+                    <label className={styles.row}>
+                      <span>{t('Language')}</span>
+                      {/* Each language is named in itself, so it can be found whatever the page reads in. */}
+                      <Select<Language | ''>
+                        label={t('Language')}
+                        value={state.language ?? ''}
+                        options={[['', t('Match System')], ['en', 'English'], ['ko', '한국어']]}
+                        onChange={(next) => void chooseLanguage(next || null)}
+                      />
+                    </label>
+                  </div>
+                  {/* The board switches at once; only the macOS app needs reopening, and it says so itself. */}
+                  {languageStatus && <p className={styles.footnote} role="alert">{languageStatus}</p>}
+                </section>
+              )}
+              {current === 'general' && state.progressCards !== undefined && (
+                <section className={styles.group}>
+                  <div className={styles.rows}>
+                    <label className={`${styles.row} ${styles.described}`}>
+                      <span>
+                        <span id="progress-cards">{t('Progress cards in chat')}</span>
+                        <small id="progress-cards-note">{t('Shows each mission step as a card in the Claude and Codex desktop apps.')}</small>
+                      </span>
+                      <input
+                        type="checkbox"
+                        className="switch"
+                        aria-labelledby="progress-cards"
+                        aria-describedby="progress-cards-note"
+                        checked={state.progressCards}
+                        onChange={(event) => void setProgressCards(event.target.checked)}
+                      />
+                    </label>
+                  </div>
+                  {cardsStatus && <p className={styles.footnote} role="alert">{cardsStatus}</p>}
+                </section>
+              )}
+              {current === 'general' && openAtLogin !== null && (
                 <section className={styles.group}>
                   <div className={styles.rows}>
                     <label className={`${styles.row} ${styles.described}`}>
@@ -834,40 +899,6 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                     </label>
                   </div>
                   {loginStatus && <p className={styles.footnote} role="alert">{loginStatus}</p>}
-                </section>
-              )}
-              {current === 'models' && (
-                <section className={styles.group}>
-                  <Scores scores={state.modelScores!} />
-                </section>
-              )}
-              {current === 'models' && state.peerRatings !== undefined && (
-                <section className={styles.group}>
-                  <div className={styles.rows}>
-                    <label className={styles.row}>
-                      <span>{t('Peer ratings')}</span>
-                      <input type="checkbox" className="switch" checked={state.peerRatings} onChange={(event) => void setPeerRatings(event.target.checked)} />
-                    </label>
-                  </div>
-                  {ratingsStatus && <p className={styles.footnote} role="alert">{ratingsStatus}</p>}
-                </section>
-              )}
-              {current === 'language' && (
-                <section className={styles.group}>
-                  <div className={styles.rows}>
-                    <label className={styles.row}>
-                      <span>{t('Language')}</span>
-                      {/* Each language is named in itself, so it can be found whatever the page reads in. */}
-                      <Select<Language | ''>
-                        label={t('Language')}
-                        value={state.language ?? ''}
-                        options={[['', t('Match System')], ['en', 'English'], ['ko', '한국어']]}
-                        onChange={(next) => void chooseLanguage(next || null)}
-                      />
-                    </label>
-                  </div>
-                  {/* The board switches at once; only the macOS app needs reopening, and it says so itself. */}
-                  {languageStatus && <p className={styles.footnote} role="alert">{languageStatus}</p>}
                 </section>
               )}
               {project !== null && pageScope !== null && state.projects !== undefined && (

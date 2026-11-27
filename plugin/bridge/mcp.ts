@@ -435,8 +435,19 @@ let showsCards = false;
  * Codex draws the card a result names, so there the card can follow the mission's steps alone
  * (docs/mcp-compatibility.md#6-mcp-apps-inline-cards).
  */
-const carriesCard = (name: string, args: any) => showsCards && name === 'mission'
+const carriesCard = (name: string, args: any) => showsCards && name === 'mission' && cardsOn()
   && (host !== 'codex' || Boolean(args?.title || args?.stage || args?.done || args?.abandoned));
+/**
+ * The user's switch, read from the config on disk so a change on the board holds from the next call. The Claude app
+ * reads the card's declaration once, when its session starts, so there the switch applies to the sessions after it.
+ */
+function cardsOn(): boolean {
+  try {
+    return loadConfig().progressCards;
+  } catch {
+    return true;
+  }
+}
 /** Called by the card itself to refresh, where the host lets a card call tools; the model is not shown it. */
 const PROGRESS_TOOL = {
   name: 'progress',
@@ -450,7 +461,7 @@ function toolList() {
   const tools = buildTools();
   for (const tool of tools) Object.assign(tool.inputSchema.properties, { ack: ackProperty });
   if (!showsCards) return tools;
-  if (host !== 'codex') for (const tool of tools) if (tool.name === 'mission') Object.assign(tool, { _meta: { ui: { resourceUri: CARD_URI } } });
+  if (host !== 'codex' && cardsOn()) for (const tool of tools) if (tool.name === 'mission') Object.assign(tool, { _meta: { ui: { resourceUri: CARD_URI } } });
   return [...tools, PROGRESS_TOOL as unknown as (typeof tools)[number]];
 }
 let TOOLS = toolList();

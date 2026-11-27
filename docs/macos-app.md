@@ -106,3 +106,7 @@ Nine reviewers (concurrency, accessibility, build/tests, design/layout, motion, 
 - [Adopting Liquid Glass](https://developer.apple.com/documentation/TechnologyOverviews/adopting-liquid-glass)
 - [Applying Liquid Glass to custom views](https://developer.apple.com/documentation/SwiftUI/Applying-Liquid-Glass-to-custom-views)
 - [SwiftUI and AppKit integration](https://developer.apple.com/documentation/swiftui/appkit-integration)
+
+## History
+
+- **2026-11-27.** Local builds were always ad-hoc signed, which was enough while nothing depended on a build keeping its identity. macOS ties the folder access a person grants to the app's signature, so every new build was asked for it again. A local build now signs with the `Crew Local Signing` certificate when the login keychain has one, and stays ad hoc without it ([Build and run](#build-and-run)).

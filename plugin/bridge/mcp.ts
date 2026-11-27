@@ -953,6 +953,10 @@ function describePaged(job: JobView, waitingHint?: string): string {
   return `The report is longer than one page; its first page is below. ${next}.\n${describe(job, waitingHint, `${page}\n${next}`)}`;
 }
 
+/** The roles, usage and board lines this session's status list last showed in full, and when. */
+let lastFooter = { text: '', at: 0 };
+const FOOTER_MS = 15 * 60_000;
+
 /** The follow-up mission being opened, which a job started meanwhile waits for. */
 let opening: Promise<string> | null = null;
 /**
@@ -1184,14 +1188,23 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
         lines.push('', 'Watched pull requests:', ...pulls.slice(0, 8).map((pull) => `[${pull.id}] ${pull.repo}#${pull.number} · ${pull.state}`));
         if (pulls.length > 8) lines.push(`(${pulls.length - 8} more.)`);
       }
+      const footer: string[] = [];
       // A daemon that predates the role table reports none.
-      if (state.roles) lines.push('', `Roles: ${(Object.keys(state.roles) as Role[]).map((role) => `${role} → ${holder(role, state.roles)}`).join(', ')}`);
+      if (state.roles) footer.push('', `Roles: ${(Object.keys(state.roles) as Role[]).map((role) => `${role} → ${holder(role, state.roles)}`).join(', ')}`);
       // A daemon that predates AgentGauge support reports no usage; Codex's own figures are then all there is.
       const measured = state.usage ? describeUsage(state.usage as Usage) : [];
-      if (measured.length) lines.push('', 'Usage (AgentGauge):', ...measured);
+      if (measured.length) footer.push('', 'Usage (AgentGauge):', ...measured);
       const windows = measured.length ? [] : (state.limits.codex?.windows ?? []);
-      if (windows.length) lines.push('', `Codex usage: ${windows.map((w: any) => `${Math.round(w.usedPercent)}% of the ${w.minutes >= 1440 ? `${Math.round(w.minutes / 1440)}-day` : `${Math.round(w.minutes / 60)}-hour`} window`).join(', ')}`);
-      lines.push('', `Board: ${baseUrl()}`);
+      if (windows.length) footer.push('', `Codex usage: ${windows.map((w: any) => `${Math.round(w.usedPercent)}% of the ${w.minutes >= 1440 ? `${Math.round(w.minutes / 1440)}-day` : `${Math.round(w.minutes / 60)}-hour`} window`).join(', ')}`);
+      footer.push('', `Board: ${baseUrl()}`);
+      // A recent list's roles, usage and board are still in the lead's context, unless compaction dropped them, which
+      // this server cannot see: repeat them once they change or the last full copy is a while old.
+      const shown = footer.join('\n');
+      if (shown === lastFooter.text && Date.now() - lastFooter.at < FOOTER_MS) lines.push('', 'Roles, usage and board: unchanged since the last list.');
+      else {
+        lines.push(shown);
+        lastFooter = { text: shown, at: Date.now() };
+      }
       return lines.join('\n');
     }
     case 'wait': {

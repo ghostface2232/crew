@@ -659,7 +659,7 @@ test('status and mission explicitly read this session\'s watch news without any 
   const offered: (string[] | undefined)[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(standing + tool + handler)}; handle`, {
     AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude', PROJECT: '/project', projectUnknown: false, carriesCard: () => false,
-    fresh: false, missionId: null, costMission: null, closedElsewhere: null,
+    fresh: false, missionId: null, costMission: null, closedElsewhere: null, lastFooter: { text: '', at: 0 }, FOOTER_MS: 60_000,
     missionHead: () => 'Current mission', missionDetail: () => '', currentPolicy: () => '', globalPreset: () => null,
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),
     imageContent: () => [], baseUrl: () => 'board', summarize: () => '',
@@ -680,6 +680,11 @@ test('status and mission explicitly read this session\'s watch news without any 
   assert.match(status.content[0].text, /Watched pull requests:\n\[pr-0\] o\/r#7 · open/);
   assert.match(status.content[0].text, /\[pr-0\] news 1/);
   assert.doesNotMatch(status.content[0].text, /pr-1|o\/r#8/);
+  assert.match(status.content[0].text, /Board: board/);
+  // The next list leaves out what has not changed since.
+  const again = await call('status');
+  assert.match(again.content[0].text, /Roles, usage and board: unchanged since the last list\./);
+  assert.doesNotMatch(again.content[0].text, /Board: board/);
   const mission = await call('mission');
   assert.equal(mission.isError, true);
   assert.match(mission.content[0].text, /no open mission[^]*\[pr-0\] news 1/);
@@ -688,7 +693,7 @@ test('status and mission explicitly read this session\'s watch news without any 
   assert.equal(current.isError, undefined);
   assert.match(current.content[0].text, /Current mission[^]*\[pr-0\] news 1/);
   assert.equal(unread(watches[0])[0].offers, 2);
-  assert.deepEqual(offered, [undefined, ['pr-0'], ['pr-0']]);
+  assert.deepEqual(offered, [undefined, undefined, ['pr-0'], ['pr-0']]);
 });
 
 test('a Codex session says hello once, retries a failed hello or one with no folder, refuses a call naming no session, and starts a new session fresh', async () => {

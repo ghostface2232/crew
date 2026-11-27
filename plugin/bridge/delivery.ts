@@ -314,7 +314,8 @@ export class Delivery {
     if (options.automatic && active?.expiresAt > now) return null;
     const candidates = this.pending(session, options.ids).filter(({ news }) => !options.automatic || news.offers < 2);
     const receipt = randomUUID();
-    const suffix = `\nReceipt: ${receipt}\nPass ack: "${receipt}" with your next Crew call (or an array for several receipts); with nothing else to do, call status with it now. Reading this is not an ACK.`;
+    // The tool descriptions explain ack; this only has to name the receipt and say that reading it acknowledges nothing.
+    const suffix = `\nReceipt: ${receipt} (pass as ack on your next Crew call, or call status with it; reading is not an ack)`;
     let text = 'Crew news (snapshots; use status with job_id to read the current job):';
     const selected: typeof candidates = [];
     for (const item of candidates) {

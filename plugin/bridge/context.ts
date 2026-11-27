@@ -9,8 +9,8 @@ import { leadContext, loadFailure } from './instructions.ts';
  */
 
 /**
- * Subagents that only search and read. The shared instructions are notes for building, running and checking, so these
- * would carry them unused into every context. The self-reviewer runs checks and the app, so it keeps them.
+ * Subagents that only search and read: the shared instructions are notes for building, running, and checking,
+ * so these subagents would carry them unused. The self-reviewer runs checks and the app, so it keeps them.
  */
 const READERS = new Set(['Explore', 'Plan', 'claude-code-guide', 'web-fetch']);
 

@@ -815,9 +815,19 @@ func mergeEvents(_ previous: [CrewEvent], _ incoming: [CrewEvent], limit: Int = 
 func agentName(_ id: String) -> String { ["claude": "Claude", "codex": "Codex", "antigravity": "Antigravity"][id] ?? id }
 let roleNames = ["delegate": "Implementation", "refactor": "Refactoring", "release": "Release preparation", "debate": "Debate", "review": "Read-only review", "verify": "Review that runs the app", "fix": "Fix", "polish": "Wording polish"]
 let roleOrder = ["delegate", "review", "polish"]
+/// The folder name; when another project shares it, as many parent folders as tell them apart, as the board names
+/// them. The whole path would be cut short in the sidebar before the part that differs. Names that differ only in
+/// case read as the same name.
 func projectName(_ path: String, among paths: [String]) -> String {
-    let name = URL(fileURLWithPath: path).lastPathComponent
-    return paths.filter { URL(fileURLWithPath: $0).lastPathComponent == name }.count > 1 ? path : name
+    let parts = { (path: String) in path.split(separator: "/").map { $0.lowercased() } }
+    let mine = path.split(separator: "/")
+    let others = paths.filter { $0 != path }.map(parts)
+    for count in stride(from: 1, through: mine.count, by: 1) {
+        let tail = mine.suffix(count)
+        let key = tail.map { $0.lowercased() }
+        if !others.contains(where: { Array($0.suffix(count)) == key }) { return tail.joined(separator: "/") }
+    }
+    return path
 }
 func elapsed(_ milliseconds: Double) -> String {
     let seconds = max(0, Int(milliseconds / 1000))

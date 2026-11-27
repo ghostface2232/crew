@@ -54,8 +54,8 @@ struct BoardView: View {
                 if !store.connected { connectionBanner }
                 heading(pending: pending)
                 if store.connected && store.project.isEmpty && overview { SetupCard(api: store.api) }
-                // All projects' overview has Review Requests in its heading instead.
-                if pending > 0 && store.selection != "needs" && !(overview && store.project.isEmpty) { attentionBanner(pending: pending).transition(.card) }
+                // Overview puts the banner in its heading instead.
+                if pending > 0 && store.selection != "needs" && !overview { attentionBanner(pending: pending).transition(.card) }
                 if store.selection == "needs" { NeedsYouView(store: store) }
                 else if store.selection == "activity" { activity }
                 else { workspace }
@@ -70,7 +70,7 @@ struct BoardView: View {
                     try? await Task.sleep(for: .seconds(600))
                 }
             }
-            // The banner and the heading's review button come and go with requests; the page below makes room.
+            // The banner, across the page or in the heading, comes and goes with requests; the page below makes room.
             .animation(Motion.reduced(Motion.reflow, reduceMotion), value: pending > 0)
             .background(OverlayScrollers())
             .padding(.horizontal, WorkspaceStyle.pageMargin).padding(.top, WorkspaceStyle.pageTop).padding(.bottom, WorkspaceStyle.pageMargin)
@@ -163,43 +163,55 @@ struct BoardView: View {
             Button("Retry") { store.start() }.pillButton()
         }.padding(WorkspaceStyle.bannerPadding).background(Palette.attention(Palette.warning), in: RoundedRectangle(cornerRadius: WorkspaceStyle.cardRadius))
     }
+    /// Requests waiting on the user, opening Needs You: a row's size, whether it runs across the page or sits in
+    /// Overview's heading.
     private func attentionBanner(pending: Int) -> some View {
         Button { store.selection = "needs"; store.search = "" } label: {
             HStack {
                 Image(systemName: "bell.badge.fill").foregroundStyle(Palette.warning)
-                Text(pending == 1 ? String(localized: "1 request needs your attention") : String(localized: "\(pending) requests need your attention")).font(Typeface.bodyStrong)
+                Text(pending == 1 ? String(localized: "1 request needs your attention") : String(localized: "\(pending) requests need your attention"))
+                    .font(Typeface.calloutStrong)
                 Spacer()
-                Text("Review").font(Typeface.callout)
+                // Its own key: "Review" alone is a mission stop's name, 리뷰 in Korean, and here it means going to look.
+                Text(String(localized: "Review requests", defaultValue: "Review")).font(Typeface.caption)
                 Image(systemName: "chevron.right").font(Typeface.micro)
-            }.padding(WorkspaceStyle.bannerPadding).contentShape(Rectangle())
-        }.buttonStyle(.plain).glassEffect(.regular, in: .rect(cornerRadius: WorkspaceStyle.cardRadius))
+            }
+            .padding(.vertical, Space.ml).padding(.horizontal, Space.l).contentShape(Rectangle())
+        }.buttonStyle(.plain).glassEffect(.regular, in: .rect(cornerRadius: WorkspaceStyle.rowRadius))
     }
     private func heading(pending: Int) -> some View {
-        let showReview = overview && store.project.isEmpty && pending > 0
+        // Only Overview, of all projects or of one: on the other pages the banner runs across the page under the heading.
+        let review = overview ? pending : 0
         return ViewThatFits(in: .horizontal) {
             if overview {
                 HStack(alignment: .top, spacing: Space.x5l) {
                     // A fixed ideal width keeps a long project path from forcing the stacked layout;
-                    // the path truncates instead.
-                    headingCopy(showReview: showReview)
-                        .frame(minWidth: Self.headingCopyWidth, idealWidth: Self.headingCopyWidth, maxWidth: .infinity)
+                    // the path truncates instead. The column is as tall as the summary card, so the banner
+                    // at its foot ends where the card does.
+                    headingCopy(review: review, fills: false)
+                        .frame(minWidth: Self.headingCopyWidth, idealWidth: Self.headingCopyWidth, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         // Align the title's cap height, not its line box, with the top of the summary card.
                         .alignmentGuide(.top) { $0[.firstTextBaseline] - Typeface.pageTitleCapHeight }
                     WorkspaceSummary(store: store).frame(minWidth: max(Self.summaryWidth.lowerBound, WorkspaceSummary.minimumWidth), maxWidth: max(Self.summaryWidth.upperBound, WorkspaceSummary.minimumWidth))
                 }
+                // The row is as tall as its taller side, and the other side is given that height.
+                .fixedSize(horizontal: false, vertical: true)
             }
             VStack(alignment: .leading, spacing: Space.x3l) {
-                headingCopy(showReview: showReview)
+                headingCopy(review: review, fills: true)
                 if overview { WorkspaceSummary(store: store) }
             }
         }.padding(.top, Space.s).padding(.bottom, Space.s)
     }
-    private func headingCopy(showReview: Bool) -> some View {
-        VStack(alignment: .leading, spacing: Space.xxl) {
+    /// The title and, with requests waiting, the banner. Beside the summary card the banner is at most
+    /// `headingCopyWidth` wide and sits at the column's foot, level with the card's; once the two stack (`fills`) it
+    /// follows the title across the page.
+    private func headingCopy(review: Int, fills: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
             WorkspaceHeading(title: title, subtitle: store.project.isEmpty ? nil : store.project)
-            if showReview {
-                Button("Review Requests", systemImage: "arrow.up.right") { store.selection = "needs"; store.search = "" }
-                    .glassPillButton(prominent: false)
+            if review > 0 {
+                if fills { Spacer().frame(height: Space.xxl) } else { Spacer(minLength: Space.xxl) }
+                attentionBanner(pending: review).frame(maxWidth: fills ? .infinity : Self.headingCopyWidth)
             }
         }
     }

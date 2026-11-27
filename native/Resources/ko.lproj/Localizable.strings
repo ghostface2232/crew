@@ -8,7 +8,7 @@
 "1 request needs your attention" = "확인이 필요한 요청 1개";
 "%lld requests need your attention" = "확인이 필요한 요청 %lld개";
 "Review" = "리뷰";
-"Review Requests" = "요청 확인";
+"Review requests" = "확인";
 "Jobs" = "작업";
 "Other jobs" = "기타 작업";
 "Recently finished" = "최근 완료";

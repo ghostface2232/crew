@@ -43,7 +43,7 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 | `cardGap` | 16 | Between cards, across and down |
 | `blockGap` | 16 | Between blocks stacked inside a card or section |
 | `sectionGap` | 28 | Between detail panel sections |
-| `bannerPadding` | 16 | Connection and attention banners |
+| `bannerPadding` | 16 | The connection banner. The attention banner is a row's size instead: `Space.ml` × `Space.l` and `rowRadius` |
 | `panelPadding` | 24 | Detail panel and New Job sheet |
 | `panelWidth` | 420 | The detail panel's width until the user drags it; a drag keeps to `panelMinWidth` (360) to `panelMaxWidth` (760), and the page keeps `panelPageRoom` (240) visible beside it and its inset, so a narrow window lowers the limit. `panelWidth(_:page:)` applies all three |
 | `panelHandleWidth` | 12 | The strip on the panel's leading edge that takes a resize drag |
@@ -80,10 +80,10 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 
 | Token | Points | Use |
 | --- | --- | --- |
-| `cardRadius` | 20 | Cards and banners |
+| `cardRadius` | 20 | Cards and the connection banner |
 | `panelRadius` | 18 | The floating detail panel: concentric with the window corner across `windowInset`, and equal to the toolbar capsules |
 | `fieldRadius` | 14 | Text fields and editors (`fieldSurface()`) |
-| `rowRadius` | 12 | Rows, gray insets and thumbnails inside a card |
+| `rowRadius` | 12 | Rows, gray insets and thumbnails inside a card; the attention banner |
 | capsule | — | Chips and pill buttons |
 | circle | — | Icon buttons and step markers |
 
@@ -102,7 +102,7 @@ Surfaces change between light and dark appearance. Status colors are system colo
 | `Palette.warning` | Waiting, stalled, unsaved, usage at 70% or more or a window reported tight |
 | `Palette.danger` | Failed, errors, refusals, usage at 90% or more or at its limit |
 | `Palette.merged` | A merged PR, in GitHub's own purple (`#8250df`, `#a371f7` in dark mode) |
-| `Palette.attention(color)` | A card or banner that needs attention (the attention banner, a request in the detail panel), tinted 7% with its status color. Rows waiting on the user keep the row fill and show it by their status icon |
+| `Palette.attention(color)` | A card or banner that needs attention (the connection banner, a request in the detail panel), tinted 7% with its status color. Rows waiting on the user keep the row fill and show it by their status icon |
 | `Palette.chip(color)` | A chip's background, 12% of its status color |
 | `Palette.selection` | The row whose details are open |
 | `Palette.contrastStroke` | Outlines when Increase Contrast is on |
@@ -127,7 +127,7 @@ Titles use SF Pro Rounded and headlines SF Pro Display. Body text uses SF Pro Te
 | `subheadline` | 14 semibold | Text | Detail section titles |
 | `bodyStrong` | 14 medium | Text | Row titles, report headings, a mission stop's name above its jobs, a detail item's title, a model's name in Model Scores |
 | `body` | 14 regular | Text | What the user types: message and answer editors, the New Job sheet's fields |
-| `calloutStrong` | 13 medium | Text | Pill buttons, agent names in events |
+| `calloutStrong` | 13 medium | Text | Pill buttons, agent names in events, the attention banner |
 | `callout` | 13 regular | Text | Text in the detail panel: facts, reports, debate messages and points, notes |
 | `captionStrong` | 12 semibold | Text | The current mission step's name on the track; other step names use `caption` |
 | `chip` | 12 medium | Text | Status chips, step numbers |
@@ -224,7 +224,7 @@ A pill or glass pill whose words follow state, such as Copied, Saving… or Keep
 
 | Kind | How | Use |
 | --- | --- | --- |
-| Primary | `.glassPillButton()`, or `.glassPillButton(prominent: false)` for clear glass: Liquid Glass at the pill's size and face. Glass pills side by side share a `GlassEffectContainer` | Send, New Job, Save (instructions), Send Job, Install (setup), approval decisions; Review Requests in clear glass |
+| Primary | `.glassPillButton()`, or `.glassPillButton(prominent: false)` for clear glass: Liquid Glass at the pill's size and face. Glass pills side by side share a `GlassEffectContainer` | Send, New Job, Save (instructions), Send Job, Install (setup), approval decisions, the ones beside the main choice in clear glass |
 | Pill | `.pillButton()`; a destructive role tints it with the danger color, and `.pillButton(selected: true)` tints a toggle with the accent when it is on | Details, Retry, Copy, Undo/Keep, Check Again, Cancel Job; Compare (evidence) |
 | Icon | `.iconButton()`: `IconButtonStyle`, a `Pill.fill` circle of `IconButton.diameter` (28 points), a little larger than a chip, with its symbol in `Symbol.control`; `.iconButton(prominent: true)` fills it with the accent | Close, Show Job, expand a mission; Send Answer (prominent). Forget beside each decision is not one: it is the system's `xmark.circle.fill` glyph at `Typeface.callout`, since one sits on every line of the list |
 | Chip | `.chip(color)`: `Typeface.chip` inked in its color, in a `Palette.chip` capsule with `Chip.insets` (5 × 8), outlined under Increase Contrast. `StatusLabel` draws status with it, passing `Chip.symbolInsets` (6 on the leading side) because the symbol's own side bearing already spaces it from the edge; `.chip(color, in:)` gives it another shape, such as a PR's rounded square | Status of missions and agents; a model's verdict word. Job and session rows and the History table show `StatusIcon`, the status symbol alone, with the word as its tooltip and accessible name |

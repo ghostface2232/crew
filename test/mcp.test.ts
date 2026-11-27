@@ -501,7 +501,7 @@ test('status pages the latest full report during a follow-up and retained debate
 });
 
 test('a report longer than one page is shown as its first page, which the next page continues', () => {
-  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   const fn = source.slice(source.indexOf('function describePaged'), source.indexOf('\n}\n', source.indexOf('function describePaged')) + 2);
   const describePaged = vm.runInNewContext(stripTypeScriptTypes(`(${fn})`), {
     describe: (job: any, hint: any, report = job.report) => `hint=${hint}\n${report}`, textPage, jsonBytes, REPORT_PAGE_BYTES,

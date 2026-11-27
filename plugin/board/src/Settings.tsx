@@ -405,6 +405,31 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       setRatingsStatus((error as Error).message);
     }
   };
+  // Windows keeps whether the app opens at sign-in, and the user can change it there too, so it is read each time About
+  // opens. Null until the app answers, and where this copy cannot open at sign-in.
+  const [openAtLogin, setOpenAtLogin] = useState<boolean | null>(null);
+  const [loginSaving, setLoginSaving] = useState(false);
+  const [loginStatus, setLoginStatus] = useState('');
+  const aboutShown = pane === 'about';
+  useEffect(() => {
+    if (!aboutShown || !desktop?.login) return;
+    let live = true;
+    void desktop.login.state().then((open) => live && setOpenAtLogin(open), () => {});
+    return () => {
+      live = false;
+    };
+  }, [aboutShown]);
+  const changeOpenAtLogin = async (open: boolean) => {
+    setLoginStatus('');
+    setLoginSaving(true);
+    try {
+      setOpenAtLogin(await desktop!.login!.set(open));
+    } catch (error) {
+      setLoginStatus(t('Not saved: {error}', { error: (error as Error).message }));
+    } finally {
+      setLoginSaving(false);
+    }
+  };
   // A project's switches save as they are flipped, like peer ratings. One saves at a time, as in the app, so two
   // quick flips cannot land out of order.
   // A failure is kept with its project, so it shows only on that project's page.
@@ -787,6 +812,28 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                       <button type="button" className="prominent" onClick={() => void desktop?.update.check()}>{t('Download Now')}</button>
                     )}
                   </div>}
+                </section>
+              )}
+              {current === 'about' && openAtLogin !== null && (
+                <section className={styles.group}>
+                  <div className={styles.rows}>
+                    <label className={`${styles.row} ${styles.described}`}>
+                      <span>
+                        <span id="open-at-login">{t('Open at Login')}</span>
+                        <small id="open-at-login-note">{t('Crew starts in the tray when you sign in, so jobs stopped by a usage limit can resume with no session open.')}</small>
+                      </span>
+                      <input
+                        type="checkbox"
+                        className="switch"
+                        aria-labelledby="open-at-login"
+                        aria-describedby="open-at-login-note"
+                        checked={openAtLogin}
+                        disabled={loginSaving}
+                        onChange={(event) => void changeOpenAtLogin(event.target.checked)}
+                      />
+                    </label>
+                  </div>
+                  {loginStatus && <p className={styles.footnote} role="alert">{loginStatus}</p>}
                 </section>
               )}
               {current === 'models' && (

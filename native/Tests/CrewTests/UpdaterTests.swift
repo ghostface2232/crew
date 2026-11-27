@@ -81,6 +81,18 @@ private final class FeedProtocol: URLProtocol, @unchecked Sendable {
         #expect(unsupported.summary == "Updates come with the Crew app bundle")
     }
 
+    /// Open at Login, like updates, needs the app bundle, and a test or alternate profile never touches the user's login.
+    @Test func openAtLoginIsOfferedOnlyForTheAppBundleOutsideATestProfile() throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: "crew-login-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let bundle = try appBundle(in: home)
+        #expect(LoginItem.supported(environment: [:], bundle: bundle))
+        #expect(!LoginItem.supported(environment: ["CREW_HOME": home.path], bundle: bundle))
+        let folder = home.appending(path: "build")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        #expect(!LoginItem.supported(environment: [:], bundle: try #require(Bundle(url: folder))))
+    }
+
     private func appBundle(in home: URL) throws -> Bundle {
         let app = home.appending(path: "Crew.app")
         let contents = app.appending(path: "Contents")

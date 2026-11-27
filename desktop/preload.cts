@@ -21,5 +21,9 @@ const bridge: Bridge = {
     pending: () => ipcRenderer.invoke('welcome:pending'),
     done: () => ipcRenderer.invoke('welcome:done'),
   },
+  login: {
+    state: () => ipcRenderer.invoke('login:state'),
+    set: (open) => ipcRenderer.invoke('login:set', open),
+  },
 };
 contextBridge.exposeInMainWorld('crewDesktop', bridge);

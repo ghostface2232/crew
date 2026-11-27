@@ -2134,6 +2134,43 @@ test('About Crew puts the check on the status row and an update action beside th
   expect(Math.abs(noteBox!.y + noteBox!.height / 2 - (installBox!.y + installBox!.height / 2))).toBeLessThan(12);
 });
 
+test('About Crew shows Open at Login as Windows has it, and only where the app can open at sign-in', async ({ page }) => {
+  const stub = (supported: boolean) => {
+    // Windows may refuse, as a policy can: the switch shows what it then says, not what was asked.
+    let open: boolean | null = supported ? false : null;
+    Object.defineProperty(window, 'crewDesktop', { value: {
+      update: {
+        state: async () => ({ current: '0.7.2', state: 'idle' }), check: async () => {}, install: async () => {}, cancel: async () => {},
+        subscribe: () => () => {},
+      },
+      login: {
+        state: async () => open,
+        set: async (want: boolean) => { open = want && !(window as { refuse?: boolean }).refuse; return open; },
+      },
+    } });
+  };
+  await page.addInitScript(stub, true);
+  await page.goto('/');
+  await openSettings(page, 'About Crew');
+  const toggle = page.getByRole('checkbox', { name: 'Open at Login' });
+  await expect(toggle).not.toBeChecked();
+  await expect(toggle).toHaveAccessibleDescription(/starts in the tray when you sign in/);
+  await toggle.click();
+  await expect(toggle).toBeChecked();
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+  await page.evaluate(() => { (window as { refuse?: boolean }).refuse = true; });
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+
+  const unpacked = await page.context().newPage();
+  await unpacked.addInitScript(stub, false);
+  await unpacked.goto('/');
+  await openSettings(unpacked, 'About Crew');
+  await expect(unpacked.getByText('Crew 0.7.2', { exact: true })).toBeVisible();
+  await expect(unpacked.getByRole('checkbox', { name: 'Open at Login' })).toHaveCount(0);
+});
+
 test('job details name whose instructions a job got and end Changes with Diff Command', async ({ page, request }) => {
   const data = fixture();
   data.jobs[0] = {

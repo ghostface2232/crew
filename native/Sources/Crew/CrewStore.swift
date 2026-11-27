@@ -430,6 +430,11 @@ final class CrewStore {
         components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         if let found: IssueList = try? await api.request(components.string!) { Motion.arrive { issues[project] = found } }
     }
+    /// The setup checklist as last read, shown on all projects' overview (`SetupCard`).
+    var setup: SetupState?
+    func loadSetup() async {
+        if let next: SetupState = try? await api.request("/api/setup", timeout: SetupState.timeout) { Motion.arrive { setup = next } }
+    }
     func dismissIssue(_ url: String, project: String) async {
         struct Dismiss: Encodable, Sendable { var url: String }
         await run("issue:\(url)") {

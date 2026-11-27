@@ -20,7 +20,7 @@ The status board: a React 19 and TypeScript app built by Vite into `dist/` (not 
 | Missions, job details, New Job, settings, and model scores | `src/Missions.tsx`, `src/JobDrawer.tsx`, `src/Dispatch.tsx`, `src/Settings.tsx`, `src/Scores.tsx` |
 | Shared components | `src/ui.tsx` |
 | Styles and tokens | `board.css`, `src/*.module.css` |
-| The Windows app's updater bridge | `src/desktop.ts` |
+| The Windows app's bridge (updater, welcome guide, Open at Login) | `src/desktop.ts` |
 | Browser notifications (off inside the Windows app) | `src/notify.ts` |
 
 ## Build and test

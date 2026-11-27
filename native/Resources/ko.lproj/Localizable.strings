@@ -651,3 +651,7 @@
 "Tokens per Turn" = "턴당 토큰";
 "By Difficulty" = "난이도별";
 "Unlimited" = "무제한";
+"Open at Login" = "로그인 시 열기";
+"Crew starts in the menu bar when you log in, so jobs stopped by a usage limit can resume with no session open." = "로그인하면 Crew가 메뉴 막대에서 시작돼요. 그래서 열린 세션이 없어도 사용량 한도로 멈춘 작업이 이어서 진행될 수 있어요.";
+"Crew is turned off in Login Items. Turn it on there to open at login." = "로그인 항목에서 Crew가 꺼져 있어요. 로그인 시 열려면 거기서 켜 주세요.";
+"Open Login Items" = "로그인 항목 열기";

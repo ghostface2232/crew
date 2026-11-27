@@ -865,6 +865,17 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         await store.dismissIssue("https://github.com/me/app/issues/7", project: "/work/a+b")
         #expect(store.issues["/work/a+b"]?.issues.isEmpty == true)
     }
+    /// The checklist is loaded by the store, not by the card, which is empty until the checklist arrives.
+    @Test func setupChecklistLoadsIntoTheStore() async throws {
+        let api = api { request in
+            #expect(request.url?.path == "/api/setup")
+            return (200, Data(#"{"items":[{"id":"codex-hooks","label":"Crew hooks in Codex","ok":false,"detail":"Select Trust Hooks.","trustable":true}],"registering":false}"#.utf8), 0)
+        }
+        let store = try store(api: api)
+        #expect(store.setup == nil)
+        await store.loadSetup()
+        #expect(store.setup?.items.first?.trustable == true)
+    }
     @Test func turnTokenBudgetIsAbsentFromAnOlderDaemonAndNullMeansByDifficulty() async throws {
         var snapshot = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(fixture())) as? [String: Any])
         #expect(snapshot["turnTokenBudget"] == nil)

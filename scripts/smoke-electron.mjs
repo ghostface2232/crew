@@ -150,10 +150,10 @@ try {
   await page.waitForTimeout(500);
   await application.evaluate(({ BrowserWindow }, bounds) => BrowserWindow.getAllWindows()[0].setBounds(bounds), placed);
 
-  // About Crew checks the feed and downloads the release; the sidebar then offers it above Settings.
+  // The Crew settings page checks the feed and downloads the release; the sidebar then offers it above Settings.
   const version = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name: 'About Crew', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name: 'Crew', exact: true }).first().click();
   await expect(page.getByText(`Crew ${version}`, { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Check for Updates' }).click();
   await expect(page.getByText('Version 9.9.9 is ready to install')).toBeVisible({ timeout: 15_000 });

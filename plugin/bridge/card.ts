@@ -234,6 +234,7 @@ button:hover{text-decoration:underline}
       foot.appendChild(open);
     }
     card.appendChild(foot);
+    requestAnimationFrame(size);
   }
   const usable = (result) => Boolean(result && !result.isError && result.structuredContent && Array.isArray(result.structuredContent.missions));
   const show = (result) => {
@@ -300,7 +301,11 @@ button:hover{text-decoration:underline}
     }
   });
   // The content's height, without the room the frame adds: reporting the frame's own height would keep it from ever shrinking.
-  new ResizeObserver(() => post({ method: 'ui/notifications/size-changed', params: { height: Math.ceil(card.getBoundingClientRect().height - (grow ? grow.getBoundingClientRect().height : 0)) } })).observe(card);
+  // Sent once there is content, and after every render, since content shorter than the frame leaves the card's box unchanged.
+  const size = () => {
+    if (grow) post({ method: 'ui/notifications/size-changed', params: { height: Math.ceil(card.getBoundingClientRect().height - grow.getBoundingClientRect().height) } });
+  };
+  new ResizeObserver(size).observe(card);
   request('ui/initialize', { protocolVersion: '2026-01-26', appInfo: { name: 'crew-progress', version: '1' }, appCapabilities: {} }).then((result) => {
     const can = (result && result.hostCapabilities) || {};
     live = Boolean(can.serverTools);

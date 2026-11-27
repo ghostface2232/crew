@@ -132,8 +132,13 @@ export interface UserPrompt {
  * Tracks Claude Code sessions from the hook payloads the plugin forwards.
  * Hooks are push-based and cover Desktop sessions, unlike polling `claude agents --json`.
  */
+/** Lead sessions whose hook state is kept; one forgotten here gets the status footer again on its next list. */
+const LEAD_HOOKS = 500;
+
 export class ClaudeSessions {
   readonly sessions = new Map<string, ClaudeSession>();
+  /** Retained after the board forgets an idle or closed session, which can resume with the same context. */
+  private leadHooks = new Map<string, { compactedAt?: number }>();
   /** Kept apart from the session so the prompts never reach the board's state. Memory only. */
   private prompts = new Map<string, UserPrompt[]>();
   /** Descriptions of Agent calls, claimed by the sub-agent each one starts. */
@@ -187,6 +192,17 @@ export class ClaudeSessions {
       return;
     }
     this.mainAt.set(id, now);
+    if (!p.agent_id && id.length <= 200) {
+      const compacted = p.hook_event_name === 'PreCompact' || (p.hook_event_name === 'SessionStart' && p.source === 'compact');
+      const kept = this.leadHooks.get(id);
+      // Most recent last, so the oldest go first past the cap.
+      this.leadHooks.delete(id);
+      this.leadHooks.set(id, compacted ? { compactedAt: now } : kept ?? {});
+      for (const old of this.leadHooks.keys()) {
+        if (this.leadHooks.size <= LEAD_HOOKS) break;
+        this.leadHooks.delete(old);
+      }
+    }
 
     switch (p.hook_event_name) {
       case 'SessionStart':
@@ -366,6 +382,10 @@ export class ClaudeSessions {
   /** The session's recent prompts, oldest first. */
   recentPrompts(id: string): UserPrompt[] {
     return [...(this.prompts.get(id) ?? [])];
+  }
+
+  leadHookState(id: string): { compactedAt?: number } | undefined {
+    return this.leadHooks.get(id);
   }
 
   private forget(id: string): void {

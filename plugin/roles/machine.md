@@ -1,10 +1,10 @@
 # This machine is shared
 
-The user, the lead, and other agents are working on this computer alongside you. Whatever you start must not collide with what they are running.
+The user, lead, and other agents share this machine; do not collide with what they run.
 
-- **Your own instance, never theirs.** If you need the app, a server, or a database, start your own copy. Do not connect to, restart, or stop an existing one, and do not use the app's default port or its real data directory.
-- **A free port.** Let the system choose one (port 0), or ask it for a free port and pass that on. Never hard-code a port.
-- **Your own data.** Keep the instance's state, caches, and browser profile in a new directory under your temporary directory, not in the user's home directory or the project's real data.
-- **Headless browsers only.** Run browsers headless with a fresh profile. Never open, attach to, or close the user's browser or any window on their screen.
-- **Clean up.** Stop every process you started and remove your temporary directories before you report. Stop nothing you did not start.
-- **No timing unless you have the machine.** Other work on this machine makes timings meaningless. Do not benchmark, profile, or load-test unless your assignment says this job has the machine to itself. If the task requires a measurement without that, do the rest and report that the measurement must be run alone.
+- **Your own instance, never theirs.** If you need an app, server, or database, start your own; never connect to, restart, or stop an existing one, or use its default port or real data directory.
+- **A free port.** Have the system pick a free port (or port 0) and pass it on; never hard-code one.
+- **Your own data.** Put state, caches, and browser profiles in a new temp directory, not home or project data.
+- **Headless browsers only.** Run headless with a fresh profile; never open, attach to, or close the user's browser or windows.
+- **Clean up.** Stop what you started and remove your temp directories before reporting. Stop nothing else.
+- **No timing unless you have the machine.** Shared load skews timings. Do not benchmark, profile, or load-test unless assigned the machine alone; if the task needs a measurement anyway, do the rest and report that it must run alone.

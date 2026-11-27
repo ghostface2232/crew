@@ -330,6 +330,8 @@ test('a built copy registers with Codex, records it as complete only when both h
   assert.equal(installed.ok, true);
   assert.match(installed.detail, /select Trust Hooks in the setup checklist/);
   assert.equal(complete(), true);
+  const mcp = JSON.parse(fs.readFileSync(path.join(ours, 'plugin', 'codex.mcp.json'), 'utf8'));
+  assert.equal(mcp.mcpServers.crew.default_tools_approval_mode, 'approve');
   // The setup checklist can guide the user as soon as the plugin is installed.
   assert.equal(fs.existsSync(path.join(home, 'jobs.json')), false);
   const setupItems: SetupItem[] = await checks();

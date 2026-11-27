@@ -8,6 +8,8 @@ Crew brings worker approvals and user questions to the user. A worker can also a
 
 Codex approval requests go first to its automatic reviewer (`codex.approvalsReviewer`, default `auto_review`), and a writable Claude worker's to Claude Code's automatic mode ([Claude worker approvals](#claude-worker-approvals)). Anything it refuses twice, along with every user-bound request or question reaching Crew, goes to the user. The lead's only decision on an approval is to decline a clearly out-of-scope request with a reason (`reply` with `decision: "decline"` and `message`), which grants nothing and spares the user a prompt.
 
+Crew's Codex plugin sets `default_tools_approval_mode` to `approve` for the lead's `crew` server, so its tool calls skip Codex's approval review just as calls to the worker server do (verified with Codex 0.172.0, 2026-11-27). That includes `reply`, which relays a decision on a worker's request. Crew cannot check that such a decision came from the user, for either lead, so an approval the lead passes on is recorded in the job's activity as passed on by the lead.
+
 - While the lead blocks inside a job call (`wait`, or `background: false`), the MCP server sends `elicitation/create` so the lead's app shows its native input prompt and forwards the user's answer straight to the worker.
 - For background jobs, the wake hook wakes the lead and the prompt appears when it calls `wait`. Answering first on the board or in the desktop app, or returning early from the call, withdraws the in-app prompt immediately.
 - Multiple waiting jobs prompt sequentially and skip any settled on the board meanwhile. If the prompt is dismissed, unsupported, or fails to show, `wait` returns distinct guidance so the lead asks in chat.

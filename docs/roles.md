@@ -61,7 +61,7 @@ The cross-reviewer (`reviewer.md`) and the lead's `self-reviewer` subagent read 
 
 ## Shared instructions
 
-Instructions written once reach every agent (requirement R9):
+Shared instructions are written once and reach every agent that builds, runs, or checks (requirement R9):
 
 | File | Applies to |
 | --- | --- |
@@ -71,7 +71,7 @@ Instructions written once reach every agent (requirement R9):
 The project file is part of the repository and is trusted like its `AGENTS.md` or `CLAUDE.md`, even if someone other than the user wrote it. It can steer an agent within its role and is read last, so it can override the global file.
 
 - **Workers:** Both files are read at job start from the repository's main working tree (including when launched from a linked worktree or subdirectory) and appended after the role text with a preface stating they do not widen the role. Outside a repository, Crew reads from the project directory. `status` lists which files a job received.
-- **Claude:** A `SessionStart` and `SubagentStart` command hook (`bridge/context.ts`) prints them as `additionalContext`, including after compaction, noting that workers already receive them.
+- **Claude:** A `SessionStart` and `SubagentStart` command hook (`bridge/context.ts`) prints them as `additionalContext`, including after compaction, noting that workers already receive them. Subagents that only search and read (`Explore`, `Plan`, `claude-code-guide`, `web-fetch`) do not receive them, because they do not build, run, or check anything.
 - Nothing is written to any service's own instruction files (`AGENTS.md`, `CLAUDE.md`, rules folders).
 - Missing or empty files contribute no instructions. An unreadable file fails the job or surfaces an error in the Claude hook.
 - Crew reads the project file only as a regular file. If it or its `.crew` folder is a symbolic link, the read fails the same way, because a link could point to a file the worker's sandbox denies (such as the daemon's token). The user's own `~/.crew/instructions.md` may be a symbolic link.

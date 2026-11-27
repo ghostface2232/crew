@@ -1036,7 +1036,14 @@ export class Jobs {
       if (!input.decision && !input.message?.trim()) throw new Error(`Job ${id} asked a question (${job.waiting.reason}). Pass a message with the answer, or a decision.`);
       if (input.decision === 'allow_for_job' && !job.waiting.grant) throw new Error(`Job ${id}'s request cannot be allowed for the whole job. Pass decision "approve" or "deny" for the user, or use "decline" with a message if the request is outside the task or role.`);
       const opts = input.decision === 'allow_for_job' ? { forJob: true } : decline ? { by: 'lead' as const } : undefined;
+      const request = job.waiting;
       await this.sendWith(job, attachments, (note) => adapter.answer(ctl, !decline && input.decision !== 'deny', note ? `${input.message ?? ''}${note}` : input.message, opts));
+      // Only the lead's own calls carry lead_session. Crew cannot tell whether the user really made this decision, so the
+      // job's activity shows that the lead passed it on, for the user to see.
+      if (input.lead_session && request.type === 'approval' && (input.decision === 'approve' || input.decision === 'allow_for_job')) {
+        // Recorded only: the turn may have ended meanwhile, and its end has already been handled.
+        job.seq = this.record(job.agent, job.sessionId, 'progress', `The lead passed on an approval${input.decision === 'allow_for_job' ? ' for the whole job' : ''}: ${request.reason}`, job.id, job.root ?? job.project).seq;
+      }
       return job;
     }
     if (input.decision !== undefined) throw new Error(`Job ${id} is not waiting for a decision.`);

@@ -46,7 +46,7 @@ const isJob = (subject: Subject): subject is Job => 'seq' in subject;
 
 /** `jobId` names the subject, a job or a watch: the field keeps its name so stored receipts stay readable. */
 export interface Item { jobId: string; newsSeq: number }
-interface Receipt { session: string; items: Item[]; text: string; acknowledged?: boolean; at?: number }
+interface Receipt { session: string; items: Item[]; text: string; acknowledged?: boolean; at?: number; source?: 'tool' | 'stop'; shown?: boolean }
 interface Lease { generation: string; expiresAt: number }
 interface Watch extends Lease { deadline: number; beat: number }
 /**
@@ -304,7 +304,7 @@ export class Delivery {
     this.changed();
   }
 
-  offer(session: string, options: { automatic?: boolean; watcher?: string; ids?: string[]; bytes?: number } = {}, now = Date.now()): Offer | null {
+  offer(session: string, options: { automatic?: boolean; watcher?: string; ids?: string[]; bytes?: number; source?: Receipt['source'] } = {}, now = Date.now()): Offer | null {
     leadSession(session);
     if (options.watcher !== undefined) this.watcher(session, options.watcher, now);
     if (options.ids !== undefined && (!Array.isArray(options.ids) || options.ids.some((id) => typeof id !== 'string'))) throw new Error('job_ids must be strings.');
@@ -314,7 +314,7 @@ export class Delivery {
     if (options.automatic && active?.expiresAt > now) return null;
     const candidates = this.pending(session, options.ids).filter(({ news }) => !options.automatic || news.offers < 2);
     const receipt = randomUUID();
-    const suffix = `\nReceipt: ${receipt}\nPass ack: "${receipt}" with your next Crew call (or an array for several receipts); with nothing else to do, call status with it now. Reading this is not an ACK.`;
+    const suffix = `\nReceipt: ${receipt} (pass as ack on your next Crew call, or call status with it)`;
     let text = 'Crew news (snapshots; use status with job_id to read the current job):';
     const selected: typeof candidates = [];
     for (const item of candidates) {
@@ -333,7 +333,7 @@ export class Delivery {
     const counts = selected.map(({ news }) => news.offers);
     const before = { ...this.state.receipts };
     this.prune(now);
-    this.state.receipts[receipt] = { session, items, text, at: now };
+    this.state.receipts[receipt] = { session, items, text, at: now, ...(options.source && { source: options.source }) };
     this.state.offering[session] = { generation: receipt, expiresAt: now + OFFER_MS };
     if (options.automatic) for (const { news } of selected) news.offers++;
     try {
@@ -348,6 +348,52 @@ export class Delivery {
     }
     this.changed();
     return { receipt, text, items };
+  }
+
+  /** PostToolUse confirms the host received the digest in the main loop's Crew tool result. */
+  toolResponse(session: string, response: unknown): void {
+    const text = typeof response === 'string' ? response : JSON.stringify(response ?? '');
+    for (const [, id] of text.matchAll(/Receipt: ([\da-f-]{36})/g)) {
+      const receipt = this.state.receipts[id];
+      if (receipt && (text.includes(receipt.text) || text.includes(JSON.stringify(receipt.text).slice(1, -1)))) this.shown(session, id, 'tool');
+    }
+  }
+
+  /** Record successful output separately from issuing a receipt, which can happen before a hook or tool is cut off. */
+  shown(session: string, id: string, source: NonNullable<Receipt['source']>): void {
+    const receipt = this.state.receipts[id];
+    if (!receipt || receipt.session !== session || receipt.source !== source || receipt.acknowledged || receipt.shown) return;
+    receipt.shown = true;
+    try {
+      this.save();
+    } catch (error) {
+      delete receipt.shown;
+      throw error;
+    }
+  }
+
+  /**
+   * A turn boundary acknowledges what the lead was certainly shown before it. A tool result stays in the conversation
+   * whatever happens next. Stop hook output reached the model only if the turn went on from it, which the next Stop
+   * proves with stop_hook_active; an interrupted turn, a hook the host timed out, or a Claude Code too old to read
+   * the output never gets that far, so the news stays for an explicit ack.
+   */
+  boundary(session: string, continued = false): boolean {
+    const ids = Object.entries(this.state.receipts)
+      .filter(([, r]) => r.session === session && r.shown && !r.acknowledged && (r.source === 'tool' || continued)).map(([id]) => id);
+    return ids.length > 0 && this.applyAck(session, ids, false).length < ids.length;
+  }
+
+  /** Compaction may leave shown news out of the summary: it goes back to waiting for an explicit ack. */
+  compacted(session: string): void {
+    let changed = false;
+    for (const receipt of Object.values(this.state.receipts)) {
+      if (receipt.session === session && receipt.shown && !receipt.acknowledged) {
+        delete receipt.shown;
+        changed = true;
+      }
+    }
+    if (changed) this.save();
   }
 
   /** Keeps the receipt store bounded: acknowledged receipts go first, then the oldest, past KEEP_RECEIPTS. */
@@ -367,6 +413,10 @@ export class Delivery {
     leadSession(session);
     const ids = typeof value === 'string' ? [value] : value;
     if (!Array.isArray(ids) || !ids.length || ids.length > 100 || ids.some((id) => typeof id !== 'string')) throw new Error('ack must be a receipt id or an array of receipt ids.');
+    return this.applyAck(session, [...new Set<string>(ids)], true);
+  }
+
+  private applyAck(session: string, ids: string[], explicit: boolean): string[] {
     // One pruned or mistyped id must not block the valid ones beside it; the unknown ones are reported back.
     const jobs = new Map(this.subjects().map((job) => [job.id, job]));
     // A receipt applies whole or not at all. Previously ACKed receipts survive history pruning.
@@ -374,10 +424,17 @@ export class Delivery {
       const job = jobs.get(item.jobId);
       return job?.lead === session && Number.isSafeInteger(item.newsSeq) && item.newsSeq >= 1 && item.newsSeq <= (job.newsSeq ?? 0) && Boolean(job.news?.some((news) => news.seq === item.newsSeq));
     }));
-    const unique = [...new Set<string>(ids)];
-    const ignored = unique.filter((id) => !fits(this.state.receipts[id]));
-    const receipts = unique.filter((id) => !ignored.includes(id)).map((id) => this.state.receipts[id]);
-    if (!receipts.length) throw new Error('Unknown receipt, another session\'s, or for news this session no longer owns.');
+    const ignored: string[] = [];
+    const receipts: Receipt[] = [];
+    for (const id of ids) {
+      const receipt = this.state.receipts[id];
+      if (fits(receipt)) receipts.push(receipt);
+      else ignored.push(id);
+    }
+    if (!receipts.length) {
+      if (explicit) throw new Error('Unknown receipt, another session\'s, or for news this session no longer owns.');
+      return ignored;
+    }
     const changed = new Map<Subject, { ackedSeq?: number; delivered?: number; acked: boolean[] }>();
     for (const receipt of receipts.filter((r) => !r.acknowledged)) {
       for (const item of receipt.items) {

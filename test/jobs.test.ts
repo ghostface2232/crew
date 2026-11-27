@@ -88,7 +88,7 @@ test('a turn budget interrupts once, reports a resumable failure, and starts fre
   const repo = tempRepo();
   let worker!: JobCtl;
   const h = harness((ctl) => { worker = ctl; });
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true }); });
   const job = await h.jobs.create({ kind: 'delegate', cwd: repo, task: 'edit', difficulty: 'routine' });
   h.adapter.cancel = async () => { h.calls.push('cancel'); worker.cancelled(); };
   const total = 60_000_002;
@@ -116,7 +116,7 @@ test("the user's turn token budget replaces the difficulty's cap within one swee
   let worker!: JobCtl;
   let budget: Config['turnTokenBudget'] = 5_000_000;
   const h = harness((ctl) => { worker = ctl; }, () => ({ ...config, turnTokenBudget: budget }));
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); });
   h.adapter.cancel = async () => { h.calls.push('cancel'); worker.cancelled(); };
   const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'edit', difficulty: 'hard' });
   budget = 'unlimited';
@@ -136,7 +136,7 @@ for (const raised of [5_000_000, 'unlimited'] as const) {
     let worker!: JobCtl;
     let budget: Config['turnTokenBudget'] = 1_000_000;
     const h = harness((ctl) => { worker = ctl; }, () => ({ ...config, turnTokenBudget: budget }));
-    t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+    t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); });
     const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'edit' });
     h.adapter.cancel = async () => { h.calls.push('cancel'); throw new Error('interrupt unconfirmed'); };
     worker.tokens(2_000_000, { input: 2_000_000, cachedInput: 0, output: 0 });
@@ -151,7 +151,7 @@ for (const raised of [5_000_000, 'unlimited'] as const) {
 
 test('a long gap between sweeps pauses the wall-clock budget', async (t) => {
   const h = harness(() => {});
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); });
   const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'edit' });
   let now = job.createdAt;
   t.mock.method(Date, 'now', () => now);
@@ -172,7 +172,7 @@ test('a long gap between sweeps pauses the wall-clock budget', async (t) => {
 test('the turn budget pauses for user decisions and resumes with the remaining running time', async (t) => {
   let worker!: JobCtl;
   const h = harness((ctl) => { worker = ctl; });
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); });
   const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'edit' });
   let now = job.createdAt;
   t.mock.method(Date, 'now', () => now);
@@ -222,7 +222,7 @@ test('the turn budget pauses for user decisions and resumes with the remaining r
 test('a worker finishing after its last token update keeps its report and result', async (t) => {
   let worker!: JobCtl;
   const h = harness((ctl) => { worker = ctl; });
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); });
   const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'edit' });
   worker.touched(path.join(job.cwd, 'app.js'));
   worker.tokens(80_000_001, { input: 80_000_001, cachedInput: 0, output: 0 });
@@ -236,7 +236,7 @@ for (const waiting of [false, true]) {
   test(`manual cancel settles a pending budget stop while ${waiting ? 'waiting' : 'running'}`, async (t) => {
     let worker!: JobCtl;
     const h = harness((ctl) => { worker = ctl; });
-    t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+    t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); });
     const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'edit' });
     h.adapter.cancel = async () => { throw new Error('interrupt unconfirmed'); };
     worker.tokens(80_000_001, { input: 80_000_001, cachedInput: 0, output: 0 });
@@ -253,7 +253,7 @@ test('a budget stop starts removal of a review snapshot', async (t) => {
   const repo = tempRepo();
   let worker!: JobCtl;
   const h = harness((ctl) => { worker = ctl; });
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true }); });
   const job = await h.jobs.create({ kind: 'review', cwd: repo, runsApp: true, review: { target: { type: 'commit', sha: 'HEAD' }, mode: 'adversarial' } });
   const snapshot = job.worktree!.path;
   const released: string[] = [];
@@ -268,7 +268,7 @@ test('a budget stop starts removal of a review snapshot', async (t) => {
 test('a failed include hint leaves the worker and its worktree available', async (t) => {
   const repo = tempRepo();
   const h = harness(() => {});
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true }); });
   fs.writeFileSync(path.join(repo, '.gitignore'), '.env\n');
   fs.writeFileSync(path.join(repo, '.env'), '');
   fs.writeFileSync(path.join(h.home, 'worktree-preflight'), 'not a directory');
@@ -280,7 +280,7 @@ test('a failed include hint leaves the worker and its worktree available', async
 test('concurrent base checks share one run and a later run reads current includes', async (t) => {
   const repo = tempRepo();
   const h = harness(() => {});
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true }); });
   fs.writeFileSync(path.join(repo, '.gitignore'), '.env\n');
   fs.writeFileSync(path.join(repo, '.worktreeinclude'), '.env\n');
   const env = path.join(repo, '.env');
@@ -310,7 +310,7 @@ test('bridge compares checks on detached bases and sends at most one automatic f
     if (refuse) ctl.refused('edit elsewhere', 'outside the workspace');
     ctl.done('first report');
   });
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true }); });
   const bases: string[] = [];
   (h.jobs as any).runJobCheck = async (command: string, cwd: string, network: boolean, codex: string) => {
     const broken = fs.readFileSync(path.join(cwd, 'app.js'), 'utf8') === 'broken\n';
@@ -370,7 +370,7 @@ test('a fresh usage window cannot resume a job stopped by a spend cap', async (t
   const repo = tempRepo();
   const h = harness((ctl) => ctl.fail('project spend cap', { limit: true, fixedLimit: true }),
     () => ({ ...config, projects: { [canonicalPath(repo)]: { autoResume: true } } }));
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true }); });
   const job = await h.jobs.create({ kind: 'delegate', cwd: repo, mission: 'm', task: 'edit' });
   await h.jobs.resumeLimited({ generatedAt: Date.now(), source: 'agentgauge', providers: [
     { agent: job.agent, reason: '', capturedAt: job.endedAt! + 1, status: 'ok', plan: null, windows: [] },
@@ -384,7 +384,7 @@ test('a fresh usage reading resumes only a limited job in an opted-in active mis
   const repo = tempRepo();
   let enabled = false;
   const h = harness((ctl) => ctl.fail('out of usage', { limit: true }), () => ({ ...config, projects: { [canonicalPath(repo)]: { autoResume: enabled } } }));
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true }); });
   const project = path.join(repo, 'subfolder');
   fs.mkdirSync(project);
   const job = await h.jobs.create({ kind: 'delegate', cwd: project, project, mission: 'm', task: 'edit' });
@@ -436,7 +436,7 @@ test('three automatic usage resumes leave further retries to the lead', async (t
   const repo = tempRepo();
   const limited = (ctl: JobCtl) => ctl.fail('still out of model usage', { limit: true });
   const h = harness(limited, () => ({ ...config, projects: { [canonicalPath(repo)]: { autoResume: true } } }));
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true }); });
   h.adapter.reply = async (ctl) => limited(ctl);
   const job = await h.jobs.create({ kind: 'delegate', cwd: repo, mission: 'm', task: 'edit' });
   for (let i = 0; i < 5; i++) {
@@ -822,6 +822,16 @@ test('a waiting job resumes on a decision and reports the limit kind on failure'
   await settled(waiting.jobs, job);
   assert.equal(job.state, 'done');
   assert.deepEqual(waiting.calls, ['answer:true']);
+  // Answered on the board, nothing says the lead passed it on.
+  assert.ok(!waiting.jobs.eventsFor(job.id, 0).some((e) => e.detail.startsWith('The lead passed on')));
+
+  // Crew cannot tell whether an approval the lead passes on came from the user, so the job's activity says it did.
+  const relayed = harness((ctl) => ctl.waiting('approval', 'run: npm install'));
+  const viaLead = await relayed.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } });
+  await relayed.jobs.wait(viaLead.id, 0, 2000);
+  await relayed.jobs.reply(viaLead.id, { decision: 'approve', request_id: viaLead.waiting!.id, lead_session: 'lead' });
+  await settled(relayed.jobs, viaLead);
+  assert.ok(relayed.jobs.eventsFor(viaLead.id, 0).some((e) => e.kind === 'progress' && e.detail === 'The lead passed on an approval: run: npm install'));
 
   const plain = harness((ctl) => ctl.waiting('approval', 'run: npm install'));
   const unscoped = await plain.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } });
@@ -1288,6 +1298,9 @@ test('the session hook prints context for the event it was called for, from the 
   assert.equal(session.hookEventName, 'SessionStart');
   assert.ok(session.additionalContext.includes('Use tabs.'));
   assert.equal(hook(JSON.stringify({ hook_event_name: 'SubagentStart', cwd: path.join(repo, '.crew') })).hookEventName, 'SubagentStart');
+  for (const agent_type of ['general-purpose', 'crew:self-reviewer']) assert.ok(hook(JSON.stringify({ hook_event_name: 'SubagentStart', agent_type, cwd: repo })).additionalContext.includes('Use tabs.'));
+  // A subagent that only reads and reports goes without them.
+  for (const agent_type of ['Explore', 'Plan']) assert.equal(hook(JSON.stringify({ hook_event_name: 'SubagentStart', agent_type, cwd: repo })), null);
 
   // Outside a repository, the session's project directory is used rather than wherever the cwd has moved to.
   const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-plain-'));
@@ -1398,7 +1411,7 @@ test('every worker that runs commands is given the shared-machine rules, and a r
     assert.ok(text.indexOf('# Role:') === 0 && text.indexOf('# This machine is shared') > 0, job.kind);
     // A reviewer that only reads starts nothing, so it is told to run checks that end by themselves instead.
     assert.equal(text.includes('Run only commands that end by themselves'), job.kind === 'review', job.kind);
-    assert.equal(text.includes('Let the system choose one'), job.kind === 'delegate', job.kind);
+    assert.equal(text.includes('Have the system pick a free port'), job.kind === 'delegate', job.kind);
     assert.ok(!job.prompt.includes('This machine is shared'));
   }
 
@@ -3061,7 +3074,7 @@ test('a stall wakes the lead only when the agent cannot vouch for the turn', asy
   const verdicts: (Probe | Error | null)[] = [{ verdict: 'working', detail: 'still going' }, { verdict: 'unknown', detail: 'no answer' }, new Error('rpc closed'), { verdict: 'ended', detail: 'turn lost' }, null];
   for (const verdict of verdicts) {
     const h = harness(() => {});
-    t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+    t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); });
     if (verdict) h.adapter.probe = async () => { if (verdict instanceof Error) throw verdict; return verdict; };
     const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test', lead: 'lead' } as JobSpec);
     job.activeAt = 0;
@@ -3092,7 +3105,7 @@ test('a stall wakes the lead only when the agent cannot vouch for the turn', asy
 
 test('activity during a status check settles the stall without a wake', async (t) => {
   const h = harness(() => {});
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); });
   const answer = Promise.withResolvers<Probe>();
   let ctl: JobCtl | undefined;
   h.adapter.start = async (c) => { c.session('s'); ctl = c; };
@@ -3109,7 +3122,7 @@ test('activity during a status check settles the stall without a wake', async (t
 
 test('a status check from an earlier stall cannot add news to a later one', async (t) => {
   const h = harness(() => {});
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); });
   const answers: PromiseWithResolvers<Probe>[] = [];
   let ctl: JobCtl | undefined;
   h.adapter.start = async (c) => { c.session('s'); ctl = c; };

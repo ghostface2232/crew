@@ -617,6 +617,9 @@ interface CallContext {
   /** Evidence images to show with the text result. */
   images: Evidence[];
   jobs: JobView[];
+  session?: string;
+  /** The status footer this response shows in full. */
+  footer?: { text: string; at: number; session?: string; compactedAt?: number };
   pullIds?: string[];
   /** False for a listing: it shows jobs without acting on them, so it offers their news but takes none over. */
   adopt?: boolean;
@@ -718,6 +721,7 @@ function forgetMissions(): void {
   closedElsewhere = null;
   fresh = true;
   openedHere.clear();
+  lastFooter = { text: '', at: 0 };
 }
 
 /** The global preset as the config on disk has it; null when it cannot be read, as jobs would then fail anyway. */
@@ -746,8 +750,8 @@ async function progressCard(): Promise<CardView> {
   return cardView(missions, now.jobs.filter((job) => job.project === PROJECT));
 }
 
-function sessionPulls(pulls: PullWatch[]): PullWatch[] {
-  return SESSION ? pulls.filter((pull) => pull.lead === SESSION) : [];
+function sessionPulls(pulls: PullWatch[], session = SESSION): PullWatch[] {
+  return session ? pulls.filter((pull) => pull.lead === session) : [];
 }
 
 const listed = (missions: Mission[]) => missions.map((m) => `${m.id} "${m.title}" (${m.stage})`).join(', ');
@@ -939,10 +943,31 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
 
 function describeJob(job: JobView, ctx: CallContext): string {
   ctx.jobs.push(job);
-  // First, so it survives when the response is cut to its bound; only a report too long for one page needs it.
-  const paged = job.report && jsonBytes(job.report) > REPORT_PAGE_BYTES;
-  return `${paged ? `Read the full report with status: job_id "${job.id}", report_offset: 0.\n` : ''}${describe(job)}`;
+  return describePaged(job);
 }
+
+/** A report longer than one page comes as its first page and where it goes on, so the lead never reads a part twice. */
+/** `room`: the bytes of the response left for this job's text. */
+function describePaged(job: JobView, waitingHint?: string, room = LEAD_TEXT_BYTES): string {
+  if (!job.report || job.state === 'running' || jsonBytes(job.report) <= REPORT_PAGE_BYTES) return describe(job, waitingHint);
+  // The turn pins the next page to this report, should a follow-up turn end before it is read.
+  const turn = job.exchange?.findLast((entry) => entry.from === 'worker')?.turn ?? job.turns;
+  const around = (page: string) => {
+    const next = `Next: status job_id "${job.id}", turn: ${turn}, report_offset: ${page.length}`;
+    // First, so it survives when the response is cut to its bound.
+    return `The report is longer than one page; its first page is below. ${next}.\n${describe(job, waitingHint, `${page}\n${next}`)}`;
+  };
+  // The response is cut from its end to LEAD_TEXT_BYTES, so the page must fit in the room beside the rest of the job's text, or
+  // the offset would skip what was cut. The slack covers the offset's digits and a line a caller puts first.
+  const page = textPage(job.report, 0, Math.min(REPORT_PAGE_BYTES, room - PAGE_SLACK - jsonBytes(around(''))));
+  return around(page);
+}
+const PAGE_SLACK = 1024;
+const SEPARATOR = '\n\n────────\n\n';
+
+/** The roles, usage and board lines this session's status list last showed in full, and when. */
+let lastFooter: { text: string; at: number; session?: string; compactedAt?: number } = { text: '', at: 0 };
+const FOOTER_MS = 30 * 60_000;
 
 /** The follow-up mission being opened, which a job started meanwhile waits for. */
 let opening: Promise<string> | null = null;
@@ -994,15 +1019,15 @@ async function followOne(id: string, ctx: CallContext): Promise<string> {
 }
 
 /** `describe`, plus what the lead should do about a waiting job that could not be settled in the app. */
-function render(job: JobView): string {
-  if (job.state !== 'waiting') return describe(job);
+function render(job: JobView, room?: number): string {
+  if (job.state !== 'waiting') return describePaged(job, undefined, room);
   const key = job.waiting!.id;
   const error = failed.get(key);
   let hint: string | undefined;
   if (error !== undefined) hint = `The app could not show the prompt to the user (${error}). Ask them in the conversation, then pass their decision on with reply.`;
   else if (dismissed.has(key)) hint = 'The user dismissed the prompt in the app. Ask what they want, then pass it on with reply.';
   else if (!canElicit) hint = 'This client cannot show the prompt itself. Ask the user in the conversation, then pass their decision on with reply.';
-  return describe(job, hint);
+  return describePaged(job, hint, room);
 }
 
 /** What the lead does with a role it holds itself, by the kind of work. */
@@ -1157,7 +1182,8 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
         }
         return describeJob(job, ctx);
       }
-      const state = await api('GET', '/api/state');
+      const session = ctx.session;
+      const state = await api('GET', session ? `/api/state?lead_session=${encodeURIComponent(session)}` : '/api/state');
       const jobs: JobView[] = state.jobs.filter((j: JobView) => j.project === PROJECT);
       const active = jobs.filter((j) => !j.endedAt);
       const recent = jobs.filter((j) => j.endedAt).slice(0, 8);
@@ -1169,20 +1195,31 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const elsewhere = state.jobs.filter((j: JobView) => j.project !== PROJECT && !j.endedAt).length;
       if (elsewhere) lines.push(`(${elsewhere} active job(s) belong to other projects; they are on the board.)`);
       if (recent.length) lines.push('', 'Recent:', ...recent.map(summarize));
-      const pulls = sessionPulls(state.pulls ?? []);
+      const pulls = session ? sessionPulls(state.pulls ?? [], session) : [];
       ctx.pullIds = pulls.map((pull) => pull.id);
       if (pulls.length) {
         lines.push('', 'Watched pull requests:', ...pulls.slice(0, 8).map((pull) => `[${pull.id}] ${pull.repo}#${pull.number} · ${pull.state}`));
         if (pulls.length > 8) lines.push(`(${pulls.length - 8} more.)`);
       }
+      const footer: string[] = [];
       // A daemon that predates the role table reports none.
-      if (state.roles) lines.push('', `Roles: ${(Object.keys(state.roles) as Role[]).map((role) => `${role} → ${holder(role, state.roles)}`).join(', ')}`);
+      if (state.roles) footer.push('', `Roles: ${(Object.keys(state.roles) as Role[]).map((role) => `${role} → ${holder(role, state.roles)}`).join(', ')}`);
       // A daemon that predates AgentGauge support reports no usage; Codex's own figures are then all there is.
       const measured = state.usage ? describeUsage(state.usage as Usage) : [];
-      if (measured.length) lines.push('', 'Usage (AgentGauge):', ...measured);
+      if (measured.length) footer.push('', 'Usage (AgentGauge):', ...measured);
       const windows = measured.length ? [] : (state.limits.codex?.windows ?? []);
-      if (windows.length) lines.push('', `Codex usage: ${windows.map((w: any) => `${Math.round(w.usedPercent)}% of the ${w.minutes >= 1440 ? `${Math.round(w.minutes / 1440)}-day` : `${Math.round(w.minutes / 60)}-hour`} window`).join(', ')}`);
-      lines.push('', `Board: ${baseUrl()}`);
+      if (windows.length) footer.push('', `Codex usage: ${windows.map((w: any) => `${Math.round(w.usedPercent)}% of the ${w.minutes >= 1440 ? `${Math.round(w.minutes / 1440)}-day` : `${Math.round(w.minutes / 60)}-hour`} window`).join(', ')}`);
+      footer.push('', `Board: ${baseUrl()}`);
+      // A compaction can drop the last full footer. Use the age fallback only when the daemon has heard no hooks.
+      const shown = footer.join('\n');
+      const hooked = state.leadHooks;
+      const stale = hooked ? (hooked.compactedAt ?? 0) > (lastFooter.compactedAt ?? 0) : Date.now() - lastFooter.at >= FOOTER_MS;
+      if (session === lastFooter.session && shown === lastFooter.text && !stale) lines.push('', 'Roles, usage and board: unchanged since the last list.');
+      else {
+        lines.push(shown);
+        // Kept only once the response is known to carry it whole (handle).
+        ctx.footer = { text: shown, at: Date.now(), session, compactedAt: hooked?.compactedAt };
+      }
       return lines.join('\n');
     }
     case 'wait': {
@@ -1195,9 +1232,15 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const ready = jobs.filter(needsLead);
       const running = jobs.filter((j) => !needsLead(j));
       for (const job of ready) showEvidence(ctx, job);
-      const parts = ready.map(render);
+      // The jobs share one response, cut from its end: each paged report gets only the room the ones before it left.
+      let room = LEAD_TEXT_BYTES;
+      const parts = ready.map((job) => {
+        const text = render(job, room);
+        room -= jsonBytes(`${text}${SEPARATOR}`);
+        return text;
+      });
       if (running.length) parts.push(`${ready.length ? 'Still running' : 'Timed out waiting; still running'}:\n${running.map(summarize).join('\n')}`);
-      return parts.join('\n\n────────\n\n');
+      return parts.join(SEPARATOR);
     }
     case 'answer':
       return describeJob(await api('POST', `/api/jobs/${args.job_id}/questions/${args.question_id}`, { answer: args.answer, attachments: args.attachments }), ctx);
@@ -1302,11 +1345,13 @@ async function handle(msg: any): Promise<void> {
         checkArguments(TOOLS, params.name, args, argumentHint);
         await ensureDaemon();
         if (host === 'codex') await codexSession(params?._meta);
+        const session = host === 'codex' ? params._meta.sessionId : SESSION;
+        ctx.session = session;
         // Echoes refer to earlier responses. Process them before creating any new offer. A bad echo must not block
         // the call it rode on (a delegate, a reply): it is reported and the receipts stay unacknowledged.
         let ackNote = '';
         if (args.ack !== undefined) {
-          await api('POST', '/api/lead/ack', { session: SESSION, ack: args.ack }).then(({ ignored }) => {
+          await api('POST', '/api/lead/ack', { session, ack: args.ack }).then(({ ignored }) => {
             if (ignored?.length) ackNote = clipped(`\n\nack not applied for ${ignored.join(', ')}: unknown, or for news this session no longer owns.`, 600);
           }, (err) => {
             ackNote = clipped(`\n\nack not applied: ${String((err as Error).message ?? err).split('\n')[0].replace(/\.$/, '')}. The news stays unacknowledged; read it with status.`, 600);
@@ -1316,20 +1361,21 @@ async function handle(msg: any): Promise<void> {
         let isError: true | undefined;
         try {
           text = clipped(await callTool(params.name, args, ctx), LEAD_TEXT_BYTES) + ackNote;
+          if (ctx.footer && text.includes(ctx.footer.text)) lastFooter = ctx.footer;
         } catch (err) {
           if (!ctx.pullIds?.length) throw err;
           isError = true;
           text = clipped(String((err as Error).message ?? err), 7000);
         }
-        if (SESSION && (ctx.jobs.length || ctx.pullIds?.length || ctx.allNews)) {
+        if (session && (ctx.jobs.length || ctx.pullIds?.length || ctx.allNews)) {
           // The call has already taken effect; failing it now over a missing offer would invite a duplicate retry.
           // The news stays in the ledger for the watcher, the Stop hook, or the next call.
           const ids = [...new Set(ctx.jobs.map((job) => job.id))];
           // Take over the jobs this response actually shows, as the wake hook would after this call, so it can carry their
           // news. A job cut off by the bound stays with its owner.
           const shown = ctx.adopt === false ? [] : ids.filter((jobId) => text.includes(`[${jobId}]`)).slice(0, 50);
-          const offer = await (shown.length ? api('POST', '/api/lead/adopt', { session: SESSION, job_ids: shown }) : Promise.resolve())
-            .then(() => api('POST', '/api/lead/offer', { session: SESSION, job_ids: ctx.allNews ? undefined : [...ids, ...(ctx.pullIds ?? [])], bytes: 4000 }))
+          const offer = await (shown.length ? api('POST', '/api/lead/adopt', { session, job_ids: shown }) : Promise.resolve())
+            .then(() => api('POST', '/api/lead/offer', { session, job_ids: ctx.allNews ? undefined : [...ids, ...(ctx.pullIds ?? [])], bytes: 4000, tool_response: true }))
             .then(({ offer }) => offer, () => null);
           if (offer) text += `\n\n${offer.text}`;
         }

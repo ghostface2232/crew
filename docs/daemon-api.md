@@ -22,6 +22,7 @@ The Crew daemon provides HTTP routes and server-sent events for the React board,
 | `language` | `"en" \| "ko" \| null` | Interface language of the board and the apps; `null` follows the system ([localization.md](localization.md#how-the-language-is-chosen)) |
 | `modelScores` | `ModelScore[]` (`notes.ts`) | Per-model scores and item breakdowns |
 | `pulls` | `PullWatch[]` (`pulls.ts`) | Watched pull requests linked to missions (without internal delivery fields) |
+| `leadHooks` | `{ compactedAt?: number } \| undefined` | Only with `?lead_session=<id>`: whether the daemon has heard that lead session's hooks, and when it last compacted (the lead's status footer uses it) |
 
 A stream whose reader has stopped (a frozen tab, a suspended app) is dropped once more than 8 MiB has waited for it at two 25-second pings running, so its frames do not pile up in the daemon; the client reconnects and gets the whole state again. One ping is not enough to tell: the first frame is the whole state, which can pass that size while a reader that keeps up is still receiving it.
 

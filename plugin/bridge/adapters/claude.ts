@@ -124,12 +124,14 @@ export function workerEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.Proce
 
 function launchClaude(config: Config, ctl: JobCtl, resume?: string) {
   const env = workerEnv();
-  const { cwd, sandbox, scratch, evidenceDir, instructions, model, effort } = ctl.job;
+  const { cwd, sandbox, scratch, evidenceDir, instructions, model, effort, kind, difficulty } = ctl.job;
   const mcp = JSON.stringify({ mcpServers: { crew: { type: 'stdio', ...ctl.mcp } } });
+  // A read-only job gets Write for its evidence directory alone (canEdit).
+  const tools = ['Read', ...(sandbox === 'workspace-write' ? ['Edit'] : []), 'Write', 'Glob', 'Grep', 'Bash', 'WebFetch', 'WebSearch'];
+  if (kind === 'delegate' && difficulty === 'hard') tools.push('Agent');
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
     '--permission-mode', permissionMode(ctl.job), '--permission-prompt-tool', 'stdio', '--restricted', '--tools',
-    // A read-only job gets Write for its evidence directory alone (canEdit).
-    sandbox === 'workspace-write' ? 'Read,Edit,Write,Glob,Grep,Bash' : 'Read,Write,Glob,Grep,Bash', '--strict-mcp-config'];
+    tools.join(','), '--strict-mcp-config'];
   // Restricted mode keeps the file tools to the working directories; the lead's attachments and the worker's
   // screenshots are in the evidence directory.
   if (evidenceDir) args.push('--add-dir', evidenceDir);

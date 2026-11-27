@@ -101,7 +101,7 @@ for (const c of cases) {
     assert.equal(has('# This machine is shared'), commands);
     // Only a worker that may start the app is told how to run one; a reader or an editor is told to start nothing.
     const starts = commands && !readOnly && c.role !== 'polish';
-    assert.equal(has('Let the system choose one'), starts);
+    assert.equal(has('Have the system pick a free port'), starts);
     assert.equal(has('Do not start the app, a server, or a browser'), commands && !starts);
     if (!commands) {
       assert.ok(!has('# What you can run') && !has('# Running the app') && !has('running checks that end by themselves'));

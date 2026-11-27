@@ -11,9 +11,11 @@ import type { TestContext } from 'node:test';
 import { followUpTitle, missionDetail, missionHead, Missions, NAME_THE_MISSION, normalizeTitle } from '../plugin/bridge/missions.ts';
 import { TIERS } from '../plugin/bridge/tiers.ts';
 import { checkArguments } from '../plugin/bridge/arguments.ts';
+import { ClaudeSessions } from '../plugin/bridge/claude.ts';
 import { assignHint, canonicalPath, defaultHolder, disabledAgents, LEAD, PRESET_NAMES, projectSettings, ROLE_INFO, WORKERS } from '../plugin/bridge/config.ts';
 import { addNews, clipped, Delivery, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from '../plugin/bridge/delivery.ts';
 import type { Job } from '../plugin/bridge/jobs.ts';
+import { describe, needsLead, summarize } from '../plugin/bridge/render.ts';
 import type { PullWatch } from '../plugin/bridge/pulls.ts';
 
 /**
@@ -439,7 +441,7 @@ test('the card goes with mission calls, under Codex only with those that move a 
     progressCard: async () => { if (failCard) throw new Error('daemon away'); return { asOf: 1, missions: [], jobs: [] }; },
   });
   const call = async (on: boolean, name: string, args: object = {}, host = 'claude') => {
-    await handle(on, host)({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
+    await handle(on, host)({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args, ...(host === 'codex' ? { _meta: { sessionId: 'lead' } } : {}) } });
     return replies.at(-1).result;
   };
   const shown = (result: any) => JSON.stringify([result.structuredContent, result._meta]);
@@ -497,6 +499,60 @@ test('status pages the latest full report during a follow-up and retained debate
   assert.match(await run({ job_id: job.id, turn: 1 }), /report turn 1, offset 0[^\n]*:\nfirst answer\nEnd of report\./);
   await assert.rejects(run({ job_id: job.id, turn: 0 }), /Invalid report offset or turn/);
   await assert.rejects(run({ job_id: job.id, report_offset: 0, turn: 99 }), /not retained/);
+});
+
+test('a report longer than one page is shown as its first page, which the next page continues', () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const fn = source.slice(source.indexOf('function describePaged'), source.indexOf('\n}\n', source.indexOf('function describePaged')) + 2);
+  const describePaged = vm.runInNewContext(stripTypeScriptTypes(`(${fn})`), {
+    describe: (job: any, hint: any, report = job.report) => `hint=${hint}\n${job.checks ?? ''}${report}`, textPage, jsonBytes, REPORT_PAGE_BYTES,
+    LEAD_TEXT_BYTES, PAGE_SLACK: 1024,
+  });
+  const report = 'x'.repeat(40_000);
+  const shown = describePaged({ id: 'long', state: 'done', turns: 2, report });
+  const first = textPage(report, 0, REPORT_PAGE_BYTES);
+  assert.ok(shown.startsWith(`The report is longer than one page; its first page is below. Next: status job_id "long", turn: 2, report_offset: ${first.length}.`));
+  assert.ok(shown.includes(`${first}\nNext: status`));
+  assert.ok(!shown.includes(report.slice(0, first.length + 1)), 'nothing past the first page is shown');
+  assert.equal(describePaged({ id: 'short', state: 'done', report: 'brief' }, 'h'), 'hint=h\nbrief');
+  assert.equal(describePaged({ id: 'run', state: 'running', report }), `hint=undefined\n${report}`);
+  // With long check output beside it, the page shrinks so the whole response stays within the bound the lead is sent.
+  const crowded = describePaged({ id: 'long', state: 'done', turns: 2, report, checks: 'y'.repeat(9_000) });
+  const offset = Number(/report_offset: (\d+)/.exec(crowded)![1]);
+  assert.ok(offset < first.length);
+  assert.ok(jsonBytes(crowded) <= LEAD_TEXT_BYTES, 'nothing is cut from the end');
+  assert.ok(crowded.includes(`${report.slice(0, offset)}\nNext: status`));
+  // A job after others in one wait response gets only the room they left, and none left means reading from the start.
+  assert.ok(jsonBytes(describePaged({ id: 'long', state: 'done', turns: 2, report }, undefined, 9_000)) <= 9_000);
+  assert.match(describePaged({ id: 'long', state: 'done', turns: 2, report }, undefined, 500), /report_offset: 0\./);
+});
+
+test('a wait that returns two long reports shows only what fits, and each Next line continues where its page stopped', async () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const between = (from: string, to: string) => source.slice(source.indexOf(from), source.indexOf(to, source.indexOf(from)));
+  // The real wait case, render, and paging, around stubs for the daemon.
+  const code = `${between('function render(', '\n/** What the lead does')}\n${between('/** A report longer than one page', '\n/** The roles, usage')}
+    async function wait(args, ctx) { switch ('wait') { ${between("case 'wait': {", "\n    case ")} } }`;
+  // Numbered lines, so a skipped or repeated stretch cannot match by accident.
+  const report = (id: string) => Array.from({ length: 2_000 }, (_, i) => `${id} line ${String(i).padStart(5, '0')}`).join('\n');
+  const jobs = ['cx-long1', 'cx-long2'].map((id) => ({ id, kind: 'review', agent: 'codex', state: 'done', outcome: 'done', turns: 1, report: report(id), news: [], notes: [], questions: [], requests: [] }));
+  const wait = vm.runInNewContext(`${stripTypeScriptTypes(code)}; wait`, {
+    describe, needsLead, summarize, unread, textPage, jsonBytes, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES,
+    failed: new Map(), dismissed: new Set(), canElicit: true, showEvidence: () => {}, DEFAULT_WAIT_SECONDS: 1,
+    follow: async () => jobs,
+  });
+  // As handle() sends it: cut from its end to the bound.
+  const shown = clipped(await wait({ job_ids: jobs.map((job) => job.id) }, { jobs: [], progress: () => {} }), LEAD_TEXT_BYTES);
+  assert.doesNotMatch(shown, /\(truncated\)/);
+  for (const job of jobs) {
+    const offset = Number(new RegExp(`job_id "${job.id}", turn: 1, report_offset: (\\d+)\\.`).exec(shown)![1]);
+    assert.ok(offset > 0, `${job.id}: part of the report is shown`);
+    assert.ok(shown.includes(`${job.report.slice(0, offset)}\nNext: status job_id "${job.id}"`), `${job.id}: the first page arrived whole`);
+    // status pages on from the offset, as its report_offset path does.
+    let rest = '';
+    for (let at = offset; at < job.report.length; at += textPage(job.report, at, REPORT_PAGE_BYTES).length) rest += textPage(job.report, at, REPORT_PAGE_BYTES);
+    assert.equal(job.report.slice(0, offset) + rest, job.report, `${job.id}: the pages join into the whole report`);
+  }
 });
 
 test('a call with an argument its tool does not take is refused before it reaches the daemon, naming where the brief goes', async (t) => {
@@ -627,7 +683,8 @@ test('a task job without a mission cannot open a follow-up', async (t) => {
   assert.ok(calls.slice(before).every(({ method }) => method === 'GET'));
 });
 
-test('status and mission explicitly read this session\'s watch news without any jobs', async () => {
+test('status and mission explicitly read this session\'s watch news without any jobs', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
   const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
   const tool = source.slice(source.indexOf('async function callTool('), source.indexOf('// --- MCP stdio transport'));
   const handler = source.slice(source.indexOf('async function handle('), source.indexOf('readline.createInterface'));
@@ -641,29 +698,40 @@ test('status and mission explicitly read this session\'s watch news without any 
   const replies: any[] = [];
   const missions: object[] = [];
   const offered: (string[] | undefined)[] = [];
-  const handle = vm.runInNewContext(`${stripTypeScriptTypes(standing + tool + handler)}; handle`, {
-    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude', PROJECT: '/project', projectUnknown: false, carriesCard: () => false,
-    fresh: false, missionId: null, costMission: null, closedElsewhere: null,
+  const sessions = new ClaudeSessions(300, { onSession() {}, onEvent() {}, onAttention() {} });
+  const context = vm.createContext({
+    Date, AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude', PROJECT: '/project', projectUnknown: false, carriesCard: () => false,
+    fresh: false, missionId: null, costMission: null, closedElsewhere: null, lastFooter: { text: '', at: 0 }, FOOTER_MS: 30 * 60_000,
+    codexSession: async () => {},
     missionHead: () => 'Current mission', missionDetail: () => '', currentPolicy: () => '', globalPreset: () => null,
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),
     imageContent: () => [], baseUrl: () => 'board', summarize: () => '',
     api: async (_method: string, route: string, body: any) => {
-      if (route === '/api/state') return { jobs: [], pulls: watches.map(({ news, ...pull }) => pull), missions, limits: {} };
+      const url = new URL(route, 'http://localhost');
+      if (url.pathname === '/api/state') return { jobs: [], pulls: watches.map(({ news, ...pull }) => pull), missions, limits: {},
+        leadHooks: sessions.leadHookState(url.searchParams.get('lead_session') ?? '') };
       assert.equal(route, '/api/lead/offer');
       // A listing offers all of the session's news; other calls only that of what they show.
       offered.push(body.job_ids && Array.from(body.job_ids));
       assert.equal(body.bytes, 4000);
+      assert.equal(body.tool_response, true);
       return { offer: delivery.offer(body.session, { ids: body.job_ids, bytes: body.bytes }) };
     },
   });
-  const call = async (name: string, args = {}) => {
-    await handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
+  const handle = vm.runInContext(`${stripTypeScriptTypes(standing + tool + handler)}; handle`, context);
+  const call = async (name: string, args = {}, sessionId?: string) => {
+    await handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args, _meta: { sessionId } } });
     return replies.at(-1).result;
   };
   const status = await call('status');
   assert.match(status.content[0].text, /Watched pull requests:\n\[pr-0\] o\/r#7 · open/);
   assert.match(status.content[0].text, /\[pr-0\] news 1/);
   assert.doesNotMatch(status.content[0].text, /pr-1|o\/r#8/);
+  assert.match(status.content[0].text, /Board: board/);
+  // The next list leaves out what has not changed since.
+  const again = await call('status');
+  assert.match(again.content[0].text, /Roles, usage and board: unchanged since the last list\./);
+  assert.doesNotMatch(again.content[0].text, /Board: board/);
   const mission = await call('mission');
   assert.equal(mission.isError, true);
   assert.match(mission.content[0].text, /no open mission[^]*\[pr-0\] news 1/);
@@ -672,7 +740,32 @@ test('status and mission explicitly read this session\'s watch news without any 
   assert.equal(current.isError, undefined);
   assert.match(current.content[0].text, /Current mission[^]*\[pr-0\] news 1/);
   assert.equal(unread(watches[0])[0].offers, 2);
-  assert.deepEqual(offered, [undefined, ['pr-0'], ['pr-0']]);
+  assert.deepEqual(offered, [undefined, undefined, ['pr-0'], ['pr-0']]);
+
+  await t.test('status repeats the footer after compaction, with a time fallback only without hooks', async () => {
+    const full = /Board: board/;
+    const unchanged = /Roles, usage and board: unchanged since the last list\./;
+    const hook = (session_id: string, hook_event_name: string, extra: object = {}) => sessions.ingest({ session_id, hook_event_name, ...extra });
+    t.mock.timers.tick(30 * 60_000);
+    assert.match((await call('status')).content[0].text, full, 'no hooks heard, so the age fallback applies');
+    hook('lead', 'SessionStart', { source: 'resume' });
+    hook('other', 'SessionStart', { source: 'compact' });
+    t.mock.timers.tick(31 * 60_000);
+    assert.match((await call('status')).content[0].text, unchanged, 'recent hooks and another session’s compaction do not resend it');
+    hook('lead', 'SessionStart', { source: 'compact' });
+    hook('lead', 'SessionEnd');
+    hook('lead', 'SessionStart', { source: 'resume' });
+    assert.match((await call('status')).content[0].text, full);
+    assert.match((await call('status')).content[0].text, unchanged);
+
+    context.host = 'codex';
+    assert.match((await call('status', {}, 'thread')).content[0].text, full, 'a new session gets its own footer');
+    assert.match((await call('status', {}, 'thread')).content[0].text, unchanged);
+    t.mock.timers.tick(500);
+    hook('thread', 'PreCompact', { host: 'codex' });
+    assert.match((await call('status', {}, 'thread')).content[0].text, full);
+    assert.match((await call('status', {}, 'thread')).content[0].text, unchanged);
+  });
 });
 
 test('a Codex session says hello once, retries a failed hello or one with no folder, refuses a call naming no session, and starts a new session fresh', async () => {

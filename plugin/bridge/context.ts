@@ -8,6 +8,12 @@ import { leadContext, loadFailure } from './instructions.ts';
  * It reads the files itself, so it works before the daemon is up.
  */
 
+/**
+ * Subagents that only search and read: the shared instructions are notes for building, running, and checking,
+ * so these subagents would carry them unused. The self-reviewer runs checks and the app, so it keeps them.
+ */
+const READERS = new Set(['Explore', 'Plan', 'claude-code-guide', 'web-fetch']);
+
 let event = 'SessionStart';
 let additionalContext: string;
 try {
@@ -15,6 +21,7 @@ try {
   for await (const chunk of process.stdin) raw += chunk;
   const input = JSON.parse(raw);
   event = input.hook_event_name ?? event;
+  if (event === 'SubagentStart' && READERS.has(input.agent_type)) process.exit(0);
   const cwd: string = input.cwd ?? process.cwd();
   // Same lookup as a worker job, so the lead and the workers are given the same files.
   additionalContext = leadContext(HOME, (await projectRoot(cwd)) ?? process.env.CLAUDE_PROJECT_DIR ?? cwd);

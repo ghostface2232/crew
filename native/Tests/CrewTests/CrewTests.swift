@@ -1154,6 +1154,14 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         store.openJob("cx-question", navigate: true)
         #expect(store.selectedJob == "cx-question")
     }
+    @Test func projectsSharingAFolderNameAreToldApartByTheirParents() {
+        let paths = ["/work/crew-claude/backlog", "/work/crew-codex/backlog", "/work/tool", "/a/x/site", "/b/x/site", "/b/x/Site2"]
+        #expect(paths.map { projectName($0, among: paths) } == ["crew-claude/backlog", "crew-codex/backlog", "tool", "a/x/site", "b/x/site", "Site2"])
+        // Names that differ only in case are told apart too, and a path listed nowhere keeps its folder name.
+        #expect(projectName("/a/App", among: ["/a/App", "/b/app"]) == "a/App")
+        #expect(projectName("/elsewhere/tool", among: paths) == "elsewhere/tool")
+        #expect(projectName("/solo/thing", among: []) == "thing")
+    }
     @Test func decisionsTakeTheDetailPanelInPlaceOfAJobOrSession() throws {
         let store = try store()
         store.toggleDecisions("mission-1")

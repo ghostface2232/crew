@@ -188,6 +188,7 @@ Requirements R4 and R6 (computer use, side chat, visibility in the desktop app) 
 - Conductor's status *(settled)*: it joined Meta and announced a cloud shutdown on 2026-11-04, withdrew the shutdown on 2026-11-12–13 (0.94.2 changelog), and continues development, cloud included. [related-work.md](../research/related-work.md) is corrected to match.
 - Antigravity's native `AGENTS.md` support is unverified; A2 does not depend on it.
 - Direct dispatch shape *(settled in `Dispatch.tsx` / `DispatchView.swift`)*: the board’s New Job creates a job without a mission or lead. The lead’s tools use the same `POST /api/jobs` endpoint and pass lead and mission information.
+- Arrival motion and History paging on the web board: the macOS app moves with news from one place and shows History 24 missions at a time (2026-11-27, [design-tokens.md](design-tokens.md#motion--motion)). The web board, and with it the Windows app, still animates only a card's first appearance and lists every finished mission.
 - PR watches while the owning session is closed *(settled 2026-11-25)*: polled every 10 minutes when turned on for the project, and not otherwise (F2).
 
 ## 7. Sources

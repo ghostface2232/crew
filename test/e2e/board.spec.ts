@@ -18,7 +18,8 @@ const openSettings = async (page: Page, tab?: string) => {
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   if (tab) await settingsPage(page, tab);
 };
-const settingsPage = (page: Page, name: string) => page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name, exact: true }).click();
+// The first match: the app's own page is named Crew, as a project folder may be, and it leads the list.
+const settingsPage = (page: Page, name: string) => page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name, exact: true }).first().click();
 const newJob = (page: Page) => page.getByRole('button', { name: 'New Job', exact: true }).click();
 /** Picks an option by its text from one of the board's own selects. */
 const pick = async (select: Locator, option: string) => {
@@ -327,11 +328,12 @@ test('choosing a language switches the board in place, so a browser tab stays si
   await page.goto(`/#ticket=${TEST_TICKET}`);
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
   await request.post('/__push', { data: { type: 'language', data: { language: null } } });
-  await openSettings(page, 'General');
+  await openSettings(page, 'Crew');
   await pick(page.getByRole('combobox', { name: 'Language' }), '한국어');
-  // Settings comes back on its General page, and text kept in tables, such as the page names, switches too.
+  // Settings comes back on its Crew page, and text kept in tables, such as the page names, switches too.
   const pages = page.getByRole('navigation', { name: '설정 페이지' });
-  await expect(pages.getByRole('button', { name: '일반', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(pages.getByRole('button', { name: 'Crew', exact: true }).first()).toHaveAttribute('aria-current', 'page');
+  await expect(pages.getByRole('button', { name: '구현', exact: true })).toBeVisible();
   await expect(page.getByRole('combobox', { name: '언어' })).toContainText('한국어');
   await expect(page.locator('html')).toHaveAttribute('lang', 'ko');
   await page.keyboard.press('Escape');
@@ -2100,7 +2102,7 @@ test('New Job shows who takes a question, and says when only the lead can', asyn
   await expect(page.getByText('Start this job from a Claude Code or Codex session: Claude Code does it itself or in a subagent, and Codex hands it to a Claude worker.')).toBeVisible();
 });
 
-test('About Crew puts the check on the status row and an update action beside the note', async ({ page }) => {
+test('the Crew page puts the check on the status row and an update action beside the note', async ({ page }) => {
   await page.addInitScript(() => {
     const listeners = new Set<(update: unknown) => void>();
     let update = { current: '0.7.0', state: 'idle', checkedAt: Date.now() } as Record<string, unknown>;
@@ -2116,7 +2118,7 @@ test('About Crew puts the check on the status row and an update action beside th
     } } });
   });
   await page.goto('/');
-  await openSettings(page, 'About Crew');
+  await openSettings(page, 'Crew');
   const status = page.getByRole('status').filter({ hasText: 'Crew is up to date' });
   const check = page.getByRole('button', { name: 'Check for Updates' });
   await expect(status).toBeVisible();
@@ -2134,7 +2136,7 @@ test('About Crew puts the check on the status row and an update action beside th
   expect(Math.abs(noteBox!.y + noteBox!.height / 2 - (installBox!.y + installBox!.height / 2))).toBeLessThan(12);
 });
 
-test('General shows Open at Login as Windows has it, and only where the app can open at sign-in', async ({ page }) => {
+test('the Crew page shows Open at Login as Windows has it, and only where the app can open at sign-in', async ({ page }) => {
   const stub = (supported: boolean) => {
     // Windows may refuse, as a policy can: the switch shows what it then says, not what was asked.
     let open: boolean | null = supported ? false : null;
@@ -2151,7 +2153,7 @@ test('General shows Open at Login as Windows has it, and only where the app can 
   };
   await page.addInitScript(stub, true);
   await page.goto('/');
-  await openSettings(page, 'General');
+  await openSettings(page, 'Crew');
   const toggle = page.getByRole('checkbox', { name: 'Open at Login' });
   await expect(toggle).not.toBeChecked();
   await expect(toggle).toHaveAccessibleDescription(/starts in the tray when you sign in/);
@@ -2166,21 +2168,20 @@ test('General shows Open at Login as Windows has it, and only where the app can 
   const unpacked = await page.context().newPage();
   await unpacked.addInitScript(stub, false);
   await unpacked.goto('/');
-  await openSettings(unpacked, 'About Crew');
+  await openSettings(unpacked, 'Crew');
   await expect(unpacked.getByText('Crew 0.7.2', { exact: true })).toBeVisible();
-  await settingsPage(unpacked, 'General');
   await expect(unpacked.getByRole('checkbox', { name: 'Open at Login' })).toHaveCount(0);
 });
 
-test('General puts the progress card switch beside the language, and it saves as it is flipped', async ({ page, request }) => {
+test('the Crew page leads Settings with the progress card switch, which saves as it is flipped', async ({ page, request }) => {
   await page.goto('/');
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
   await request.post('/__push', { data: { type: 'progressCards', data: true } });
-  await openSettings(page, 'General');
+  await openSettings(page, 'Crew');
   const pages = page.getByRole('navigation', { name: 'Settings pages' });
-  // General comes first, above the roles.
-  const top = async (name: string) => (await pages.getByRole('button', { name, exact: true }).boundingBox())!.y;
-  expect(await top('General')).toBeLessThan(await top('Build'));
+  // The app's own page comes first, above the roles.
+  const top = async (name: string) => (await pages.getByRole('button', { name, exact: true }).first().boundingBox())!.y;
+  expect(await top('Crew')).toBeLessThan(await top('Build'));
   const toggle = page.getByRole('checkbox', { name: 'Progress cards in chat' });
   await expect(toggle).toBeChecked();
   await toggle.click();

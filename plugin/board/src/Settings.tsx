@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import {
   ChevronLeftRegular, ChevronRightRegular, DocumentText16Regular, ErrorCircle16Regular, Folder16Regular, Gauge16Regular, Info16Regular,
-  Options16Regular, Settings16Regular, ShieldCheckmark16Regular, TextFont16Regular, Wrench16Regular,
+  Options16Regular, ShieldCheckmark16Regular, TextFont16Regular, Wrench16Regular,
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { AppUpdate, Preset, PresetName, ProjectSettings, Snapshot } from './types.ts';
@@ -50,17 +50,17 @@ function presetDetails(preset: Preset): [string, string][] {
 }
 
 /** One page of settings, listed in the sidebar: the roles by kind of work, what every agent shares, each project's own instructions, then the desktop app. */
-type Fixed = 'general' | 'build' | 'review' | 'edit' | 'presets' | 'models' | 'instructions' | 'about';
+type Fixed = 'about' | 'build' | 'review' | 'edit' | 'presets' | 'models' | 'instructions';
 type Pane = Fixed | `project:${string}`;
 const PANES = translated((): Record<Fixed, { title: string; icon: FluentIcon; kind?: JobKind }> => ({
-  general: { title: t('General'), icon: Settings16Regular },
   build: { title: t('Build'), icon: Wrench16Regular, kind: 'delegate' },
   review: { title: t('Review'), icon: ShieldCheckmark16Regular, kind: 'review' },
   edit: { title: t('Edit'), icon: TextFont16Regular, kind: 'polish' },
   presets: { title: t('Model Presets'), icon: Options16Regular },
   models: { title: t('Model Scores'), icon: Gauge16Regular },
   instructions: { title: t('Instructions'), icon: DocumentText16Regular },
-  about: { title: t('About Crew'), icon: Info16Regular },
+  // The app's own page: its updates and the settings that are the app's rather than the agents'. Named as the app is.
+  about: { title: 'Crew', icon: Info16Regular },
 }));
 
 /** What each of a project's switches lets Crew do there without asking, as in the app. */
@@ -415,19 +415,19 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     }
   };
   // Windows keeps whether the app opens at sign-in, and the user can change it there too, so it is read each time
-  // General opens. Null until the app answers, and where this copy cannot open at sign-in.
+  // the Crew page opens. Null until the app answers, and where this copy cannot open at sign-in.
   const [openAtLogin, setOpenAtLogin] = useState<boolean | null>(null);
   const [loginSaving, setLoginSaving] = useState(false);
   const [loginStatus, setLoginStatus] = useState('');
-  const generalShown = pane === 'general';
+  const aboutShown = pane === 'about';
   useEffect(() => {
-    if (!generalShown || !desktop?.login) return;
+    if (!aboutShown || !desktop?.login) return;
     let live = true;
     void desktop.login.state().then((open) => live && setOpenAtLogin(open), () => {});
     return () => {
       live = false;
     };
-  }, [generalShown]);
+  }, [aboutShown]);
   const changeOpenAtLogin = async (open: boolean) => {
     setLoginStatus('');
     setLoginSaving(true);
@@ -493,11 +493,11 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       }
     }
   };
-  // A daemon without presets, notes, or any general setting, in a browser that cannot open at sign-in, has no page for them.
-  const hasGeneral = state.language !== undefined || state.progressCards !== undefined || Boolean(desktop?.login);
+  // A daemon without presets or notes has no page for them, and the Crew page needs an update to show or a setting.
+  const hasAbout = Boolean(update) || state.language !== undefined || state.progressCards !== undefined || Boolean(desktop?.login);
   const current: Pane =
-    (pane === 'presets' && !state.presets) || (pane === 'models' && !state.modelScores) || (pane === 'general' && !hasGeneral) ||
-    (pane === 'about' && !update) ? 'build' : pane;
+    (pane === 'presets' && !state.presets) || (pane === 'models' && !state.modelScores) ||
+    (pane === 'about' && !hasAbout) ? 'build' : pane;
   useEffect(() => {
     if (current === 'about' && update?.installError) shownInstallError.current = true;
   }, [current, update?.installError]);
@@ -668,7 +668,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
             <h2 className={styles.windowTitle} id="settings-title">{t('Settings')}</h2>
             <span className={styles.listClose}><CloseButton label={t('Close settings')} onClose={closeSettings} /></span>
           </header>
-          {hasGeneral && <div className={styles.section}>{item('general')}</div>}
+          {hasAbout && <div className={styles.section}>{item('about')}</div>}
           <p className={styles.sectionLabel}>{t('Roles')}</p>
           <div className={styles.section}>{(['build', 'review', 'edit'] as Pane[]).map(item)}</div>
           <p className={styles.sectionLabel}>{t('Shared')}</p>
@@ -681,12 +681,6 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
             <>
               <p className={styles.sectionLabel}>{t('Projects')}</p>
               <div className={styles.section}>{dirs.map((dir) => item(`project:${dir}`))}</div>
-            </>
-          )}
-          {update && (
-            <>
-              <p className={styles.sectionLabel}>{t('App')}</p>
-              <div className={styles.section}>{item('about')}</div>
             </>
           )}
         </nav>
@@ -840,7 +834,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                   {ratingsStatus && <p className={styles.footnote} role="alert">{ratingsStatus}</p>}
                 </section>
               )}
-              {current === 'general' && state.language !== undefined && (
+              {current === 'about' && state.language !== undefined && (
                 <section className={styles.group}>
                   <div className={styles.rows}>
                     <label className={styles.row}>
@@ -858,7 +852,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                   {languageStatus && <p className={styles.footnote} role="alert">{languageStatus}</p>}
                 </section>
               )}
-              {current === 'general' && state.progressCards !== undefined && (
+              {current === 'about' && state.progressCards !== undefined && (
                 <section className={styles.group}>
                   <div className={styles.rows}>
                     <label className={`${styles.row} ${styles.described}`}>
@@ -879,7 +873,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                   {cardsStatus && <p className={styles.footnote} role="alert">{cardsStatus}</p>}
                 </section>
               )}
-              {current === 'general' && openAtLogin !== null && (
+              {current === 'about' && openAtLogin !== null && (
                 <section className={styles.group}>
                   <div className={styles.rows}>
                     <label className={`${styles.row} ${styles.described}`}>

@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// One page of the settings window, listed in the sidebar: the app's general settings, the app itself, the roles by kind
-/// of work, what every agent shares, then each project's own instructions.
+/// One page of the settings window, listed in the sidebar: the app itself with its own settings, the roles by kind of
+/// work, what every agent shares, then each project's own instructions.
 enum SettingsPane: Hashable, Identifiable {
-    case general, about, build, review, edit, presets, models, instructions
+    case about, build, review, edit, presets, models, instructions
     case project(String)
     var id: Self { self }
     static let roles: [SettingsPane] = [.build, .review, .edit]
@@ -14,7 +14,6 @@ enum SettingsPane: Hashable, Identifiable {
     var scope: String? { switch self { case .instructions: ""; case .project(let path): path; default: nil } }
     var systemImage: String {
         switch self {
-        case .general: "gearshape.fill"
         case .about: "info.circle.fill"
         case .build: "hammer.fill"
         case .review: "checkmark.shield.fill"
@@ -31,7 +30,7 @@ enum SettingsPane: Hashable, Identifiable {
         case .project: .teal
         case .review: .green
         case .edit: .orange
-        case .general, .presets, .about: .gray
+        case .presets, .about: .gray
         case .models: .purple
         case .instructions: .indigo
         }
@@ -50,7 +49,7 @@ struct CrewSettingsView: View {
     var store: CrewStore
     @Environment(AppUpdater.self) private var updater
     @State private var selection: SettingsPane? = .build
-    /// Open at Login as macOS last reported it; read whenever General shows, as the user can change it in System Settings.
+    /// Open at Login as macOS last reported it; read whenever the Crew page shows, as the user can change it in System Settings.
     @State private var login: LoginItem.State?
     @State private var loginError: String?
     /// The model or effort being typed by hand, stored when it is left as when Return is pressed.
@@ -70,7 +69,6 @@ struct CrewSettingsView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: pages) {
-                paneRow(.general)
                 SettingsAppRow(ready: updater.phase == .ready).tag(SettingsPane.about)
                 Section("Roles") { ForEach(SettingsPane.roles) { paneRow($0) } }
                 Section("Shared") { ForEach(SettingsPane.shared.filter(available)) { paneRow($0) } }
@@ -100,7 +98,7 @@ struct CrewSettingsView: View {
         .task { if !model.loaded && !model.loading { await model.load(scope: model.scope) } }
         .onChange(of: store.state.editableRoleSettings) { _, table in model.adopt(roleSettings: table) }
     }
-    /// A daemon without presets or model notes has no page for them. General always has Open at Login, where the app can.
+    /// A daemon without presets or model notes has no page for them.
     private func available(_ pane: SettingsPane) -> Bool {
         switch pane {
         case .presets: model.presets != nil
@@ -110,11 +108,10 @@ struct CrewSettingsView: View {
     }
     private func title(_ pane: SettingsPane) -> String {
         switch pane {
-        case .about: String(localized: "About Crew")
+        case .about: "Crew"
         case .presets: String(localized: "Model Presets")
         case .models: String(localized: "Model Scores")
         case .instructions: String(localized: "Instructions")
-        case .general: String(localized: "General")
         case .project(let path): projectName(path, among: store.projects)
         default: pane.group.map(localizedCrewLabel) ?? ""
         }
@@ -129,12 +126,12 @@ struct CrewSettingsView: View {
     @ViewBuilder private func content(_ pane: SettingsPane) -> some View {
         if let group = pane.group {
             ForEach(model.roleInfo.filter { $0.group == group }) { roleSection($0) }
-        } else if pane == .general {
+        } else if pane == .about {
+            // The app's own page: its updates, then the settings that are the app's rather than the agents'.
+            about
             if store.state.hasLanguageSetting == true { language }
             progressCards
             openAtLogin
-        } else if pane == .about {
-            about
         } else if pane == .presets {
             presets
         } else if pane == .models {
@@ -493,7 +490,7 @@ private struct SettingsPaneIcon: View {
 }
 
 /// The app's icon and name at the top of the sidebar, where System Settings shows the account.
-/// The app's own row, which opens About Crew; a dot marks an update ready to install.
+/// The app's own row, which opens the Crew page; a dot marks an update ready to install.
 private struct SettingsAppRow: View {
     let ready: Bool
     private static let iconSize: CGFloat = 36

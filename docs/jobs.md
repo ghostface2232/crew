@@ -31,7 +31,7 @@ Lead tools start and manage work in worker sessions. Writable jobs use isolated 
 
 ## Progress card
 
-A host that declares the MCP Apps extension (`io.modelcontextprotocol/ui`) in `initialize` gets a card beside `mission` results: the Claude desktop app's Code tab and Codex in the ChatGPT desktop app ([what each host does](mcp-compatibility.md#6-mcp-apps-inline-cards)). Other hosts, the terminal CLIs among them, see the same tools, capabilities and results as before. The switch in Settings → General (`progressCards` in `config.json`, on by default) turns the card off: under Codex from the next call, and in the Claude app, which reads the card's declaration when its session starts, from the next session.
+A host that declares the MCP Apps extension (`io.modelcontextprotocol/ui`) in `initialize` gets a card beside `mission` results: the Claude desktop app's Code tab and Codex in the ChatGPT desktop app ([what each host does](mcp-compatibility.md#6-mcp-apps-inline-cards)). Other hosts, the terminal CLIs among them, see the same tools, capabilities and results as before. The switch on the Crew page in Settings (`progressCards` in `config.json`, on by default) turns the card off: under Codex from the next call, and in the Claude app, which reads the card's declaration when its session starts, from the next session.
 
 - **Which calls.** Under Codex, a card goes with the calls that start, move or end a mission (`title`, `stage`, `done`, `abandoned`), named in the result's `_meta`. The Claude app draws only cards a tool declares, so there `mission` declares it and every `mission` call carries one. `status` carries none, since a lead calls it on every wake-up (`carriesCard` in `mcp.ts`).
 

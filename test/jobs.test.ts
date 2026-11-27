@@ -28,7 +28,9 @@ const config = resolveConfig({ notify: false, codex: { bin: 'codex', approvalPol
 function tempRepo(): string {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-test-')));
   const git = (...args: string[]) => execFileSync('git', args, { cwd: dir });
-  git('init', '-q');
+  // Tests block a branch with a loose `refs/heads/<branch>.lock`, which only the files backend has, whatever the
+  // user's init.defaultRefFormat is.
+  git('-c', 'init.defaultRefFormat=files', 'init', '-q');
   git('config', 'user.email', 'test@example.com');
   git('config', 'user.name', 'Test');
   // Checked-out files must match what the tests wrote, whatever the user's autocrlf setting is.

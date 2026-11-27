@@ -684,52 +684,56 @@ struct NeedsYouView: View {
     private var sessions: [ClaudeSession] { store.scopedWaitingSessions.filter { matches("\($0.title) \($0.projectPath) \(agentName($0.agent)) \($0.waitingFor ?? "")") } }
     var body: some View {
         let jobs = jobs, sessions = sessions
-        if store.scopedPendingCount == 0 {
-            EmptyState(title: String(localized: "All caught up"), symbol: "checkmark.circle").transition(.card)
-        } else if jobs.isEmpty && sessions.isEmpty {
-            EmptyState(title: String(localized: "No matching requests"), symbol: "magnifyingglass").transition(.card)
-        }
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.requestWidth.lowerBound, maximum: Self.requestWidth.upperBound), spacing: WorkspaceStyle.cardGap)], alignment: .leading, spacing: WorkspaceStyle.cardGap) {
-            ForEach(jobs) { job in
-                VStack(alignment: .leading, spacing: Space.xl) {
-                    VStack(alignment: .leading, spacing: Space.ml) {
-                        requestHeader(job.waiting?.type == "approval" ? String(localized: "Approval") : String(localized: "Question"), agent: job.agent, who: agentName(job.agent),
-                                      project: job.projectPath, since: job.waiting?.since) { store.openJob(job.id) }
-                        Text(job.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(job.title)
-                    }
-                    AnswerView(store: store, job: job)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading).card()
-                .transition(.card)
-            }
-            // As on the web board: a lead session is answered in its own app, so its tile says so instead of offering a composer.
-            ForEach(sessions) { session in
-                VStack(alignment: .leading, spacing: Space.xl) {
-                    // Laid out as a job's tile: who on the header, the session's title under it.
-                    VStack(alignment: .leading, spacing: Space.ml) {
-                        HStack(spacing: Space.ml) {
-                            StatusLabel(state: "waiting", title: String(localized: "Input"))
-                            HStack(spacing: Space.s) {
-                                AgentMark(agent: session.agent, size: MarkSize.inline)
-                                Text(verbatim: agentName(session.agent)).lineLimit(1)
-                            }.font(Typeface.chip).foregroundStyle(.secondary).help(session.projectPath)
-                            Spacer(minLength: WorkspaceStyle.rowSpacer)
-                            OpenInAgentButton(session: session)
+        // The empty state lies over the cards' place, not above it, so the last card leaves where it is and the first
+        // arrives there, instead of travelling the empty state's height.
+        ZStack(alignment: .top) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.requestWidth.lowerBound, maximum: Self.requestWidth.upperBound), spacing: WorkspaceStyle.cardGap, alignment: .top)], alignment: .leading, spacing: WorkspaceStyle.cardGap) {
+                ForEach(jobs) { job in
+                    VStack(alignment: .leading, spacing: Space.xl) {
+                        VStack(alignment: .leading, spacing: Space.ml) {
+                            requestHeader(job.waiting?.type == "approval" ? String(localized: "Approval") : String(localized: "Question"), agent: job.agent, who: agentName(job.agent),
+                                          project: job.projectPath, since: job.waiting?.since) { store.openJob(job.id) }
+                            Text(job.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(job.title)
                         }
-                        Text(session.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(session.title)
+                        AnswerView(store: store, job: job)
                     }
-                    Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
-                    ClaudeAskView(session: session)
-                    if OpenInAgentButton.availableURL(for: session) == nil {
-                        Label("Answer in \(agentName(session.agent)).", systemImage: "bubble.left.and.bubble.right").font(Typeface.callout).foregroundStyle(.secondary)
-                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).card()
+                    .transition(.card)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading).card()
-                // The whole tile opens the details, as a row does.
-                .contentShape(.rect).onTapGesture { store.toggleSession(session.id) }
-                .accessibilityAction(named: "Show Details") { store.openSession(session.id) }
-                .transition(.card)
+                // As on the web board: a lead session is answered in its own app, so its tile says so instead of offering a composer.
+                ForEach(sessions) { session in
+                    VStack(alignment: .leading, spacing: Space.xl) {
+                        // Laid out as a job's tile: who on the header, the session's title under it.
+                        VStack(alignment: .leading, spacing: Space.ml) {
+                            HStack(spacing: Space.ml) {
+                                StatusLabel(state: "waiting", title: String(localized: "Input"))
+                                HStack(spacing: Space.s) {
+                                    AgentMark(agent: session.agent, size: MarkSize.inline)
+                                    Text(verbatim: agentName(session.agent)).lineLimit(1)
+                                }.font(Typeface.chip).foregroundStyle(.secondary).help(session.projectPath)
+                                Spacer(minLength: WorkspaceStyle.rowSpacer)
+                                OpenInAgentButton(session: session)
+                            }
+                            Text(session.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(session.title)
+                        }
+                        Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                        ClaudeAskView(session: session)
+                        if OpenInAgentButton.availableURL(for: session) == nil {
+                            Label("Answer in \(agentName(session.agent)).", systemImage: "bubble.left.and.bubble.right").font(Typeface.callout).foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).card()
+                    // The whole tile opens the details, as a row does.
+                    .contentShape(.rect).onTapGesture { store.toggleSession(session.id) }
+                    .accessibilityAction(named: "Show Details") { store.openSession(session.id) }
+                    .transition(.card)
+                }
+            }
+            if store.scopedPendingCount == 0 {
+                EmptyState(title: String(localized: "All caught up"), symbol: "checkmark.circle").transition(.card)
+            } else if jobs.isEmpty && sessions.isEmpty {
+                EmptyState(title: String(localized: "No matching requests"), symbol: "magnifyingglass").transition(.card)
             }
         }
     }

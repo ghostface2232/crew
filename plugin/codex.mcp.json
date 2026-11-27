@@ -2,9 +2,16 @@
   "mcpServers": {
     "crew": {
       "command": "node",
-      "args": ["./bridge/mcp.ts"],
+      "args": [
+        "./bridge/mcp.ts"
+      ],
       "cwd": ".",
-      "default_tools_approval_mode": "approve"
+      "default_tools_approval_mode": "approve",
+      "tools": {
+        "reply": {
+          "approval_mode": "prompt"
+        }
+      }
     }
   }
 }

@@ -26,6 +26,13 @@ enum Motion {
     static let swapOut = Animation.easeIn(duration: 0.12)
     static let swapIn = Animation.easeOut(duration: 0.24).delay(0.08)
     static func reduced(_ animation: Animation, _ reduce: Bool) -> Animation? { reduce ? nil : animation }
+    /// Makes a change that comes on its own, such as news from the daemon or the answer to something a view asked
+    /// for, under `reflow`. The whole window moves with it: what the change adds or removes comes and goes by its
+    /// transition, and everything around it moves into place, on whichever page, panel or list it shows. A view
+    /// needs no animation of its own for such a change, only a transition where a fade does not suit (`.card`).
+    @MainActor static func arrive<Result>(_ change: () throws -> Result) rethrows -> Result {
+        try withAnimation(reduced(reflow, NSWorkspace.shared.accessibilityDisplayShouldReduceMotion), change)
+    }
 }
 
 /// The spacing scale, in points. Layout spacing and padding use these steps; a component's own geometry

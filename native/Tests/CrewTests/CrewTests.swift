@@ -1165,6 +1165,23 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         #expect(projectName("/a/b", among: ["/a/b", "/x/a/b"]) == "/a/b")
         #expect(projectName("/x/a/b", among: ["/a/b", "/x/a/b"]) == "x/a/b")
     }
+    @Test func onlyNewsThatChangesWhatIsShownWhereRearrangesTheBoard() throws {
+        let state = try fixture()
+        // A running turn's status line, clock and counters change in place.
+        var running = state
+        running.jobs[0].phase = "Reading the next file"; running.jobs[0].activeAt += 1000; running.jobs[0].seq += 1
+        running.jobs[0].tokens = (running.jobs[0].tokens ?? 0) + 500
+        running.claude[0].phase = "Editing"; running.claude[0].inTool.toggle(); running.claude[0].activeAt += 1000
+        #expect(!running.rearranges(state))
+        // A state, a request, a job or session coming or going, and anything outside the two lists move something.
+        var ended = state; ended.jobs[0].state = "done"
+        var asked = state; asked.claude[0].state = "waiting"
+        var fewer = state; fewer.jobs.removeLast()
+        var noted = state; noted.missions[0].outcome = "Done"
+        // A line that shows only once it has words is new when its first words come.
+        var started = state; started.jobs[0].phase = ""
+        for changed in [ended, asked, fewer, noted, started] { #expect(changed.rearranges(state)) }
+    }
     @Test func decisionsTakeTheDetailPanelInPlaceOfAJobOrSession() throws {
         let store = try store()
         store.toggleDecisions("mission-1")

@@ -51,7 +51,7 @@ struct BoardView: View {
         return ScrollView {
             // Lazy so a long history builds only the panels on screen.
             LazyVStack(alignment: .leading, spacing: WorkspaceStyle.cardGap) {
-                if !store.connected { connectionBanner }
+                if !store.connected { connectionBanner.transition(.card) }
                 heading(pending: pending)
                 if store.connected && store.project.isEmpty && overview { SetupCard(api: store.api) }
                 // Overview puts the banner in its heading instead.
@@ -70,8 +70,8 @@ struct BoardView: View {
                     try? await Task.sleep(for: .seconds(600))
                 }
             }
-            // The banner, across the page or in the heading, comes and goes with requests; the page below makes room.
-            .animation(Motion.reduced(Motion.reflow, reduceMotion), value: pending > 0)
+            // News moves the page by itself (`Motion.arrive`); a search is the one change of the page's own making.
+            .animation(Motion.reduced(Motion.reflow, reduceMotion), value: store.search)
             .background(OverlayScrollers())
             .padding(.horizontal, WorkspaceStyle.pageMargin).padding(.top, WorkspaceStyle.pageTop).padding(.bottom, WorkspaceStyle.pageMargin)
             .frame(maxWidth: WorkspaceStyle.pageMaxWidth).frame(maxWidth: .infinity)
@@ -146,16 +146,6 @@ struct BoardView: View {
         return ["needs": String(localized: "Needs You"), "activity": String(localized: "Activity"), "history": String(localized: "History")][store.selection ?? ""] ?? String(localized: "Overview")
     }
     private func matches(_ text: String) -> Bool { store.search.isEmpty || text.localizedCaseInsensitiveContains(store.search) }
-    /// A folding mission's stages that fold by default, so a stage folding by itself as its last job ends moves the
-    /// cards like other work leaving. The user's own picks stay out: they animate within their card, as a mission's do.
-    private func foldedStages(_ mission: Mission, jobs: [Job], lead: ClaudeSession?) -> [String] {
-        guard jobs.count > MissionPanel.foldStagesAfter else { return [] }
-        return mission.stops.indices.filter { index in
-            let mine = jobs.filter { mission.jobStep($0) == index }, hasLead = lead != nil && index == mission.step
-            // A stage the panel does not draw has nothing to fold.
-            return (!mine.isEmpty || hasLead) && !store.stageOpensByDefault(mission, index, jobs: mine, hasLead: hasLead)
-        }.map { "\(mission.id)#\($0)" }
-    }
     private var connectionBanner: some View {
         HStack(alignment: .firstTextBaseline, spacing: Space.l) {
             Label(store.connectionMessage, systemImage: "wifi.exclamationmark").font(Typeface.callout).textSelection(.enabled)
@@ -211,7 +201,7 @@ struct BoardView: View {
             WorkspaceHeading(title: title, subtitle: store.project.isEmpty ? nil : store.project)
             if review > 0 {
                 if fills { Spacer().frame(height: Space.xxl) } else { Spacer(minLength: Space.xxl) }
-                attentionBanner(pending: review).frame(maxWidth: fills ? .infinity : Self.headingCopyWidth)
+                attentionBanner(pending: review).frame(maxWidth: fills ? .infinity : Self.headingCopyWidth).transition(.card)
             }
         }
     }
@@ -246,20 +236,6 @@ struct BoardView: View {
         let tiles: [Tile] = shownMissions.map(Tile.mission) + (loose.isEmpty ? [] : [.loose]) + recent.map(Tile.mission)
         let emptyHistory = history && shownMissions.isEmpty && loose.isEmpty
         let emptyWorkspace = !history && jobs.isEmpty && scopedMissions.isEmpty && !store.state.claude.contains { (store.project.isEmpty || $0.projectPath == store.project) && matches($0.title) }
-        // What is shown where. Work arriving or leaving changes it, and only then do the cards animate, so a status
-        // or timer updating in place does not set the page moving.
-        // A mission's rows as its panel places them: each job and the lead's session under their step, and its notes
-        // and outcome.
-        let missionRows = (shownMissions + recent).flatMap { mission in
-            let lead = store.state.leadRow(for: mission)
-            return ["\(mission.id):\(mission.notes?.count ?? 0):\(mission.outcome.isEmpty)"]
-                + missionJobs(mission).map { "\(mission.id)/\($0.id)@\(mission.jobStep($0))" }
-                + (lead.map { ["\(mission.id)/\($0.id)@\(mission.step)"] } ?? [])
-                + foldedStages(mission, jobs: missionJobs(mission), lead: lead)
-        }
-        let layout = tiles.map(\.id) + loose.map(\.id) + ["finished"] + recentJobs.map(\.id) + ["sessions"] + sessions.map(\.id)
-            + missionRows + [emptyHistory || emptyWorkspace ? "empty" : ""]
-        Group {
         masonry(tiles, left: recentJobs.isEmpty ? nil : .finished, right: sessions.isEmpty ? nil : .sessions) { tile in
             switch tile {
             case .mission(let mission):
@@ -285,7 +261,6 @@ struct BoardView: View {
                 if store.search.isEmpty && !emptyHistory { Button("New Job", systemImage: "plus") { store.showingDispatch = true }.glassPillButton().disabled(!store.connected) }
             }.transition(.card)
         }
-        }.animation(Motion.reduced(Motion.reflow, reduceMotion), value: layout)
     }
     private var activity: some View {
         let events = store.scopedEvents.filter { matches("\($0.detail) \($0.agent)") }
@@ -310,7 +285,7 @@ struct AgentOverview: View {
             else {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: WorkspaceStyle.cardGap) {
-                        ForEach(agents, id: \.self) { agent in AgentCard(store: store, agent: agent) }
+                        ForEach(agents, id: \.self) { agent in AgentCard(store: store, agent: agent).transition(.card) }
                     }.fixedSize(horizontal: false, vertical: true)
                     compactAgents
                 }
@@ -704,17 +679,11 @@ struct NeedsYouView: View {
     /// Request cards fill the page in columns of this width.
     private static let requestWidth: ClosedRange<CGFloat> = 420...620
     @Bindable var store: CrewStore
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private func matches(_ text: String) -> Bool { store.search.isEmpty || text.localizedCaseInsensitiveContains(store.search) }
     private var jobs: [Job] { store.scopedWaitingJobs.filter { matches("\($0.title) \($0.projectPath) \($0.agent) \($0.waiting?.reason ?? "")") } }
     private var sessions: [ClaudeSession] { store.scopedWaitingSessions.filter { matches("\($0.title) \($0.projectPath) \(agentName($0.agent)) \($0.waitingFor ?? "")") } }
     var body: some View {
         let jobs = jobs, sessions = sessions
-        // Requests come and go as agents ask and get answered; the cards around them close up or make room.
-        Group { content(jobs: jobs, sessions: sessions) }
-            .animation(Motion.reduced(Motion.reflow, reduceMotion), value: jobs.map(\.id) + ["sessions"] + sessions.map(\.id))
-    }
-    @ViewBuilder private func content(jobs: [Job], sessions: [ClaudeSession]) -> some View {
         if store.scopedPendingCount == 0 {
             EmptyState(title: String(localized: "All caught up"), symbol: "checkmark.circle").transition(.card)
         } else if jobs.isEmpty && sessions.isEmpty {

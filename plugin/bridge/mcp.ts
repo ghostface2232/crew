@@ -939,9 +939,16 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
 
 function describeJob(job: JobView, ctx: CallContext): string {
   ctx.jobs.push(job);
-  // First, so it survives when the response is cut to its bound; only a report too long for one page needs it.
-  const paged = job.report && jsonBytes(job.report) > REPORT_PAGE_BYTES;
-  return `${paged ? `Read the full report with status: job_id "${job.id}", report_offset: 0.\n` : ''}${describe(job)}`;
+  return describePaged(job);
+}
+
+/** A report longer than one page comes as its first page and where it goes on, so the lead never reads a part twice. */
+function describePaged(job: JobView, waitingHint?: string): string {
+  if (!job.report || job.state === 'running' || jsonBytes(job.report) <= REPORT_PAGE_BYTES) return describe(job, waitingHint);
+  const page = textPage(job.report, 0, REPORT_PAGE_BYTES);
+  const next = `Next: status job_id "${job.id}", report_offset: ${page.length}`;
+  // First, so it survives when the response is cut to its bound.
+  return `The report is longer than one page; its first page is below. ${next}.\n${describe(job, waitingHint, `${page}\n${next}`)}`;
 }
 
 /** The follow-up mission being opened, which a job started meanwhile waits for. */
@@ -995,14 +1002,14 @@ async function followOne(id: string, ctx: CallContext): Promise<string> {
 
 /** `describe`, plus what the lead should do about a waiting job that could not be settled in the app. */
 function render(job: JobView): string {
-  if (job.state !== 'waiting') return describe(job);
+  if (job.state !== 'waiting') return describePaged(job);
   const key = job.waiting!.id;
   const error = failed.get(key);
   let hint: string | undefined;
   if (error !== undefined) hint = `The app could not show the prompt to the user (${error}). Ask them in the conversation, then pass their decision on with reply.`;
   else if (dismissed.has(key)) hint = 'The user dismissed the prompt in the app. Ask what they want, then pass it on with reply.';
   else if (!canElicit) hint = 'This client cannot show the prompt itself. Ask the user in the conversation, then pass their decision on with reply.';
-  return describe(job, hint);
+  return describePaged(job, hint);
 }
 
 /** What the lead does with a role it holds itself, by the kind of work. */

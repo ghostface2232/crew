@@ -499,6 +499,22 @@ test('status pages the latest full report during a follow-up and retained debate
   await assert.rejects(run({ job_id: job.id, report_offset: 0, turn: 99 }), /not retained/);
 });
 
+test('a report longer than one page is shown as its first page, which the next page continues', () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
+  const fn = source.slice(source.indexOf('function describePaged'), source.indexOf('\n}\n', source.indexOf('function describePaged')) + 2);
+  const describePaged = vm.runInNewContext(stripTypeScriptTypes(`(${fn})`), {
+    describe: (job: any, hint: any, report = job.report) => `hint=${hint}\n${report}`, textPage, jsonBytes, REPORT_PAGE_BYTES,
+  });
+  const report = 'x'.repeat(40_000);
+  const shown = describePaged({ id: 'long', state: 'done', report });
+  const first = textPage(report, 0, REPORT_PAGE_BYTES);
+  assert.ok(shown.startsWith(`The report is longer than one page; its first page is below. Next: status job_id "long", report_offset: ${first.length}.`));
+  assert.ok(shown.includes(`${first}\nNext: status`));
+  assert.ok(!shown.includes(report.slice(0, first.length + 1)), 'nothing past the first page is shown');
+  assert.equal(describePaged({ id: 'short', state: 'done', report: 'brief' }, 'h'), 'hint=h\nbrief');
+  assert.equal(describePaged({ id: 'run', state: 'running', report }), `hint=undefined\n${report}`);
+});
+
 test('a call with an argument its tool does not take is refused before it reaches the daemon, naming where the brief goes', async (t) => {
   // No initialize, and a port nothing listens on: a call that got past the check would try to reach a daemon.
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-args-'));

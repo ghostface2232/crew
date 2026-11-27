@@ -70,7 +70,7 @@ struct BoardView: View {
                     try? await Task.sleep(for: .seconds(600))
                 }
             }
-            // The banner and the heading's review button come and go with requests; the page below makes room.
+            // The banner, across the page or compact in the heading, comes and goes with requests; the page below makes room.
             .animation(Motion.reduced(Motion.reflow, reduceMotion), value: pending > 0)
             .background(OverlayScrollers())
             .padding(.horizontal, WorkspaceStyle.pageMargin).padding(.top, WorkspaceStyle.pageTop).padding(.bottom, WorkspaceStyle.pageMargin)
@@ -186,13 +186,16 @@ struct BoardView: View {
             if overview {
                 HStack(alignment: .top, spacing: Space.x5l) {
                     // A fixed ideal width keeps a long project path from forcing the stacked layout;
-                    // the path truncates instead.
+                    // the path truncates instead. The column is as tall as the summary card, so the banner
+                    // at its foot ends where the card does.
                     headingCopy(review: review, fills: false)
-                        .frame(minWidth: Self.headingCopyWidth, idealWidth: Self.headingCopyWidth, maxWidth: .infinity)
+                        .frame(minWidth: Self.headingCopyWidth, idealWidth: Self.headingCopyWidth, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         // Align the title's cap height, not its line box, with the top of the summary card.
                         .alignmentGuide(.top) { $0[.firstTextBaseline] - Typeface.pageTitleCapHeight }
                     WorkspaceSummary(store: store).frame(minWidth: max(Self.summaryWidth.lowerBound, WorkspaceSummary.minimumWidth), maxWidth: max(Self.summaryWidth.upperBound, WorkspaceSummary.minimumWidth))
                 }
+                // The row is as tall as its taller side, and the other side is given that height.
+                .fixedSize(horizontal: false, vertical: true)
             }
             VStack(alignment: .leading, spacing: Space.x3l) {
                 headingCopy(review: review, fills: true)
@@ -200,12 +203,14 @@ struct BoardView: View {
             }
         }.padding(.top, Space.s).padding(.bottom, Space.s)
     }
-    /// The title and, with requests waiting, the compact banner under it: as wide as the title's column beside the
-    /// summary card, or across the page (`fills`) once the two stack.
+    /// The title and, with requests waiting, the compact banner. Beside the summary card the banner is as wide as
+    /// the title's column and sits at the column's foot, level with the card's; once the two stack (`fills`) it
+    /// follows the title across the page.
     private func headingCopy(review: Int, fills: Bool) -> some View {
-        VStack(alignment: .leading, spacing: Space.xxl) {
+        VStack(alignment: .leading, spacing: 0) {
             WorkspaceHeading(title: title, subtitle: store.project.isEmpty ? nil : store.project)
             if review > 0 {
+                if fills { Spacer().frame(height: Space.xxl) } else { Spacer(minLength: Space.xxl) }
                 attentionBanner(pending: review, compact: true).frame(maxWidth: fills ? .infinity : Self.headingCopyWidth)
             }
         }

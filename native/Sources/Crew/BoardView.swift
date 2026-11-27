@@ -71,8 +71,10 @@ struct BoardView: View {
                     try? await Task.sleep(for: .seconds(600))
                 }
             }
-            // News moves the page by itself (`Motion.arrive`); a search is the one change of the page's own making.
+            // News moves the page by itself (`Motion.arrive`). A search is the page's own change, and so is a
+            // selection, which folds a finished stage it was holding open as it moves on.
             .animation(Motion.reduced(Motion.reflow, reduceMotion), value: store.search)
+            .animation(Motion.reduced(Motion.reflow, reduceMotion), value: store.selectedJob)
             .background(OverlayScrollers())
             .padding(.horizontal, WorkspaceStyle.pageMargin).padding(.top, WorkspaceStyle.pageTop).padding(.bottom, WorkspaceStyle.pageMargin)
             .frame(maxWidth: WorkspaceStyle.pageMaxWidth).frame(maxWidth: .infinity)
@@ -119,7 +121,7 @@ struct BoardView: View {
     /// Arranges cards in two independent columns on a wide page, so a card that grows only shifts cards below
     /// it in that column. Cards alternate left and right in order rather than filling the shorter column, which
     /// would move cards across whenever one opens or closes. `left` and `right` end their respective columns
-    /// regardless of the count above, and follow them in that order in a single column. When all cards belong
+    /// regardless of the count above, and come last, in that order, in a single column. When all cards belong
     /// to one column, they take the full width.
     ///
     /// Each card stays a single view inside `Columns`, so changing column or width moves it as itself and keeps
@@ -134,8 +136,6 @@ struct BoardView: View {
                 card(tile).layoutValue(key: Columns.Column.self, value: second.contains(tile.id) ? 1 : 0).transition(.card)
             }
         }
-        // When empty, offset the stack's gap so the empty state sits where it would without this view.
-        .padding(.bottom, all.isEmpty ? -WorkspaceStyle.cardGap : 0)
     }
     private var title: String {
         if !store.project.isEmpty { return projectName(store.project, among: store.projects) }
@@ -234,35 +234,38 @@ struct BoardView: View {
         let tiles: [Tile] = shownMissions.map(Tile.mission) + (loose.isEmpty ? [] : [.loose]) + recent.map(Tile.mission)
         let emptyHistory = history && shownMissions.isEmpty && loose.isEmpty
         let emptyWorkspace = !history && jobs.isEmpty && scopedMissions.isEmpty && !store.state.claude.contains { (store.project.isEmpty || $0.projectPath == store.project) && matches($0.title) }
-        masonry(tiles, left: recentJobs.isEmpty ? nil : .finished, right: sessions.isEmpty ? nil : .sessions) { tile in
-            switch tile {
-            case .mission(let mission):
-                MissionPanel(store: store, mission: mission, jobs: missionJobs(mission))
-            case .loose:
-                ContentPanel(title: history ? String(localized: "Jobs") : String(localized: "Other jobs"), symbol: "rectangle.stack") {
-                    VStack(spacing: WorkspaceStyle.rowGap) { ForEach(loose) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) }.transition(.card) } }
+        // The empty state lies over the cards' place, as on Needs You, so the last card leaves where it is.
+        ZStack(alignment: .top) {
+            masonry(tiles, left: recentJobs.isEmpty ? nil : .finished, right: sessions.isEmpty ? nil : .sessions) { tile in
+                switch tile {
+                case .mission(let mission):
+                    MissionPanel(store: store, mission: mission, jobs: missionJobs(mission))
+                case .loose:
+                    ContentPanel(title: history ? String(localized: "Jobs") : String(localized: "Other jobs"), symbol: "rectangle.stack") {
+                        VStack(spacing: WorkspaceStyle.rowGap) { ForEach(loose) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) }.transition(.card) } }
+                    }
+                case .finished:
+                    ContentPanel(title: String(localized: "Recently finished"), symbol: "checkmark.circle") {
+                        VStack(spacing: WorkspaceStyle.rowGap) { ForEach(recentJobs) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) }.transition(.card) } }
+                    }
+                case .sessions:
+                    ContentPanel(title: String(localized: "Lead sessions"), symbol: "bubble.left.and.bubble.right") {
+                        VStack(spacing: WorkspaceStyle.rowGap) { ForEach(sessions) { session in SessionRow(session: session, selected: store.selectedSession == session.id, store: store) { store.toggleSession(session.id) }.transition(.card) } }
+                    }
                 }
-            case .finished:
-                ContentPanel(title: String(localized: "Recently finished"), symbol: "checkmark.circle") {
-                    VStack(spacing: WorkspaceStyle.rowGap) { ForEach(recentJobs) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) }.transition(.card) } }
-                }
-            case .sessions:
-                ContentPanel(title: String(localized: "Lead sessions"), symbol: "bubble.left.and.bubble.right") {
-                    VStack(spacing: WorkspaceStyle.rowGap) { ForEach(sessions) { session in SessionRow(session: session, selected: store.selectedSession == session.id, store: store) { store.toggleSession(session.id) }.transition(.card) } }
-                }
+            }
+            if emptyHistory || emptyWorkspace {
+                EmptyState(title: store.search.isEmpty ? (emptyHistory ? String(localized: "No completed work yet") : String(localized: "Ready when you are")) : String(localized: "No matching work"),
+                           symbol: store.search.isEmpty ? "square.stack.3d.up" : "magnifyingglass",
+                           detail: store.search.isEmpty && !emptyHistory ? String(localized: "Hand a task to an agent, or run /crew:run in Claude Code or $crew:run in Codex.") : nil) {
+                    if store.search.isEmpty && !emptyHistory { Button("New Job", systemImage: "plus") { store.showingDispatch = true }.glassPillButton().disabled(!store.connected) }
+                }.transition(.card)
             }
         }
         if history && finished.count > historyShown {
             Button("Show More", systemImage: "chevron.down") {
                 withAnimation(Motion.reduced(Motion.reflow, reduceMotion)) { historyShown += Self.historyPage }
             }.pillButton().frame(maxWidth: .infinity).transition(.card)
-        }
-        if emptyHistory || emptyWorkspace {
-            EmptyState(title: store.search.isEmpty ? (emptyHistory ? String(localized: "No completed work yet") : String(localized: "Ready when you are")) : String(localized: "No matching work"),
-                       symbol: store.search.isEmpty ? "square.stack.3d.up" : "magnifyingglass",
-                       detail: store.search.isEmpty && !emptyHistory ? String(localized: "Hand a task to an agent, or run /crew:run in Claude Code or $crew:run in Codex.") : nil) {
-                if store.search.isEmpty && !emptyHistory { Button("New Job", systemImage: "plus") { store.showingDispatch = true }.glassPillButton().disabled(!store.connected) }
-            }.transition(.card)
         }
     }
     private var activity: some View {
@@ -758,7 +761,6 @@ struct NeedsYouView: View {
     }
 }
 
-/// A card on the overview or history page.
 /// Stacks its subviews in `count` columns of equal width, each in the column it names (`Column`), in the order
 /// given. With one column, every subview stacks in it.
 private struct Columns: Layout {
@@ -792,6 +794,7 @@ private struct Columns: Layout {
     }
 }
 
+/// A card on the overview or history page.
 private enum Tile: Identifiable {
     case mission(Mission), loose, finished, sessions
     var id: String {

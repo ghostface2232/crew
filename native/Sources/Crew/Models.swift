@@ -83,6 +83,8 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
         job.tokenUse = tokenUse.map { _ in TokenUse(input: 0, cachedInput: 0, output: 0, turn: 0) }
         job.context = context.map { _ in ContextUse(used: 0, size: 0) }
         job.liveDiff = liveDiff.map { LiveDiff(turn: $0.turn, at: 0, chars: 0) }
+        // Only a job read by itself carries its prompt; the stream's copies do not.
+        job.prompt = nil
         return job
     }
     var kindTitle: String { debate != nil ? String(localized: "Debate") : ask == true ? String(localized: "Question") : roleNames[kind].map(localizedCrewLabel) ?? kind }

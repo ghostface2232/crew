@@ -291,6 +291,8 @@ button:hover{text-decoration:underline}
     }
     if (message.method === 'ui/notifications/tool-result') {
       show(message.params);
+      // A call that failed has no card data, but a host that declared the card still draws its frame: keep that frame empty.
+      if (!view) post({ method: 'ui/notifications/size-changed', params: { height: 0 } });
       if (active()) poll();
     } else if (message.method === 'ui/notifications/host-context-changed') {
       context(message.params);

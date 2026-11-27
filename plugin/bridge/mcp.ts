@@ -946,7 +946,9 @@ function describeJob(job: JobView, ctx: CallContext): string {
 function describePaged(job: JobView, waitingHint?: string): string {
   if (!job.report || job.state === 'running' || jsonBytes(job.report) <= REPORT_PAGE_BYTES) return describe(job, waitingHint);
   const page = textPage(job.report, 0, REPORT_PAGE_BYTES);
-  const next = `Next: status job_id "${job.id}", report_offset: ${page.length}`;
+  // The turn pins the next page to this report, should a follow-up turn end before it is read.
+  const turn = job.exchange?.findLast((entry) => entry.from === 'worker')?.turn ?? job.turns;
+  const next = `Next: status job_id "${job.id}", turn: ${turn}, report_offset: ${page.length}`;
   // First, so it survives when the response is cut to its bound.
   return `The report is longer than one page; its first page is below. ${next}.\n${describe(job, waitingHint, `${page}\n${next}`)}`;
 }

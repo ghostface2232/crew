@@ -1288,9 +1288,9 @@ test('the session hook prints context for the event it was called for, from the 
   assert.equal(session.hookEventName, 'SessionStart');
   assert.ok(session.additionalContext.includes('Use tabs.'));
   assert.equal(hook(JSON.stringify({ hook_event_name: 'SubagentStart', cwd: path.join(repo, '.crew') })).hookEventName, 'SubagentStart');
-  assert.ok(hook(JSON.stringify({ hook_event_name: 'SubagentStart', agent_type: 'general-purpose', cwd: repo })).additionalContext.includes('Use tabs.'));
+  for (const agent_type of ['general-purpose', 'crew:self-reviewer']) assert.ok(hook(JSON.stringify({ hook_event_name: 'SubagentStart', agent_type, cwd: repo })).additionalContext.includes('Use tabs.'));
   // A subagent that only reads and reports goes without them.
-  for (const agent_type of ['crew:self-reviewer', 'Explore']) assert.equal(hook(JSON.stringify({ hook_event_name: 'SubagentStart', agent_type, cwd: repo })), null);
+  for (const agent_type of ['Explore', 'Plan']) assert.equal(hook(JSON.stringify({ hook_event_name: 'SubagentStart', agent_type, cwd: repo })), null);
 
   // Outside a repository, the session's project directory is used rather than wherever the cwd has moved to.
   const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-plain-'));

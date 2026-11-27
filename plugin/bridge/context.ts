@@ -9,10 +9,10 @@ import { leadContext, loadFailure } from './instructions.ts';
  */
 
 /**
- * Subagents that only read and report. The shared instructions are mostly notes for jobs and for building, so these
- * would carry them unused into every context.
+ * Subagents that only search and read. The shared instructions are notes for building, running and checking, so these
+ * would carry them unused into every context. The self-reviewer runs checks and the app, so it keeps them.
  */
-const READERS = new Set(['crew:self-reviewer', 'Explore', 'Plan', 'claude-code-guide', 'web-fetch']);
+const READERS = new Set(['Explore', 'Plan', 'claude-code-guide', 'web-fetch']);
 
 let event = 'SessionStart';
 let additionalContext: string;

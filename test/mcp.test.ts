@@ -506,9 +506,9 @@ test('a report longer than one page is shown as its first page, which the next p
     describe: (job: any, hint: any, report = job.report) => `hint=${hint}\n${report}`, textPage, jsonBytes, REPORT_PAGE_BYTES,
   });
   const report = 'x'.repeat(40_000);
-  const shown = describePaged({ id: 'long', state: 'done', report });
+  const shown = describePaged({ id: 'long', state: 'done', turns: 2, report });
   const first = textPage(report, 0, REPORT_PAGE_BYTES);
-  assert.ok(shown.startsWith(`The report is longer than one page; its first page is below. Next: status job_id "long", report_offset: ${first.length}.`));
+  assert.ok(shown.startsWith(`The report is longer than one page; its first page is below. Next: status job_id "long", turn: 2, report_offset: ${first.length}.`));
   assert.ok(shown.includes(`${first}\nNext: status`));
   assert.ok(!shown.includes(report.slice(0, first.length + 1)), 'nothing past the first page is shown');
   assert.equal(describePaged({ id: 'short', state: 'done', report: 'brief' }, 'h'), 'hint=h\nbrief');

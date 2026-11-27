@@ -15,6 +15,7 @@ import { ClaudeSessions } from '../plugin/bridge/claude.ts';
 import { assignHint, canonicalPath, defaultHolder, disabledAgents, LEAD, PRESET_NAMES, projectSettings, ROLE_INFO, WORKERS } from '../plugin/bridge/config.ts';
 import { addNews, clipped, Delivery, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from '../plugin/bridge/delivery.ts';
 import type { Job } from '../plugin/bridge/jobs.ts';
+import { describe, needsLead, summarize } from '../plugin/bridge/render.ts';
 import type { PullWatch } from '../plugin/bridge/pulls.ts';
 
 /**
@@ -524,6 +525,34 @@ test('a report longer than one page is shown as its first page, which the next p
   // A job after others in one wait response gets only the room they left, and none left means reading from the start.
   assert.ok(jsonBytes(describePaged({ id: 'long', state: 'done', turns: 2, report }, undefined, 9_000)) <= 9_000);
   assert.match(describePaged({ id: 'long', state: 'done', turns: 2, report }, undefined, 500), /report_offset: 0\./);
+});
+
+test('a wait that returns two long reports shows only what fits, and each Next line continues where its page stopped', async () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const between = (from: string, to: string) => source.slice(source.indexOf(from), source.indexOf(to, source.indexOf(from)));
+  // The real wait case, render, and paging, around stubs for the daemon.
+  const code = `${between('function render(', '\n/** What the lead does')}\n${between('/** A report longer than one page', '\n/** The roles, usage')}
+    async function wait(args, ctx) { switch ('wait') { ${between("case 'wait': {", "\n    case ")} } }`;
+  // Numbered lines, so a skipped or repeated stretch cannot match by accident.
+  const report = (id: string) => Array.from({ length: 2_000 }, (_, i) => `${id} line ${String(i).padStart(5, '0')}`).join('\n');
+  const jobs = ['cx-long1', 'cx-long2'].map((id) => ({ id, kind: 'review', agent: 'codex', state: 'done', outcome: 'done', turns: 1, report: report(id), news: [], notes: [], questions: [], requests: [] }));
+  const wait = vm.runInNewContext(`${stripTypeScriptTypes(code)}; wait`, {
+    describe, needsLead, summarize, unread, textPage, jsonBytes, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES,
+    failed: new Map(), dismissed: new Set(), canElicit: true, showEvidence: () => {}, DEFAULT_WAIT_SECONDS: 1,
+    follow: async () => jobs,
+  });
+  // As handle() sends it: cut from its end to the bound.
+  const shown = clipped(await wait({ job_ids: jobs.map((job) => job.id) }, { jobs: [], progress: () => {} }), LEAD_TEXT_BYTES);
+  assert.doesNotMatch(shown, /\(truncated\)/);
+  for (const job of jobs) {
+    const offset = Number(new RegExp(`job_id "${job.id}", turn: 1, report_offset: (\\d+)\\.`).exec(shown)![1]);
+    assert.ok(offset > 0, `${job.id}: part of the report is shown`);
+    assert.ok(shown.includes(`${job.report.slice(0, offset)}\nNext: status job_id "${job.id}"`), `${job.id}: the first page arrived whole`);
+    // status pages on from the offset, as its report_offset path does.
+    let rest = '';
+    for (let at = offset; at < job.report.length; at += textPage(job.report, at, REPORT_PAGE_BYTES).length) rest += textPage(job.report, at, REPORT_PAGE_BYTES);
+    assert.equal(job.report.slice(0, offset) + rest, job.report, `${job.id}: the pages join into the whole report`);
+  }
 });
 
 test('a call with an argument its tool does not take is refused before it reaches the daemon, naming where the brief goes', async (t) => {

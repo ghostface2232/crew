@@ -372,9 +372,28 @@ export class Delivery {
     }
   }
 
-  boundary(session: string): boolean {
-    const ids = Object.entries(this.state.receipts).filter(([, r]) => r.session === session && r.shown && !r.acknowledged).map(([id]) => id);
+  /**
+   * A turn boundary acknowledges what the lead was certainly shown before it. A tool result stays in the conversation
+   * whatever happens next. Stop hook output reached the model only if the turn went on from it, which the next Stop
+   * proves with stop_hook_active; an interrupted turn, a hook the host timed out, or a Claude Code too old to read
+   * the output never gets that far, so the news stays for an explicit ack.
+   */
+  boundary(session: string, continued = false): boolean {
+    const ids = Object.entries(this.state.receipts)
+      .filter(([, r]) => r.session === session && r.shown && !r.acknowledged && (r.source === 'tool' || continued)).map(([id]) => id);
     return ids.length > 0 && this.applyAck(session, ids, false).length < ids.length;
+  }
+
+  /** Compaction may leave shown news out of the summary: it goes back to waiting for an explicit ack. */
+  compacted(session: string): void {
+    let changed = false;
+    for (const receipt of Object.values(this.state.receipts)) {
+      if (receipt.session === session && receipt.shown && !receipt.acknowledged) {
+        delete receipt.shown;
+        changed = true;
+      }
+    }
+    if (changed) this.save();
   }
 
   /** Keeps the receipt store bounded: acknowledged receipts go first, then the oldest, past KEEP_RECEIPTS. */

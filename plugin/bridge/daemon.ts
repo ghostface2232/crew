@@ -1064,7 +1064,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       locate(claude.sessions.get(session));
       if (!main || stopping) return {};
       if (event === 'PostToolUse' && /^mcp__.*crew__/.test(payload.tool_name)) delivery.toolResponse(session, payload.tool_response);
-      if ((event === 'Stop' || event === 'UserPromptSubmit') && delivery.boundary(session)) {
+      if (event === 'PreCompact' || (event === 'SessionStart' && payload.source === 'compact')) delivery.compacted(session);
+      if ((event === 'Stop' || event === 'UserPromptSubmit') && delivery.boundary(session, event === 'Stop' && payload.stop_hook_active === true)) {
         for (const job of jobs.list().filter((job) => job.lead === session)) broadcast('job', view(job));
       }
       if (event === 'Stop' && payload.offer_news === true && !payload.stop_hook_active) {

@@ -132,6 +132,9 @@ export interface UserPrompt {
  * Tracks Claude Code sessions from the hook payloads the plugin forwards.
  * Hooks are push-based and cover Desktop sessions, unlike polling `claude agents --json`.
  */
+/** Lead sessions whose hook state is kept; one forgotten here gets the status footer again on its next list. */
+const LEAD_HOOKS = 500;
+
 export class ClaudeSessions {
   readonly sessions = new Map<string, ClaudeSession>();
   /** Retained after the board forgets an idle or closed session, which can resume with the same context. */
@@ -189,9 +192,16 @@ export class ClaudeSessions {
       return;
     }
     this.mainAt.set(id, now);
-    if (!p.agent_id) {
-      if (p.hook_event_name === 'PreCompact' || (p.hook_event_name === 'SessionStart' && p.source === 'compact')) this.leadHooks.set(id, { compactedAt: now });
-      else if (!this.leadHooks.has(id)) this.leadHooks.set(id, {});
+    if (!p.agent_id && id.length <= 200) {
+      const compacted = p.hook_event_name === 'PreCompact' || (p.hook_event_name === 'SessionStart' && p.source === 'compact');
+      const kept = this.leadHooks.get(id);
+      // Most recent last, so the oldest go first past the cap.
+      this.leadHooks.delete(id);
+      this.leadHooks.set(id, compacted ? { compactedAt: now } : kept ?? {});
+      for (const old of this.leadHooks.keys()) {
+        if (this.leadHooks.size <= LEAD_HOOKS) break;
+        this.leadHooks.delete(old);
+      }
     }
 
     switch (p.hook_event_name) {

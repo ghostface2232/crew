@@ -1040,8 +1040,9 @@ export class Jobs {
       await this.sendWith(job, attachments, (note) => adapter.answer(ctl, !decline && input.decision !== 'deny', note ? `${input.message ?? ''}${note}` : input.message, opts));
       // Only the lead's own calls carry lead_session. Crew cannot tell whether the user really made this decision, so the
       // job's activity shows that the lead passed it on, for the user to see.
-      if (input.lead_session && (input.decision === 'approve' || input.decision === 'allow_for_job')) {
-        this.event(job, 'progress', `The lead passed on an approval${input.decision === 'allow_for_job' ? ' for the whole job' : ''}: ${request.reason}`);
+      if (input.lead_session && request.type === 'approval' && (input.decision === 'approve' || input.decision === 'allow_for_job')) {
+        // Recorded only: the turn may have ended meanwhile, and its end has already been handled.
+        job.seq = this.record(job.agent, job.sessionId, 'progress', `The lead passed on an approval${input.decision === 'allow_for_job' ? ' for the whole job' : ''}: ${request.reason}`, job.id, job.root ?? job.project).seq;
       }
       return job;
     }

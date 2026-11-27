@@ -618,6 +618,8 @@ interface CallContext {
   images: Evidence[];
   jobs: JobView[];
   session?: string;
+  /** The status footer this response shows in full. */
+  footer?: { text: string; at: number; session?: string; compactedAt?: number };
   pullIds?: string[];
   /** False for a listing: it shows jobs without acting on them, so it offers their news but takes none over. */
   adopt?: boolean;
@@ -1207,7 +1209,8 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       if (session === lastFooter.session && shown === lastFooter.text && !stale) lines.push('', 'Roles, usage and board: unchanged since the last list.');
       else {
         lines.push(shown);
-        lastFooter = { text: shown, at: Date.now(), session, compactedAt: hooked?.compactedAt };
+        // Kept only once the response is known to carry it whole (handle).
+        ctx.footer = { text: shown, at: Date.now(), session, compactedAt: hooked?.compactedAt };
       }
       return lines.join('\n');
     }
@@ -1344,6 +1347,7 @@ async function handle(msg: any): Promise<void> {
         let isError: true | undefined;
         try {
           text = clipped(await callTool(params.name, args, ctx), LEAD_TEXT_BYTES) + ackNote;
+          if (ctx.footer && text.includes(ctx.footer.text)) lastFooter = ctx.footer;
         } catch (err) {
           if (!ctx.pullIds?.length) throw err;
           isError = true;

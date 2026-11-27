@@ -389,7 +389,20 @@ test('notification routes require authentication; boundaries acknowledge confirm
     await hook('UserPromptSubmit', { agent_id: 'child' });
     assert.equal(job.ackedSeq, 3);
     await hook('UserPromptSubmit', { host: 'codex' });
+    assert.equal(job.ackedSeq, 3, 'a turn that did not go on from the output (interrupted, timed out, or an old host) may never have shown it');
+    await hook('Stop', { host: 'codex', stop_hook_active: true });
     assert.equal(job.ackedSeq, 4);
+  });
+
+  await t.test('compaction sends news the lead was shown back to an explicit ack', async () => {
+    h.jobs.ask(job.id, 'news before compaction');
+    const { offer: tool } = await lead('offer', { tool_response: true });
+    await hook('PostToolUse', { tool_name: 'mcp__plugin_crew_crew__status', tool_response: [{ type: 'text', text: tool.text }] });
+    await hook('PreCompact');
+    await hook('Stop');
+    assert.equal(job.ackedSeq, 4, 'the summary may have dropped it');
+    await lead('ack', { ack: tool.receipt });
+    assert.equal(job.ackedSeq, 5);
   });
 
   await t.test('an asynchronous offer still needs an explicit acknowledgement', async () => {
@@ -398,9 +411,9 @@ test('notification routes require authentication; boundaries acknowledge confirm
     const { offer } = await lead('offer', { automatic: true, generation: watch.generation });
     await hook('UserPromptSubmit');
     await hook('Stop');
-    assert.equal(job.ackedSeq, 4);
-    await lead('ack', { ack: offer.receipt });
     assert.equal(job.ackedSeq, 5);
+    await lead('ack', { ack: offer.receipt });
+    assert.equal(job.ackedSeq, 6);
   });
 });
 

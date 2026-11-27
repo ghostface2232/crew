@@ -1161,6 +1161,9 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         #expect(projectName("/a/App", among: ["/a/App", "/b/app"]) == "a/App")
         #expect(projectName("/elsewhere/tool", among: paths) == "elsewhere/tool")
         #expect(projectName("/solo/thing", among: []) == "thing")
+        // One path that is the end of another has no parent left to add, so it keeps its whole path.
+        #expect(projectName("/a/b", among: ["/a/b", "/x/a/b"]) == "/a/b")
+        #expect(projectName("/x/a/b", among: ["/a/b", "/x/a/b"]) == "x/a/b")
     }
     @Test func decisionsTakeTheDetailPanelInPlaceOfAJobOrSession() throws {
         let store = try store()

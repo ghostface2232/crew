@@ -202,8 +202,8 @@ struct BoardView: View {
             }
         }.padding(.top, Space.s).padding(.bottom, Space.s)
     }
-    /// The title and, with requests waiting, the banner. Beside the summary card the banner is as wide as
-    /// the title's column and sits at the column's foot, level with the card's; once the two stack (`fills`) it
+    /// The title and, with requests waiting, the banner. Beside the summary card the banner is at most
+    /// `headingCopyWidth` wide and sits at the column's foot, level with the card's; once the two stack (`fills`) it
     /// follows the title across the page.
     private func headingCopy(review: Int, fills: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {

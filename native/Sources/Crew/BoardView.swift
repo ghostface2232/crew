@@ -629,6 +629,7 @@ struct MissionPanel: View {
                 if let count { Text(count, format: .number).font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary) }
                 Image(systemName: "chevron.down").font(Symbol.badge).foregroundStyle(.secondary)
                     .rotationEffect(.degrees(open ? 0 : -90)).offset(x: open ? 0 : Symbol.chevronNudge)
+                    .accessibilityHidden(true)
             }
             .padding(.leading, WorkspaceStyle.rowTitleInset).padding(.vertical, Space.xs).padding(.trailing, Space.l)
             .contentShape(Rectangle())

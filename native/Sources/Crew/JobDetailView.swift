@@ -430,9 +430,12 @@ struct MissionDecisionsView: View {
                         // The system's small clear glyph, not an icon button: one sits beside every decision.
                         Button { if let mission { Task { await store.forget(entry, in: mission) } } } label: {
                             Image(systemName: "xmark.circle.fill").font(Typeface.callout)
-                                .foregroundStyle(locked ? .quaternary : .tertiary).contentShape(Rectangle())
+                                .foregroundStyle(locked ? .quaternary : .tertiary)
+                                .padding(Space.xs).contentShape(Rectangle())
                         }
                         .buttonStyle(WorkspacePressStyle()).disabled(locked)
+                        // The padding widens the target only; the glyph stays where it was.
+                        .padding(-Space.xs)
                         .accessibilityLabel(String(localized: "Forget “\(entry.text)”"))
                         .help("Forget this decision. Jobs started after this no longer get it.")
                     }.inset()
@@ -883,7 +886,8 @@ private struct DebateRound: View {
                                 Text(point.title).font(Typeface.callout).textSelection(.enabled)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            .padding(WorkspaceStyle.rowInsets)
+                            // A point is a line in a list, not a row that opens something: it keeps the tighter inset.
+                            .padding(.vertical, Space.ml).padding(.horizontal, Space.l)
                         }
                     }
                     .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous))

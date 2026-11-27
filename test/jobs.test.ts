@@ -1401,7 +1401,7 @@ test('every worker that runs commands is given the shared-machine rules, and a r
     assert.ok(text.indexOf('# Role:') === 0 && text.indexOf('# This machine is shared') > 0, job.kind);
     // A reviewer that only reads starts nothing, so it is told to run checks that end by themselves instead.
     assert.equal(text.includes('Run only commands that end by themselves'), job.kind === 'review', job.kind);
-    assert.equal(text.includes('Let the system choose one'), job.kind === 'delegate', job.kind);
+    assert.equal(text.includes('Have the system pick a free port'), job.kind === 'delegate', job.kind);
     assert.ok(!job.prompt.includes('This machine is shared'));
   }
 

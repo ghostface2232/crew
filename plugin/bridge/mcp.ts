@@ -949,13 +949,19 @@ function describeJob(job: JobView, ctx: CallContext): string {
 /** A report longer than one page comes as its first page and where it goes on, so the lead never reads a part twice. */
 function describePaged(job: JobView, waitingHint?: string): string {
   if (!job.report || job.state === 'running' || jsonBytes(job.report) <= REPORT_PAGE_BYTES) return describe(job, waitingHint);
-  const page = textPage(job.report, 0, REPORT_PAGE_BYTES);
   // The turn pins the next page to this report, should a follow-up turn end before it is read.
   const turn = job.exchange?.findLast((entry) => entry.from === 'worker')?.turn ?? job.turns;
-  const next = `Next: status job_id "${job.id}", turn: ${turn}, report_offset: ${page.length}`;
-  // First, so it survives when the response is cut to its bound.
-  return `The report is longer than one page; its first page is below. ${next}.\n${describe(job, waitingHint, `${page}\n${next}`)}`;
+  const around = (page: string) => {
+    const next = `Next: status job_id "${job.id}", turn: ${turn}, report_offset: ${page.length}`;
+    // First, so it survives when the response is cut to its bound.
+    return `The report is longer than one page; its first page is below. ${next}.\n${describe(job, waitingHint, `${page}\n${next}`)}`;
+  };
+  // The response is cut from its end to LEAD_TEXT_BYTES, so the page must fit beside the rest of the job's text whole, or
+  // the offset would skip what was cut. The slack covers the offset's digits and a line a caller puts first.
+  const page = textPage(job.report, 0, Math.min(REPORT_PAGE_BYTES, LEAD_TEXT_BYTES - PAGE_SLACK - jsonBytes(around(''))));
+  return around(page);
 }
+const PAGE_SLACK = 1024;
 
 /** The roles, usage and board lines this session's status list last showed in full, and when. */
 let lastFooter: { text: string; at: number; session?: string; compactedAt?: number } = { text: '', at: 0 };

@@ -504,7 +504,8 @@ test('a report longer than one page is shown as its first page, which the next p
   const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   const fn = source.slice(source.indexOf('function describePaged'), source.indexOf('\n}\n', source.indexOf('function describePaged')) + 2);
   const describePaged = vm.runInNewContext(stripTypeScriptTypes(`(${fn})`), {
-    describe: (job: any, hint: any, report = job.report) => `hint=${hint}\n${report}`, textPage, jsonBytes, REPORT_PAGE_BYTES,
+    describe: (job: any, hint: any, report = job.report) => `hint=${hint}\n${job.checks ?? ''}${report}`, textPage, jsonBytes, REPORT_PAGE_BYTES,
+    LEAD_TEXT_BYTES, PAGE_SLACK: 1024,
   });
   const report = 'x'.repeat(40_000);
   const shown = describePaged({ id: 'long', state: 'done', turns: 2, report });
@@ -514,6 +515,12 @@ test('a report longer than one page is shown as its first page, which the next p
   assert.ok(!shown.includes(report.slice(0, first.length + 1)), 'nothing past the first page is shown');
   assert.equal(describePaged({ id: 'short', state: 'done', report: 'brief' }, 'h'), 'hint=h\nbrief');
   assert.equal(describePaged({ id: 'run', state: 'running', report }), `hint=undefined\n${report}`);
+  // With long check output beside it, the page shrinks so the whole response stays within the bound the lead is sent.
+  const crowded = describePaged({ id: 'long', state: 'done', turns: 2, report, checks: 'y'.repeat(9_000) });
+  const offset = Number(/report_offset: (\d+)/.exec(crowded)![1]);
+  assert.ok(offset < first.length);
+  assert.ok(jsonBytes(crowded) <= LEAD_TEXT_BYTES, 'nothing is cut from the end');
+  assert.ok(crowded.includes(`${report.slice(0, offset)}\nNext: status`));
 });
 
 test('a call with an argument its tool does not take is refused before it reaches the daemon, naming where the brief goes', async (t) => {

@@ -10,8 +10,9 @@ struct BoardView: View {
     /// The page column's width, the panel floating over its trailing part; it bounds how wide the panel may be dragged.
     @State private var pageWidth: CGFloat = 0
     @State private var scroll = ScrollPosition(edge: .top)
-    /// Lets a card that changes column glide across instead of fading out of one and into the other.
-    @Namespace private var cards
+    /// How many finished missions History shows; Show More adds `historyPage`. A search still reads all of them.
+    @State private var historyShown = BoardView.historyPage
+    private static let historyPage = 24
     private var pageKey: String { "\(store.project)|\(store.selection ?? "overview")" }
     private var overview: Bool { (store.selection ?? "overview") == "overview" }
     var body: some View {
@@ -39,6 +40,7 @@ struct BoardView: View {
         .frame(minHeight: WorkspaceStyle.windowMinHeight)
         .onChange(of: pageKey) {
             store.persistSelection()
+            historyShown = Self.historyPage
             scroll.scrollTo(edge: .top)
         }
         .onExitCommand { store.closeDetail() }
@@ -49,7 +51,6 @@ struct BoardView: View {
         let pending = store.scopedPendingCount
         let issuesProject = store.connected && overview ? store.project : ""
         return ScrollView {
-            // Lazy so a long history builds only the panels on screen.
             LazyVStack(alignment: .leading, spacing: WorkspaceStyle.cardGap) {
                 if !store.connected { connectionBanner.transition(.card) }
                 heading(pending: pending)
@@ -122,38 +123,20 @@ struct BoardView: View {
     /// full width.
     ///
     /// A card is one view wherever it is placed (`Columns`), so one that changes column or width as others come and
-    /// go moves there as itself and keeps its state. History is the exception: it grows without bound, so its
-    /// columns are lazy stacks, and a card changing column there is two views that cross over (`placed`).
-    @ViewBuilder private func masonry<Card: View>(_ tiles: [Tile], left: Tile?, right: Tile?, lazy: Bool, @ViewBuilder card: @escaping (Tile) -> Card) -> some View {
-        let columns = [
-            stride(from: 0, to: tiles.count, by: 2).map { tiles[$0] } + [left].compactMap { $0 },
-            stride(from: 1, to: tiles.count, by: 2).map { tiles[$0] } + [right].compactMap { $0 },
-        ]
-        let paired = wide && !columns[0].isEmpty && !columns[1].isEmpty
-        if !lazy {
-            let second = Set(columns[1].map(\.id)), all = tiles + [left, right].compactMap { $0 }
-            Columns(count: paired ? 2 : 1, spacing: WorkspaceStyle.cardGap) {
-                ForEach(all) { tile in
-                    card(tile).layoutValue(key: Columns.Column.self, value: second.contains(tile.id) ? 1 : 0).transition(.card)
-                }
+    /// go moves there as itself and keeps its state. The layout builds every card, which is why History shows its
+    /// missions a page at a time.
+    private func masonry<Card: View>(_ tiles: [Tile], left: Tile?, right: Tile?, @ViewBuilder card: @escaping (Tile) -> Card) -> some View {
+        let all = tiles + [left, right].compactMap { $0 }
+        let second = Set(stride(from: 1, to: tiles.count, by: 2).map { tiles[$0].id } + [right].compactMap { $0?.id })
+        // A lone column keeps the full width.
+        let paired = wide && !second.isEmpty && second.count < all.count
+        return Columns(count: paired ? 2 : 1, spacing: WorkspaceStyle.cardGap) {
+            ForEach(all) { tile in
+                card(tile).layoutValue(key: Columns.Column.self, value: second.contains(tile.id) ? 1 : 0).transition(.card)
             }
-            // Empty, it takes no room in the page's stack either, so an empty state sits where it does without it.
-            .padding(.bottom, all.isEmpty ? -WorkspaceStyle.cardGap : 0)
-        } else if paired {
-            HStack(alignment: .top, spacing: WorkspaceStyle.cardGap) {
-                ForEach(columns.indices, id: \.self) { column in
-                    LazyVStack(alignment: .leading, spacing: WorkspaceStyle.cardGap) {
-                        ForEach(columns[column]) { placed(card($0), $0) }
-                    }.frame(maxWidth: .infinity, alignment: .top)
-                }
-            }
-        } else {
-            ForEach(tiles + [left, right].compactMap { $0 }) { placed(card($0), $0) }
         }
-    }
-    /// Matched within the page only: the same mission on another page must not fly across when the page changes.
-    private func placed<Card: View>(_ card: Card, _ tile: Tile) -> some View {
-        card.matchedGeometryEffect(id: "\(pageKey)/\(tile.id)", in: cards).transition(.card)
+        // Empty, it takes no room in the page's stack either, so an empty state sits where it does without it.
+        .padding(.bottom, all.isEmpty ? -WorkspaceStyle.cardGap : 0)
     }
     private var title: String {
         if !store.project.isEmpty { return projectName(store.project, among: store.projects) }
@@ -240,17 +223,19 @@ struct BoardView: View {
         let missionJobs: (Mission) -> [Job] = { mission in
             (store.search.isEmpty || !matches(mission.title) ? matchedByMission[mission.id] : allByMission[mission.id]) ?? []
         }
-        let shownMissions = history ? scopedMissions.filter { $0.state != "active" } : scopedMissions.filter { $0.state == "active" }
-        let recent = history ? [] : Array(scopedMissions.filter { $0.state != "active" }.prefix(2))
-        // Jobs of a recent mission already appear inside its panel.
-        let panelIDs = Set((shownMissions + recent).map(\.id))
+        let finished = scopedMissions.filter { $0.state != "active" }
+        let shownMissions = history ? Array(finished.prefix(historyShown)) : scopedMissions.filter { $0.state == "active" }
+        let recent = history ? [] : Array(finished.prefix(2))
+        // Jobs of a recent mission already appear inside its panel, and those of a History mission not shown yet
+        // wait with it.
+        let panelIDs = Set(((history ? finished : shownMissions) + recent).map(\.id))
         let loose = jobs.filter { !panelIDs.contains($0.mission ?? "") && (history ? !$0.isActive : $0.isActive) }.sorted { $0.createdAt > $1.createdAt }
         let recentJobs = history ? [] : Array(jobs.filter { !$0.isActive && $0.mission == nil }.sorted { ($0.endedAt ?? 0) > ($1.endedAt ?? 0) }.prefix(4))
         let sessions = history ? [] : store.state.claude.filter { (store.project.isEmpty || $0.projectPath == store.project) && matches($0.title) }
         let tiles: [Tile] = shownMissions.map(Tile.mission) + (loose.isEmpty ? [] : [.loose]) + recent.map(Tile.mission)
         let emptyHistory = history && shownMissions.isEmpty && loose.isEmpty
         let emptyWorkspace = !history && jobs.isEmpty && scopedMissions.isEmpty && !store.state.claude.contains { (store.project.isEmpty || $0.projectPath == store.project) && matches($0.title) }
-        masonry(tiles, left: recentJobs.isEmpty ? nil : .finished, right: sessions.isEmpty ? nil : .sessions, lazy: history) { tile in
+        masonry(tiles, left: recentJobs.isEmpty ? nil : .finished, right: sessions.isEmpty ? nil : .sessions) { tile in
             switch tile {
             case .mission(let mission):
                 MissionPanel(store: store, mission: mission, jobs: missionJobs(mission))
@@ -267,6 +252,11 @@ struct BoardView: View {
                     VStack(spacing: WorkspaceStyle.rowGap) { ForEach(sessions) { session in SessionRow(session: session, selected: store.selectedSession == session.id, store: store) { store.toggleSession(session.id) }.transition(.card) } }
                 }
             }
+        }
+        if history && finished.count > historyShown {
+            Button("Show More", systemImage: "chevron.down") {
+                withAnimation(Motion.reduced(Motion.reflow, reduceMotion)) { historyShown += Self.historyPage }
+            }.pillButton().frame(maxWidth: .infinity).transition(.card)
         }
         if emptyHistory || emptyWorkspace {
             EmptyState(title: store.search.isEmpty ? (emptyHistory ? String(localized: "No completed work yet") : String(localized: "Ready when you are")) : String(localized: "No matching work"),

@@ -116,16 +116,30 @@ struct BoardView: View {
     private static let headingCopyWidth: CGFloat = 340
     private static let summaryWidth: ClosedRange<CGFloat> = 430...500
     /// The page's cards in two columns on a wide page, each stacked on its own, so a card that grows moves only
-    /// the cards below it in its own column. Cards alternate left and right in order and keep their column: filling
-    /// the shorter column instead would move cards across whenever one opens or closes. `left` and `right` end their
-    /// columns whatever the count above, in the order a single column shows them. With one column's worth of cards,
-    /// they keep the full width.
-    @ViewBuilder private func masonry<Card: View>(_ tiles: [Tile], left: Tile?, right: Tile?, @ViewBuilder card: @escaping (Tile) -> Card) -> some View {
+    /// the cards below it in its own column. Cards alternate left and right in order: filling the shorter column
+    /// instead would move cards across whenever one opens or closes. `left` and `right` end their columns whatever
+    /// the count above, in the order a single column shows them. With one column's worth of cards, they keep the
+    /// full width.
+    ///
+    /// A card is one view wherever it is placed (`Columns`), so one that changes column or width as others come and
+    /// go moves there as itself and keeps its state. History is the exception: it grows without bound, so its
+    /// columns are lazy stacks, and a card changing column there is two views that cross over (`placed`).
+    @ViewBuilder private func masonry<Card: View>(_ tiles: [Tile], left: Tile?, right: Tile?, lazy: Bool, @ViewBuilder card: @escaping (Tile) -> Card) -> some View {
         let columns = [
             stride(from: 0, to: tiles.count, by: 2).map { tiles[$0] } + [left].compactMap { $0 },
             stride(from: 1, to: tiles.count, by: 2).map { tiles[$0] } + [right].compactMap { $0 },
         ]
-        if wide && !columns[0].isEmpty && !columns[1].isEmpty {
+        let paired = wide && !columns[0].isEmpty && !columns[1].isEmpty
+        if !lazy {
+            let second = Set(columns[1].map(\.id)), all = tiles + [left, right].compactMap { $0 }
+            Columns(count: paired ? 2 : 1, spacing: WorkspaceStyle.cardGap) {
+                ForEach(all) { tile in
+                    card(tile).layoutValue(key: Columns.Column.self, value: second.contains(tile.id) ? 1 : 0).transition(.card)
+                }
+            }
+            // Empty, it takes no room in the page's stack either, so an empty state sits where it does without it.
+            .padding(.bottom, all.isEmpty ? -WorkspaceStyle.cardGap : 0)
+        } else if paired {
             HStack(alignment: .top, spacing: WorkspaceStyle.cardGap) {
                 ForEach(columns.indices, id: \.self) { column in
                     LazyVStack(alignment: .leading, spacing: WorkspaceStyle.cardGap) {
@@ -236,7 +250,7 @@ struct BoardView: View {
         let tiles: [Tile] = shownMissions.map(Tile.mission) + (loose.isEmpty ? [] : [.loose]) + recent.map(Tile.mission)
         let emptyHistory = history && shownMissions.isEmpty && loose.isEmpty
         let emptyWorkspace = !history && jobs.isEmpty && scopedMissions.isEmpty && !store.state.claude.contains { (store.project.isEmpty || $0.projectPath == store.project) && matches($0.title) }
-        masonry(tiles, left: recentJobs.isEmpty ? nil : .finished, right: sessions.isEmpty ? nil : .sessions) { tile in
+        masonry(tiles, left: recentJobs.isEmpty ? nil : .finished, right: sessions.isEmpty ? nil : .sessions, lazy: history) { tile in
             switch tile {
             case .mission(let mission):
                 MissionPanel(store: store, mission: mission, jobs: missionJobs(mission))
@@ -756,6 +770,39 @@ struct NeedsYouView: View {
 }
 
 /// A card on the overview or history page.
+/// Stacks its subviews in `count` columns of equal width, each in the column it names (`Column`), in the order
+/// given. With one column, every subview stacks in it.
+private struct Columns: Layout {
+    struct Column: LayoutValueKey { static let defaultValue = 0 }
+    var count: Int
+    var spacing: CGFloat
+    private func columnWidth(_ width: CGFloat) -> CGFloat { (width - spacing * CGFloat(count - 1)) / CGFloat(count) }
+    /// Each subview's column and height at `width`, and the height of the tallest column.
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> (cards: [(column: Int, height: CGFloat)], height: CGFloat) {
+        let proposal = ProposedViewSize(width: columnWidth(width), height: nil)
+        var heights = [CGFloat](repeating: 0, count: count)
+        let cards = subviews.map { subview in
+            let column = min(subview[Column.self], count - 1), height = subview.sizeThatFits(proposal).height
+            heights[column] += height + spacing
+            return (column, height)
+        }
+        return (cards, max(0, (heights.max() ?? 0) - spacing))
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.replacingUnspecifiedDimensions().width
+        return CGSize(width: width, height: arrange(subviews, width: width).height)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let width = columnWidth(bounds.width)
+        var tops = [CGFloat](repeating: bounds.minY, count: count)
+        for (subview, card) in zip(subviews, arrange(subviews, width: bounds.width).cards) {
+            subview.place(at: CGPoint(x: bounds.minX + CGFloat(card.column) * (width + spacing), y: tops[card.column]),
+                          proposal: ProposedViewSize(width: width, height: card.height))
+            tops[card.column] += card.height + spacing
+        }
+    }
+}
+
 private enum Tile: Identifiable {
     case mission(Mission), loose, finished, sessions
     var id: String {

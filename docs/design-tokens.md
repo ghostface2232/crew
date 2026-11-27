@@ -43,7 +43,7 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 | `cardGap` | 16 | Between cards, across and down |
 | `blockGap` | 16 | Between blocks stacked inside a card or section |
 | `sectionGap` | 28 | Between detail panel sections |
-| `bannerPadding` | 16 | Connection and attention banners. The compact attention banner in all projects' Overview heading takes `Space.ml` × `Space.l` and `rowRadius` instead |
+| `bannerPadding` | 16 | Connection and attention banners; the compact attention banner in all projects' Overview heading uses `Space.ml` × `Space.l` and `rowRadius` instead |
 | `panelPadding` | 24 | Detail panel and New Job sheet |
 | `panelWidth` | 420 | The detail panel's width until the user drags it; a drag keeps to `panelMinWidth` (360) to `panelMaxWidth` (760), and the page keeps `panelPageRoom` (240) visible beside it and its inset, so a narrow window lowers the limit. `panelWidth(_:page:)` applies all three |
 | `panelHandleWidth` | 12 | The strip on the panel's leading edge that takes a resize drag |

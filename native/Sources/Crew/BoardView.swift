@@ -54,7 +54,7 @@ struct BoardView: View {
                 if !store.connected { connectionBanner }
                 heading(pending: pending)
                 if store.connected && store.project.isEmpty && overview { SetupCard(api: store.api) }
-                // All projects' overview has the banner in its heading instead, compact, beside the summary card.
+                // All projects' overview puts the compact banner in its heading instead.
                 if pending > 0 && store.selection != "needs" && !(overview && store.project.isEmpty) { attentionBanner(pending: pending).transition(.card) }
                 if store.selection == "needs" { NeedsYouView(store: store) }
                 else if store.selection == "activity" { activity }
@@ -163,8 +163,8 @@ struct BoardView: View {
             Button("Retry") { store.start() }.pillButton()
         }.padding(WorkspaceStyle.bannerPadding).background(Palette.attention(Palette.warning), in: RoundedRectangle(cornerRadius: WorkspaceStyle.cardRadius))
     }
-    /// Requests waiting on the user, leading to Needs You. `compact` is the same banner a size down, for the heading
-    /// of all projects' overview, where it sits under the title in a column rather than across the page.
+    /// Requests waiting on the user, opening Needs You. `compact` draws it a size down to sit under the title in
+    /// all projects' overview heading.
     private func attentionBanner(pending: Int, compact: Bool = false) -> some View {
         Button { store.selection = "needs"; store.search = "" } label: {
             HStack {

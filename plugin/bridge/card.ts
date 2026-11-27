@@ -23,6 +23,7 @@ const MAX_JOBS = 6;
 
 export interface CardJob { agent: string; title: string; state: JobView['state']; startedAt: number; endedAt: number | null }
 export interface CardMission {
+  id: string;
   title: string;
   state: Mission['state'];
   steps: { stop: number; label: string | null }[];
@@ -50,6 +51,7 @@ export function cardView(missions: Mission[], jobs: JobView[], now = Date.now())
     const stages = mission.stages ?? ORIGINAL_TRACK;
     const at = mission.stages ? mission.stageIndex ?? Math.max(0, stages.indexOf(mission.stage)) : STOP_OF_STAGE[mission.stage];
     return {
+      id: mission.id,
       title: mission.title,
       state: mission.state,
       steps: stages.map((stage, index) => ({ stop: STOP_OF_STAGE[stage], label: mission.labels?.[index] ?? null })),
@@ -180,6 +182,9 @@ button:hover{text-decoration:underline}
     });
   };
   const active = () => view && (view.missions.some((m) => m.state === 'active') || view.jobs.length > 0);
+  // Where the missions stood when this card was made. A newer card is shown once a step moves, so this one then stays as it was.
+  const stepsOf = (v) => v.missions.map((m) => m.id + ':' + m.at + ':' + m.state).join(' ');
+  let made = null;
   function render() {
     if (!view) return;
     // A live card counts time as it goes; a snapshot stops at the moment it was taken.
@@ -234,6 +239,7 @@ button:hover{text-decoration:underline}
   const show = (result) => {
     if (!usable(result)) return;
     view = result.structuredContent;
+    if (made === null) made = stepsOf(view);
     render();
   };
   const stop = () => { polling = false; clearTimeout(timer); timer = 0; };
@@ -244,6 +250,11 @@ button:hover{text-decoration:underline}
     if (!seen || document.hidden) return void (timer = setTimeout(tick, POLL_MS));
     request('tools/call', { name: 'progress', arguments: {} }).then((result) => {
       if (!usable(result)) throw new Error('no card');
+      if (stepsOf(result.structuredContent) !== made) {
+        stop();
+        live = false;
+        return render();
+      }
       show(result);
       if (!active()) stop();
       else if (polling) timer = setTimeout(tick, POLL_MS);

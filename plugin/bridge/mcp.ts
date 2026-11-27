@@ -429,8 +429,14 @@ const ackProperty = {
 };
 /** Set from the client's initialize request: whether it draws MCP Apps, and so this server's progress card. */
 let showsCards = false;
-/** The tools whose results carry the progress card. */
-const CARD_TOOLS = ['mission', 'status'];
+/**
+ * Whether a call's result carries the progress card: only `mission`, and under Codex only the calls that start, move or
+ * end a mission. The Claude app draws a card for every call of a tool that declares one and ignores a result's own;
+ * Codex draws the card a result names, so there the card can follow the mission's steps alone
+ * (docs/mcp-compatibility.md#6-mcp-apps-inline-cards).
+ */
+const carriesCard = (name: string, args: any) => showsCards && name === 'mission'
+  && (host !== 'codex' || Boolean(args?.title || args?.stage || args?.done || args?.abandoned));
 /** Called by the card itself to refresh, where the host lets a card call tools; the model is not shown it. */
 const PROGRESS_TOOL = {
   name: 'progress',
@@ -444,7 +450,7 @@ function toolList() {
   const tools = buildTools();
   for (const tool of tools) Object.assign(tool.inputSchema.properties, { ack: ackProperty });
   if (!showsCards) return tools;
-  for (const tool of tools) if (CARD_TOOLS.includes(tool.name)) Object.assign(tool, { _meta: { ui: { resourceUri: CARD_URI } } });
+  if (host !== 'codex') for (const tool of tools) if (tool.name === 'mission') Object.assign(tool, { _meta: { ui: { resourceUri: CARD_URI } } });
   return [...tools, PROGRESS_TOOL as unknown as (typeof tools)[number]];
 }
 let TOOLS = toolList();
@@ -1318,8 +1324,8 @@ async function handle(msg: any): Promise<void> {
         }
         // The limit is on text, which is what grew without bound; evidence images keep their own path as before.
         if (jsonBytes(text) > LEAD_BYTES) throw new Error('Crew response exceeds its size limit. Read one job at a time.');
-        const card = showsCards && CARD_TOOLS.includes(params.name) ? await progressCard().catch(() => undefined) : undefined;
-        reply({ content: [{ type: 'text', text }, ...imageContent(ctx.images)], isError, ...(card ? { structuredContent: card } : {}) });
+        const card = carriesCard(params.name, args) ? await progressCard().catch(() => undefined) : undefined;
+        reply({ content: [{ type: 'text', text }, ...imageContent(ctx.images)], isError, ...(card ? { structuredContent: card, _meta: { ui: { resourceUri: CARD_URI } } } : {}) });
       } catch (err) {
         reply({ content: [{ type: 'text', text: clipped(String((err as Error).message ?? err), 7000) }], isError: true });
       } finally {

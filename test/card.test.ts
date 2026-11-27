@@ -20,6 +20,7 @@ test('the card shows a mission\'s track and its jobs, those under way first', ()
   assert.equal(view.asOf, 1000);
   assert.deepEqual(view.missions[0].steps, [{ stop: 0, label: null }, { stop: 1, label: 'Sample' }, { stop: 2, label: null }, { stop: 4, label: null }]);
   assert.equal(view.missions[0].at, 2);
+  assert.equal(view.missions[0].id, 'm-1');
   assert.deepEqual(view.missions[0].jobs.map((j) => j.title), ['Review', 'Old']);
   assert.deepEqual(view.jobs, []);
 });

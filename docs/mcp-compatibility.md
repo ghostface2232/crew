@@ -173,5 +173,7 @@ Checked 2026-11-27 on macOS, to see whether a lead's chat can show Crew's progre
   - In the Claude app, a card therefore shows the state of the tool call that made it, and a newer state needs another tool call (a new card).
 - **Frame height.** The Claude app sizes the frame to the height the card reports in `ui/notifications/size-changed`. ChatGPT keeps an inline frame at least 200px tall: a card reporting 64px stayed at an `innerHeight` of 200, and its `containerDimensions` gave only `maxWidth`. Reporting the document's own height (`scrollHeight`) keeps a frame from ever shrinking, since a document is never shorter than its frame.
 - **Borders.** Both apps draw a rounded frame around the card, so a card that draws its own border shows two.
+- **Which calls get a card.** A tool that declares `ui.resourceUri` in `tools/list` gets a card in both apps on every call, even when its result has no `structuredContent`. Only ChatGPT also draws a card for a result that names `_meta.ui.resourceUri` while its tool declares none; the Claude app ignores that, so there a card goes with every call of a declaring tool or none.
+- **Reused servers.** Neither app asked a stdio server for its tool list again after the server's file changed: a new conversation reused the process an earlier one had started. Renaming the server in the config gave a fresh one.
 
 Crew's card is built on these findings; [jobs.md](jobs.md#progress-card) says what it shows and when.

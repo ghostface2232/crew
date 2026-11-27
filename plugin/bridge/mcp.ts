@@ -947,7 +947,8 @@ function describeJob(job: JobView, ctx: CallContext): string {
 }
 
 /** A report longer than one page comes as its first page and where it goes on, so the lead never reads a part twice. */
-function describePaged(job: JobView, waitingHint?: string): string {
+/** `room`: the bytes of the response left for this job's text. */
+function describePaged(job: JobView, waitingHint?: string, room = LEAD_TEXT_BYTES): string {
   if (!job.report || job.state === 'running' || jsonBytes(job.report) <= REPORT_PAGE_BYTES) return describe(job, waitingHint);
   // The turn pins the next page to this report, should a follow-up turn end before it is read.
   const turn = job.exchange?.findLast((entry) => entry.from === 'worker')?.turn ?? job.turns;
@@ -956,12 +957,13 @@ function describePaged(job: JobView, waitingHint?: string): string {
     // First, so it survives when the response is cut to its bound.
     return `The report is longer than one page; its first page is below. ${next}.\n${describe(job, waitingHint, `${page}\n${next}`)}`;
   };
-  // The response is cut from its end to LEAD_TEXT_BYTES, so the page must fit beside the rest of the job's text whole, or
+  // The response is cut from its end to LEAD_TEXT_BYTES, so the page must fit in the room beside the rest of the job's text, or
   // the offset would skip what was cut. The slack covers the offset's digits and a line a caller puts first.
-  const page = textPage(job.report, 0, Math.min(REPORT_PAGE_BYTES, LEAD_TEXT_BYTES - PAGE_SLACK - jsonBytes(around(''))));
+  const page = textPage(job.report, 0, Math.min(REPORT_PAGE_BYTES, room - PAGE_SLACK - jsonBytes(around(''))));
   return around(page);
 }
 const PAGE_SLACK = 1024;
+const SEPARATOR = '\n\n────────\n\n';
 
 /** The roles, usage and board lines this session's status list last showed in full, and when. */
 let lastFooter: { text: string; at: number; session?: string; compactedAt?: number } = { text: '', at: 0 };
@@ -1017,15 +1019,15 @@ async function followOne(id: string, ctx: CallContext): Promise<string> {
 }
 
 /** `describe`, plus what the lead should do about a waiting job that could not be settled in the app. */
-function render(job: JobView): string {
-  if (job.state !== 'waiting') return describePaged(job);
+function render(job: JobView, room?: number): string {
+  if (job.state !== 'waiting') return describePaged(job, undefined, room);
   const key = job.waiting!.id;
   const error = failed.get(key);
   let hint: string | undefined;
   if (error !== undefined) hint = `The app could not show the prompt to the user (${error}). Ask them in the conversation, then pass their decision on with reply.`;
   else if (dismissed.has(key)) hint = 'The user dismissed the prompt in the app. Ask what they want, then pass it on with reply.';
   else if (!canElicit) hint = 'This client cannot show the prompt itself. Ask the user in the conversation, then pass their decision on with reply.';
-  return describePaged(job, hint);
+  return describePaged(job, hint, room);
 }
 
 /** What the lead does with a role it holds itself, by the kind of work. */
@@ -1230,9 +1232,15 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const ready = jobs.filter(needsLead);
       const running = jobs.filter((j) => !needsLead(j));
       for (const job of ready) showEvidence(ctx, job);
-      const parts = ready.map(render);
+      // The jobs share one response, cut from its end: each paged report gets only the room the ones before it left.
+      let room = LEAD_TEXT_BYTES;
+      const parts = ready.map((job) => {
+        const text = render(job, room);
+        room -= jsonBytes(`${text}${SEPARATOR}`);
+        return text;
+      });
       if (running.length) parts.push(`${ready.length ? 'Still running' : 'Timed out waiting; still running'}:\n${running.map(summarize).join('\n')}`);
-      return parts.join('\n\n────────\n\n');
+      return parts.join(SEPARATOR);
     }
     case 'answer':
       return describeJob(await api('POST', `/api/jobs/${args.job_id}/questions/${args.question_id}`, { answer: args.answer, attachments: args.attachments }), ctx);

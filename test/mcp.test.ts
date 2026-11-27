@@ -521,6 +521,9 @@ test('a report longer than one page is shown as its first page, which the next p
   assert.ok(offset < first.length);
   assert.ok(jsonBytes(crowded) <= LEAD_TEXT_BYTES, 'nothing is cut from the end');
   assert.ok(crowded.includes(`${report.slice(0, offset)}\nNext: status`));
+  // A job after others in one wait response gets only the room they left, and none left means reading from the start.
+  assert.ok(jsonBytes(describePaged({ id: 'long', state: 'done', turns: 2, report }, undefined, 9_000)) <= 9_000);
+  assert.match(describePaged({ id: 'long', state: 'done', turns: 2, report }, undefined, 500), /report_offset: 0\./);
 });
 
 test('a call with an argument its tool does not take is refused before it reaches the daemon, naming where the brief goes', async (t) => {

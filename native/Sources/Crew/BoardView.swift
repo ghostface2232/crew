@@ -54,7 +54,7 @@ struct BoardView: View {
                 if !store.connected { connectionBanner }
                 heading(pending: pending)
                 if store.connected && store.project.isEmpty && overview { SetupCard(api: store.api) }
-                // All projects' overview has Review Requests in its heading instead.
+                // All projects' overview has the banner in its heading instead, compact, beside the summary card.
                 if pending > 0 && store.selection != "needs" && !(overview && store.project.isEmpty) { attentionBanner(pending: pending).transition(.card) }
                 if store.selection == "needs" { NeedsYouView(store: store) }
                 else if store.selection == "activity" { activity }
@@ -163,25 +163,31 @@ struct BoardView: View {
             Button("Retry") { store.start() }.pillButton()
         }.padding(WorkspaceStyle.bannerPadding).background(Palette.attention(Palette.warning), in: RoundedRectangle(cornerRadius: WorkspaceStyle.cardRadius))
     }
-    private func attentionBanner(pending: Int) -> some View {
+    /// Requests waiting on the user, leading to Needs You. `compact` is the same banner a size down, for the heading
+    /// of all projects' overview, where it sits under the title in a column rather than across the page.
+    private func attentionBanner(pending: Int, compact: Bool = false) -> some View {
         Button { store.selection = "needs"; store.search = "" } label: {
             HStack {
                 Image(systemName: "bell.badge.fill").foregroundStyle(Palette.warning)
-                Text(pending == 1 ? String(localized: "1 request needs your attention") : String(localized: "\(pending) requests need your attention")).font(Typeface.bodyStrong)
+                Text(pending == 1 ? String(localized: "1 request needs your attention") : String(localized: "\(pending) requests need your attention"))
+                    .font(compact ? Typeface.calloutStrong : Typeface.bodyStrong)
                 Spacer()
-                Text("Review").font(Typeface.callout)
+                Text("Review").font(compact ? Typeface.caption : Typeface.callout)
                 Image(systemName: "chevron.right").font(Typeface.micro)
-            }.padding(WorkspaceStyle.bannerPadding).contentShape(Rectangle())
-        }.buttonStyle(.plain).glassEffect(.regular, in: .rect(cornerRadius: WorkspaceStyle.cardRadius))
+            }
+            .padding(.vertical, compact ? Space.ml : WorkspaceStyle.bannerPadding).padding(.horizontal, compact ? Space.l : WorkspaceStyle.bannerPadding)
+            .contentShape(Rectangle())
+        }.buttonStyle(.plain).glassEffect(.regular, in: .rect(cornerRadius: compact ? WorkspaceStyle.rowRadius : WorkspaceStyle.cardRadius))
     }
     private func heading(pending: Int) -> some View {
-        let showReview = overview && store.project.isEmpty && pending > 0
+        // Only all projects' overview: elsewhere the banner runs across the page under the heading.
+        let review = overview && store.project.isEmpty ? pending : 0
         return ViewThatFits(in: .horizontal) {
             if overview {
                 HStack(alignment: .top, spacing: Space.x5l) {
                     // A fixed ideal width keeps a long project path from forcing the stacked layout;
                     // the path truncates instead.
-                    headingCopy(showReview: showReview)
+                    headingCopy(review: review, fills: false)
                         .frame(minWidth: Self.headingCopyWidth, idealWidth: Self.headingCopyWidth, maxWidth: .infinity)
                         // Align the title's cap height, not its line box, with the top of the summary card.
                         .alignmentGuide(.top) { $0[.firstTextBaseline] - Typeface.pageTitleCapHeight }
@@ -189,17 +195,18 @@ struct BoardView: View {
                 }
             }
             VStack(alignment: .leading, spacing: Space.x3l) {
-                headingCopy(showReview: showReview)
+                headingCopy(review: review, fills: true)
                 if overview { WorkspaceSummary(store: store) }
             }
         }.padding(.top, Space.s).padding(.bottom, Space.s)
     }
-    private func headingCopy(showReview: Bool) -> some View {
+    /// The title and, with requests waiting, the compact banner under it: as wide as the title's column beside the
+    /// summary card, or across the page (`fills`) once the two stack.
+    private func headingCopy(review: Int, fills: Bool) -> some View {
         VStack(alignment: .leading, spacing: Space.xxl) {
             WorkspaceHeading(title: title, subtitle: store.project.isEmpty ? nil : store.project)
-            if showReview {
-                Button("Review Requests", systemImage: "arrow.up.right") { store.selection = "needs"; store.search = "" }
-                    .glassPillButton(prominent: false)
+            if review > 0 {
+                attentionBanner(pending: review, compact: true).frame(maxWidth: fills ? .infinity : Self.headingCopyWidth)
             }
         }
     }

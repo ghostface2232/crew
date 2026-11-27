@@ -43,7 +43,7 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 | `cardGap` | 16 | Between cards, across and down |
 | `blockGap` | 16 | Between blocks stacked inside a card or section |
 | `sectionGap` | 28 | Between detail panel sections |
-| `bannerPadding` | 16 | Connection and attention banners |
+| `bannerPadding` | 16 | Connection and attention banners. The compact attention banner in all projects' Overview heading takes `Space.ml` × `Space.l` and `rowRadius` instead |
 | `panelPadding` | 24 | Detail panel and New Job sheet |
 | `panelWidth` | 420 | The detail panel's width until the user drags it; a drag keeps to `panelMinWidth` (360) to `panelMaxWidth` (760), and the page keeps `panelPageRoom` (240) visible beside it and its inset, so a narrow window lowers the limit. `panelWidth(_:page:)` applies all three |
 | `panelHandleWidth` | 12 | The strip on the panel's leading edge that takes a resize drag |
@@ -224,7 +224,7 @@ A pill or glass pill whose words follow state, such as Copied, Saving… or Keep
 
 | Kind | How | Use |
 | --- | --- | --- |
-| Primary | `.glassPillButton()`, or `.glassPillButton(prominent: false)` for clear glass: Liquid Glass at the pill's size and face. Glass pills side by side share a `GlassEffectContainer` | Send, New Job, Save (instructions), Send Job, Install (setup), approval decisions; Review Requests in clear glass |
+| Primary | `.glassPillButton()`, or `.glassPillButton(prominent: false)` for clear glass: Liquid Glass at the pill's size and face. Glass pills side by side share a `GlassEffectContainer` | Send, New Job, Save (instructions), Send Job, Install (setup), approval decisions. No control uses clear glass now |
 | Pill | `.pillButton()`; a destructive role tints it with the danger color, and `.pillButton(selected: true)` tints a toggle with the accent when it is on | Details, Retry, Copy, Undo/Keep, Check Again, Cancel Job; Compare (evidence) |
 | Icon | `.iconButton()`: `IconButtonStyle`, a `Pill.fill` circle of `IconButton.diameter` (28 points), a little larger than a chip, with its symbol in `Symbol.control`; `.iconButton(prominent: true)` fills it with the accent | Close, Show Job, expand a mission; Send Answer (prominent). Forget beside each decision is not one: it is the system's `xmark.circle.fill` glyph at `Typeface.callout`, since one sits on every line of the list |
 | Chip | `.chip(color)`: `Typeface.chip` inked in its color, in a `Palette.chip` capsule with `Chip.insets` (5 × 8), outlined under Increase Contrast. `StatusLabel` draws status with it, passing `Chip.symbolInsets` (6 on the leading side) because the symbol's own side bearing already spaces it from the edge; `.chip(color, in:)` gives it another shape, such as a PR's rounded square | Status of missions and agents; a model's verdict word. Job and session rows and the History table show `StatusIcon`, the status symbol alone, with the word as its tooltip and accessible name |

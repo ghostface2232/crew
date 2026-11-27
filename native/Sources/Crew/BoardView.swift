@@ -567,11 +567,19 @@ struct MissionPanel: View {
             }
             Text(outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
         }
-        // The lead's wrap-up of finished work: what changed, what was verified, what is left for the user.
+        // The lead's wrap-up of finished work: what changed, what was verified, what is left for the user. Folded until
+        // asked for: with several finished cards open, each wrap-up in full buries the cards themselves.
         if mission.state == "done", let summary = mission.summary, !summary.isEmpty {
-            // A group, as in the board: a label on the text itself would be read in place of the summary.
-            ReportText(report: summary).padding(.leading, WorkspaceStyle.rowTitleInset)
-                .accessibilityElement(children: .contain).accessibilityLabel(String(localized: "Wrap-up"))
+            let shown = store.summaryExpanded[mission.id] ?? false
+            // Its label folds it as a stage's label folds its rows.
+            VStack(alignment: .leading, spacing: Space.m) {
+                foldLabel(String(localized: "Wrap-up"), open: shown) { store.summaryExpanded[mission.id] = !shown }
+                if shown {
+                    // A group, as in the board: a label on the text itself would be read in place of the summary.
+                    ReportText(report: summary).padding(.leading, WorkspaceStyle.rowTitleInset)
+                        .accessibilityElement(children: .contain).accessibilityLabel(String(localized: "Wrap-up"))
+                }
+            }
         }
     }
     /// One row however many decisions there are, so a long mission's card stays short; the detail panel lists them.
@@ -602,29 +610,35 @@ struct MissionPanel: View {
     private var foldsStages: Bool { jobs.count > Self.foldStagesAfter }
     /// A stop's name; on a folding mission, the button that folds it, with the stage's job count.
     @ViewBuilder private func stageLabel(_ index: Int, count: Int, open: Bool) -> some View {
-        let name = Text(mission.stops[index]).font(Typeface.bodyStrong).foregroundStyle(.secondary)
         if foldsStages {
-            Button {
-                withAnimation(Motion.reduced(Motion.expand, reduceMotion)) { store.stageExpanded["\(mission.id):\(index)"] = !open }
-            } label: {
-                HStack(spacing: Space.s) {
-                    name
-                    Text(count, format: .number).font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary)
-                    Image(systemName: "chevron.down").font(Symbol.badge).foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(open ? 0 : -90)).offset(x: open ? 0 : Symbol.chevronNudge)
-                }
-                .padding(.leading, WorkspaceStyle.rowTitleInset).padding(.vertical, Space.xs).padding(.trailing, Space.l)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(WorkspacePressStyle())
-            // The padding widens the target only; the label stays where an unfolding stage's name sits.
-            .padding(.vertical, -Space.xs)
-            .accessibilityLabel(count == 1 ? String(localized: "\(mission.stops[index]), 1 job") : String(localized: "\(mission.stops[index]), \(count) jobs"))
-            .accessibilityValue(open ? String(localized: "Expanded") : String(localized: "Collapsed"))
-            .accessibilityAddTraits(.isHeader)
+            foldLabel(mission.stops[index], count: count, open: open) { store.stageExpanded["\(mission.id):\(index)"] = !open }
+                .accessibilityLabel(count == 1 ? String(localized: "\(mission.stops[index]), 1 job") : String(localized: "\(mission.stops[index]), \(count) jobs"))
         } else {
-            name.padding(.leading, WorkspaceStyle.rowTitleInset).accessibilityAddTraits(.isHeader)
+            Text(mission.stops[index]).font(Typeface.bodyStrong).foregroundStyle(.secondary)
+                .padding(.leading, WorkspaceStyle.rowTitleInset).accessibilityAddTraits(.isHeader)
         }
+    }
+    /// A label that folds what is under it, a stage's rows or a finished mission's wrap-up: its name, a count when it
+    /// has one, and a chevron.
+    private func foldLabel(_ title: String, count: Int? = nil, open: Bool, toggle: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(Motion.reduced(Motion.expand, reduceMotion)) { toggle() }
+        } label: {
+            HStack(spacing: Space.s) {
+                Text(title).font(Typeface.bodyStrong).foregroundStyle(.secondary)
+                if let count { Text(count, format: .number).font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary) }
+                Image(systemName: "chevron.down").font(Symbol.badge).foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(open ? 0 : -90)).offset(x: open ? 0 : Symbol.chevronNudge)
+                    .accessibilityHidden(true)
+            }
+            .padding(.leading, WorkspaceStyle.rowTitleInset).padding(.vertical, Space.xs).padding(.trailing, Space.l)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(WorkspacePressStyle())
+        // The padding widens the target only; the label stays where an unfolding stage's name sits.
+        .padding(.vertical, -Space.xs)
+        .accessibilityValue(open ? String(localized: "Expanded") : String(localized: "Collapsed"))
+        .accessibilityAddTraits(.isHeader)
     }
 }
 

@@ -1268,9 +1268,12 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .mission-summary .report { font-size: 12.5px; }
 /* Decisions the user made in a mission, listed in the detail panel, each one theirs to drop. */
 .decisions { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-.decisions li { display: flex; align-items: flex-start; gap: 8px; padding: 6px 4px 6px 12px; border-radius: var(--row-radius); background: var(--surface-2); font-size: 12.5px; line-height: 1.45; }
+.decisions li { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px 6px 12px; border-radius: var(--row-radius); background: var(--surface-2); font-size: 12.5px; line-height: 1.45; }
 .decisions li > span { flex: 1 1 auto; min-width: 0; padding-block: 2px; overflow-wrap: anywhere; }
-.decisions li > button { flex: none; }
+/* Half the size of an icon button (one sits beside every decision), centered on the first line with an expanded hit target. */
+.decisions li > button { position: relative; flex: none; width: 16px; min-height: 16px; margin-top: 3px; color: var(--secondary); }
+.decisions li > button svg { width: 10px; height: 10px; }
+.decisions li > button::after { content: ''; position: absolute; inset: -5px; }
 
 /* MissionTrack: numbered markers, evenly spread between end insets, joined by a line, names centered under them. Each
    step is a zero-width anchor its marker and name center on. The insets fit the longer end name (--fit, measured) but stay
@@ -1331,7 +1334,7 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .track > li[data-pos="now"] .track-name { color: var(--label); }
 .stage-groups { display: grid; gap: 6px; }
 /* The first stage sits as far under the track as the track sits under the title. */
-.stage-groups > .rows:first-child > .stage-name { padding-top: 0; }
+.stage-groups > .rows:first-child > .stage-name, .mission-wrap-up > .stage-name { padding-top: 0; }
 .stage-name { padding: 10px 4px 6px; color: var(--tertiary); font: 550 10.5px/1.2 var(--text-face); letter-spacing: 0.06em; text-transform: uppercase; }
 /* A folding stage's whole label (name, count, chevron) is the button, padded to an easy target; negative margins keep the
    text in place, and the button ends as far above the first row as the rows sit from each other. On hover the label
@@ -1347,7 +1350,7 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   gap: 12px;
   width: 100%;
   min-height: 0;
-  padding: 10px 12px;
+  padding: 12px;
   border-radius: var(--row-radius); corner-shape: var(--smooth);
   background: var(--row);
   color: var(--label);

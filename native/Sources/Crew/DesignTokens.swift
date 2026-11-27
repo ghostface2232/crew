@@ -92,7 +92,7 @@ enum WorkspaceStyle {
         return max(0, min(fits, min(upper, max(panelMinWidth, wanted))))
     }
     /// A row in a list: an icon, two lines and trailing status.
-    static let rowInsets = EdgeInsets(top: Space.ml, leading: Space.l, bottom: Space.ml, trailing: Space.l)
+    static let rowInsets = EdgeInsets(top: Space.l, leading: Space.l, bottom: Space.l, trailing: Space.l)
     /// Between rows in a list.
     static let rowGap = Space.xs
     /// The gray inset that holds a section's contents.

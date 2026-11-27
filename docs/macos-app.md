@@ -109,4 +109,4 @@ Nine reviewers (concurrency, accessibility, build/tests, design/layout, motion, 
 
 ## History
 
-- **2026-11-27.** Local builds were always ad-hoc signed, which was enough while nothing depended on a build keeping its identity. macOS ties the folder access a person grants to the app's signature, so every new build was asked for it again. A local build now signs with the `Crew Local Signing` certificate when the login keychain has one, and stays ad hoc without it ([Build and run](#build-and-run)).
+- **2026-11-27.** Previously, every local build was ad-hoc signed. Because macOS ties granted folder access to the app's signature, it asked for folder access again after every build. Local builds are now signed with the `Crew Local Signing` certificate when the login keychain has one, and ad-hoc signed without it ([Build and run](#build-and-run)).

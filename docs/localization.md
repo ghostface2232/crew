@@ -61,7 +61,7 @@ Mission stops: Plan `계획`, Build `구현`, Review `리뷰`, Fix `수정`, Pol
 
 "Task" outside a mission's task list means the work itself and reads `작업`. Tiers: Fast `빠름`, Light `경량`, Standard `표준`, Frontier `최상위`. Presets: Economy `절약`, Balanced `균형`, Best `최고`. Usage states: ok `정상`, tight `한도 임박`, exhausted `한도 도달`, stale `오래됨`.
 
-The board's `ko.ts` and the macOS app's `Localizable.strings` give the same English the same Korean, so the two read alike side by side.
+The board's `ko.ts` and the macOS app's `Localizable.strings` give the same English the same Korean, so the two read alike side by side. One English word that needs two Korean ones gets a key of its own in the app: the attention banner's *Review* is keyed `Review requests` and reads `확인`, while the mission stop *Review* stays `리뷰`.
 
 ## Not verified
 

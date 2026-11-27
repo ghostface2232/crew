@@ -172,7 +172,8 @@ struct BoardView: View {
                 Text(pending == 1 ? String(localized: "1 request needs your attention") : String(localized: "\(pending) requests need your attention"))
                     .font(Typeface.calloutStrong)
                 Spacer()
-                Text("Review").font(Typeface.caption)
+                // Its own key: "Review" alone is a mission stop's name, 리뷰 in Korean, and here it means going to look.
+                Text(String(localized: "Review requests", defaultValue: "Review")).font(Typeface.caption)
                 Image(systemName: "chevron.right").font(Typeface.micro)
             }
             .padding(.vertical, Space.ml).padding(.horizontal, Space.l).contentShape(Rectangle())

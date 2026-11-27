@@ -43,8 +43,8 @@ const base = `http://127.0.0.1:${port}`;
 const getHealth = async () => (await fetch(`${base}/api/health`)).json();
 const auth = () => ({ authorization: `Bearer ${fs.readFileSync(path.join(home, 'token'), 'utf8').trim()}` });
 const appPath = process.env.CREW_APP_PATH;
-const launch = (extra = {}) =>
-  electron.launch({ ...(appPath ? { executablePath: appPath, args: [] } : { args: ['desktop/build'] }), env: { ...env, ...extra }, timeout: 30_000 });
+const launch = (extra = {}, args = []) =>
+  electron.launch({ ...(appPath ? { executablePath: appPath, args } : { args: ['desktop/build', ...args] }), env: { ...env, ...extra }, timeout: 30_000 });
 // On Windows the daemon this app starts inherits the app's stdio pipes, so Playwright's close() would wait on the
 // daemon. Quitting and waiting for the app's own exit tests what a user's quit does.
 const quit = async (application) => {
@@ -241,6 +241,18 @@ try {
   expect(Math.abs(bounds.width - placed.width)).toBeLessThanOrEqual(8);
   expect(Math.abs(bounds.height - placed.height)).toBeLessThanOrEqual(8);
   expect(await relaunchBounds()).toEqual(bounds);
+  // Opened at sign-in, the app waits in the tray, and a second launch opens it. A test profile offers no Open at Login,
+  // so it never touches the user's sign-in.
+  application = await launch({}, ['--hidden']);
+  const hidden = await application.firstWindow();
+  await expect(hidden.getByText('Live', { exact: true })).toBeAttached({ timeout: 20_000 });
+  expect(await visible(application)).toBe(false);
+  expect(await hidden.evaluate(() => window.crewDesktop.login.state())).toBeNull();
+  const opener = spawn(appPath ?? require('electron'), appPath ? [] : ['desktop/build'], { env, stdio: 'ignore' });
+  await once(opener, 'exit');
+  await expect.poll(() => visible(application)).toBe(true);
+  await quit(application);
+  application = null;
   // Reopened by the update supervisor after a failed install, the app says so in place of the update button; About
   // says why, and closing Settings brings the update button back.
   const reason = 'The installer stopped with exit code 2, so the update was not installed.';
@@ -265,6 +277,7 @@ try {
       'stage-only scrolling, keyboard scrolling after a sidebar click',
       'close hides to tray',
       'single instance',
+      'opened at sign-in, waits in the tray; no Open at Login under a test profile',
       'cancelled quit preserves unsaved settings',
       'external navigation blocked',
       'no control under the window buttons, wide or narrow, with Settings or search open',

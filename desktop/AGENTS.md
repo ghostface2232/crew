@@ -4,7 +4,7 @@ The Windows app: an Electron shell around the React board, with a tray icon, the
 
 ## Rules
 
-- The renderer stays sandboxed (`nodeIntegration: false`, `contextIsolation: true`, `sandbox: true`). The preload script (`preload.cts`) exposes only the updater, and the main process answers it only when called from the main window's board page.
+- The renderer stays sandboxed (`nodeIntegration: false`, `contextIsolation: true`, `sandbox: true`). The preload script (`preload.cts`) exposes only the updater, the welcome guide's mark, and Open at Login, and the main process answers them only when called from the main window's board page.
 - The main process signs the board's requests to the daemon (`signBoard` in `main.ts`); the page holds no secret.
 - Board features belong in `plugin/board/`. What this folder adds to the page is limited to the frame: drag regions and room for the window buttons.
 - Notifications stay with the daemon's toasts (`plugin/bridge/toast.ts`), because an unsigned Electron build has no registered app identity.
@@ -14,8 +14,8 @@ The Windows app: an Electron shell around the React board, with a tray icon, the
 
 | File | What it does |
 | --- | --- |
-| `main.ts` | Window, tray, single instance, daemon start, request signing, frame stylesheet, and navigation limits |
-| `preload.cts` | The updater bridge the board sees as `window.crewDesktop` |
+| `main.ts` | Window, tray, single instance, Open at Login, daemon start, request signing, frame stylesheet, and navigation limits |
+| `preload.cts` | The bridge the board sees as `window.crewDesktop`: the updater, the welcome guide, and Open at Login |
 | `updater.ts` | Checking, downloading, verifying, and installing releases |
 | `window-state.ts` | Restoring window bounds |
 | `taskbar.ts` | Reading the Windows mode, which sets the taskbar's theme, for the tray icon |

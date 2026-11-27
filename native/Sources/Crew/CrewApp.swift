@@ -164,6 +164,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     private var instanceLock: InstanceLock?
     private var completions = CompletionTracker()
     private var hiddenToolbarBackgrounds: [NSView] = []
+    /// Opened at login, the app waits in the menu bar: its window stays closed until the user opens it.
+    private var openedAtLogin = false
 
     override init() {
         let home = ProcessInfo.processInfo.environment["CREW_HOME"]
@@ -187,6 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         super.init()
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
+        openedAtLogin = LoginItem.launchedAtLogin
         let home = CrewHome.directory()
         let lock = InstanceLock(home: home)
         do {
@@ -232,8 +235,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             store.start()
             watchUpdates()
         }
+        if openedAtLogin, let mainWindow { keepClosedAtLogin(mainWindow) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self, self.mainWindow == nil else { return }
+            // SwiftUI did not open the window, so at login there is nothing to put away, and a window opened later is the user's.
+            if self.openedAtLogin { self.openedAtLogin = false; return }
             self.openMainWindow?(id: "main")
         }
         if ProcessInfo.processInfo.environment["CREW_TEST_MODE"] != "1" {
@@ -274,11 +280,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         window.setFrameAutosaveName(frameName)
         window.setFrameUsingName(frameName)
         if !NSScreen.screens.contains(where: { $0.visibleFrame.intersects(window.frame) }) { window.center() }
+        if openedAtLogin { keepClosedAtLogin(window) }
         startAfterUpdateIfReady()
+    }
+    /// SwiftUI opens the window as the app starts; at login it is put away at once, as closing it would.
+    private func keepClosedAtLogin(_ window: NSWindow) {
+        openedAtLogin = false
+        hideMain(window)
     }
     func show() { show(job: nil) }
     @objc private func reopenWindow() { show() }
     func show(job: String?) {
+        openedAtLogin = false
         if mainWindow == nil { openMainWindow?(id: "main") }
         store.windowVisible = true
         if let job { store.openJob(job, navigate: true) }

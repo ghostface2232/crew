@@ -50,11 +50,12 @@ struct BoardView: View {
     private var page: some View {
         let pending = store.scopedPendingCount
         let issuesProject = store.connected && overview ? store.project : ""
+        let setupShown = store.connected && store.project.isEmpty && overview
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: WorkspaceStyle.cardGap) {
                 if !store.connected { connectionBanner.transition(.card) }
                 heading(pending: pending)
-                if store.connected && store.project.isEmpty && overview { SetupCard(api: store.api) }
+                if setupShown { SetupCard(store: store) }
                 // Overview puts the banner in its heading instead.
                 if pending > 0 && store.selection != "needs" && !overview { attentionBanner(pending: pending).transition(.card) }
                 if store.selection == "needs" { NeedsYouView(store: store) }
@@ -69,6 +70,14 @@ struct BoardView: View {
                 while !Task.isCancelled {
                     await store.loadIssues(issuesProject)
                     try? await Task.sleep(for: .seconds(600))
+                }
+            }
+            // The setup checklist, read again each minute and on reconnect so an item fixed outside the app clears.
+            .task(id: setupShown) {
+                guard setupShown else { return }
+                while !Task.isCancelled {
+                    await store.loadSetup()
+                    try? await Task.sleep(for: .seconds(60))
                 }
             }
             // News moves the page by itself (`Motion.arrive`). A search is the page's own change, and so is a

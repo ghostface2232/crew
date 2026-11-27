@@ -21,15 +21,16 @@ struct SetupState: Decodable, Sendable {
 
 /// The overview's setup checklist. The daemon installs the bundled Claude Code plugin by itself; this shows what is
 /// still missing, offers Install for what Crew can put in place and Trust Hooks for Crew's Codex hooks, and leaves
-/// installing and signing in to the CLIs to the user. It hides once every item passes.
+/// installing and signing in to the CLIs to the user. It hides once every item passes. The page loads the checklist
+/// (`BoardView.page`): a view that shows nothing has no body for a task to run on.
 struct SetupCard: View {
-    let api: CrewAPI
-    @State private var setup: SetupState?
+    let store: CrewStore
+    private var api: CrewAPI { store.api }
     @State private var busy = false
     @State private var error: String?
     var body: some View {
         Group {
-            if let setup, !setup.items.allSatisfy(\.ok) {
+            if let setup = store.setup, !setup.items.allSatisfy(\.ok) {
                 ContentPanel(title: String(localized: "Set up Crew"), symbol: "wrench.and.screwdriver") {
                     VStack(alignment: .leading, spacing: Space.m) {
                         ForEach(setup.items) { item in
@@ -61,12 +62,6 @@ struct SetupCard: View {
                 }.transition(.card)
             }
         }
-        .task {
-            while !Task.isCancelled {
-                if let next: SetupState = try? await api.request("/api/setup", timeout: SetupState.timeout) { Motion.arrive { setup = next } }
-                try? await Task.sleep(for: .seconds(60))
-            }
-        }
     }
     private func act(_ call: @escaping @MainActor () async throws -> SetupState) {
         busy = true
@@ -74,7 +69,7 @@ struct SetupCard: View {
         Task {
             do {
                 let next = try await call()
-                Motion.arrive { setup = next }
+                Motion.arrive { store.setup = next }
             } catch { self.error = error.localizedDescription }
             busy = false
         }

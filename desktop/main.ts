@@ -79,16 +79,30 @@ function refreshTray() {
 /** The window looks out of reach once it has been out of focus, or the system idle, this long; only then does an update download. */
 const AWAY_MS = 120_000;
 const CHECK_EVERY_MS = 6 * 3_600_000;
+/** An installed copy has the installer's uninstaller beside it; an unpacked or development build cannot update itself. */
+const installed = process.platform === 'win32' && fs.existsSync(path.join(path.dirname(process.execPath), 'Uninstall Crew.exe'));
+/** What Windows starts at sign-in: this executable with this argument, which keeps the window closed. */
+const LOGIN_ITEM = { args: ['--hidden'] };
+const openedAtLogin = process.argv.includes(LOGIN_ITEM.args[0]);
 /**
- * An installed copy has the installer's uninstaller beside it; an unpacked or development build cannot update itself.
- * CREW_UPDATE_FEED points any build at another releases endpoint, for testing against a local server.
+ * Only the installed copy opens at sign-in, since another build's executable is Electron's own or a folder that moves.
+ * A test or alternate profile (CREW_HOME) must not change what the user's sign-in starts.
  */
+const loginItemSupported = installed && !process.env.CREW_HOME;
+/**
+ * Read from Windows each time rather than stored, since the user can also turn it off in Task Manager's Startup apps:
+ * the Run entry must be this one, and Windows must not have it switched off.
+ */
+const opensAtLogin = () => {
+  const settings = app.getLoginItemSettings(LOGIN_ITEM);
+  return settings.openAtLogin && settings.executableWillLaunchAtLogin;
+};
+/** CREW_UPDATE_FEED points any build at another releases endpoint, for testing against a local server. */
 const updater = new Updater({
   dir: path.join(app.getPath('userData'), 'updates'),
   current: app.getVersion(),
   feed: process.env.CREW_UPDATE_FEED,
-  supported: process.platform === 'win32' &&
-    (Boolean(process.env.CREW_UPDATE_FEED) || fs.existsSync(path.join(path.dirname(process.execPath), 'Uninstall Crew.exe'))),
+  supported: installed || (process.platform === 'win32' && Boolean(process.env.CREW_UPDATE_FEED)),
   onChange: (status) => {
     if (window && !window.isDestroyed()) window.webContents.send('update:changed', status);
     trayMenu();
@@ -215,7 +229,10 @@ function createWindow() {
   // A theme update is tied to the app mode, so for the Windows mode the tray also takes the system's own message,
   // which reaches the window while it is hidden too.
   if (process.platform === 'win32') window.hookWindowMessage(SETTING_CHANGE, refreshTray);
-  window.once('ready-to-show', () => show());
+  // Opened at sign-in, the app waits in the tray until the user opens it.
+  window.once('ready-to-show', () => {
+    if (!openedAtLogin) show();
+  });
   window.webContents.on('dom-ready', () => {
     void window?.webContents.insertCSS(BACKDROP ? FRAME_CSS + BACKDROP_CSS : FRAME_CSS).catch(console.error);
   });
@@ -455,6 +472,17 @@ function watchUpdates() {
   ipcMain.handle('welcome:done', (event) => {
     fromBoard(event);
     fs.rmSync(welcomeFile, { force: true });
+  });
+  ipcMain.handle('login:state', (event) => {
+    fromBoard(event);
+    return loginItemSupported ? opensAtLogin() : null;
+  });
+  // Turning it on also switches it back on where the user turned it off in Task Manager (`enabled` defaults to true).
+  ipcMain.handle('login:set', (event, open: unknown) => {
+    fromBoard(event);
+    if (!loginItemSupported || typeof open !== 'boolean') throw new Error('Only the installed app opens at sign-in.');
+    app.setLoginItemSettings({ openAtLogin: open, ...LOGIN_ITEM });
+    return opensAtLogin();
   });
   if (updateFailed) updater.installFailed(updateFailed);
   void updater.load().catch(console.error).then(() => {

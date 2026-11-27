@@ -43,6 +43,11 @@ const fakeClaude = `
   };
   const local = path.join(cwd, 'inside.txt');
   const outside = path.join(cwd, '..', 'outside.txt');
+  const nonFileTools = new Map([
+    ['WebFetch', { url: 'https://example.com', prompt: 'Read the page' }],
+    ['WebSearch', { query: 'Example Domain' }],
+    ['Agent', { description: 'Review code', prompt: 'Review this function' }],
+  ]);
   const policy = [
     ['Write', { file_path: local, content: 'inside' }],
     ['Write', { file_path: outside, content: 'outside' }],
@@ -65,7 +70,7 @@ const fakeClaude = `
     if (message.type === 'control_response') {
       const reply = message.response;
       replies.push(reply);
-      if (['read-only edit', 'linked edit', 'git edit', 'evidence edit', 'relative edit', 'browser', 'granted follow-up'].includes(prompt)) return success();
+      if (nonFileTools.has(prompt) || ['read-only edit', 'linked edit', 'git edit', 'evidence edit', 'relative edit', 'browser', 'granted follow-up'].includes(prompt)) return success();
       if (step === 0 && reply.response.behavior === 'allow') fs.writeFileSync(reply.response.updatedInput.file_path, 'inside');
       if (++step < policy.length) return ask(...policy[step]);
       send({ type: 'system', subtype: 'permission_denied', tool_name: 'Write', decision_reason_type: 'other', decision_reason: '--restricted: path outside the working directory', blocked_path: outside });
@@ -90,6 +95,7 @@ const fakeClaude = `
     if (prompt === 'evidence edit') return ask('Write', { file_path: path.join(flag('--add-dir'), 'view-after.png'), content: '' });
     if (prompt === 'relative edit') return ask('Write', { file_path: 'review.txt', content: '' });
     if (prompt === 'browser') return ask('mcp__crew__browser', {});
+    if (nonFileTools.has(prompt)) return ask(prompt, nonFileTools.get(prompt));
     if (prompt === 'classifier') {
       send({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'git push --force' }, id: 'use-1' }] } });
       send({ type: 'system', subtype: 'permission_denied', tool_name: 'Bash', tool_use_id: 'use-1', decision_reason_type: 'classifier', decision_reason: 'Force push not asked for.' });
@@ -177,7 +183,8 @@ for (const kind of ['delegate', 'polish', 'review', 'ask', 'debate'] as const) {
     assert.equal(flag(args, '--output-format'), 'stream-json');
     assert.equal(flag(args, '--permission-mode'), writable ? 'auto' : 'default');
     assert.equal(flag(args, '--permission-prompt-tool'), 'stdio');
-    assert.equal(flag(args, '--tools'), writable ? 'Read,Edit,Write,Glob,Grep,Bash' : 'Read,Write,Glob,Grep,Bash');
+    assert.equal(flag(args, '--tools'), writable
+      ? 'Read,Edit,Write,Glob,Grep,Bash,WebFetch,WebSearch' : 'Read,Write,Glob,Grep,Bash,WebFetch,WebSearch');
     assert.equal(flag(args, '--model'), writable ? 'requested-model' : undefined);
     assert.equal(flag(args, '--effort'), writable ? 'medium' : undefined);
     assert.equal(flag(args, '--resume'), undefined);
@@ -199,6 +206,30 @@ for (const kind of ['delegate', 'polish', 'review', 'ask', 'debate'] as const) {
     await h.adapter.release!(h.ctl);
     assert.equal(fs.existsSync(configArg), false);
     if (promptFile) assert.equal(fs.existsSync(promptFile), false);
+  });
+}
+
+for (const [kind, difficulty, agentTool] of [
+  ['delegate', 'hard', ',Agent'],
+  ['delegate', 'standard', ''],
+  ['polish', 'hard', ''],
+] as const) {
+  test(`Claude Code starts a ${difficulty} ${kind} job with the matching tool list`, async (t) => {
+    const h = harness(t, 'first task', { kind, difficulty });
+    await h.adapter.start(h.ctl);
+    assert.equal(flag((await h.report()).args, '--tools'), `Read,Edit,Write,Glob,Grep,Bash,WebFetch,WebSearch${agentTool}`);
+  });
+}
+
+for (const tool of ['WebFetch', 'WebSearch', 'Agent'] as const) {
+  test(`Claude Code asks the user about ${tool} permission requests sent to Crew`, async (t) => {
+    const h = harness(t, tool, tool === 'Agent' ? { difficulty: 'hard' } : { kind: 'review', sandbox: 'read-only' });
+    await h.adapter.start(h.ctl);
+    assert.deepEqual(await h.event('waiting'), ['approval', tool, undefined]);
+    await h.adapter.answer(h.ctl, true);
+    const { replies } = await h.report();
+    assert.equal(replies[0].response.behavior, 'allow');
+    assert.equal(h.events.touched, undefined);
   });
 }
 

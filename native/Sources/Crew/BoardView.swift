@@ -10,8 +10,9 @@ struct BoardView: View {
     /// The page column's width, the panel floating over its trailing part; it bounds how wide the panel may be dragged.
     @State private var pageWidth: CGFloat = 0
     @State private var scroll = ScrollPosition(edge: .top)
-    /// Lets a card that changes column glide across instead of fading out of one and into the other.
-    @Namespace private var cards
+    /// How many finished missions History shows; Show More adds `historyPage`. A search still reads all of them.
+    @State private var historyShown = BoardView.historyPage
+    private static let historyPage = 24
     private var pageKey: String { "\(store.project)|\(store.selection ?? "overview")" }
     private var overview: Bool { (store.selection ?? "overview") == "overview" }
     var body: some View {
@@ -39,6 +40,7 @@ struct BoardView: View {
         .frame(minHeight: WorkspaceStyle.windowMinHeight)
         .onChange(of: pageKey) {
             store.persistSelection()
+            historyShown = Self.historyPage
             scroll.scrollTo(edge: .top)
         }
         .onExitCommand { store.closeDetail() }
@@ -49,9 +51,8 @@ struct BoardView: View {
         let pending = store.scopedPendingCount
         let issuesProject = store.connected && overview ? store.project : ""
         return ScrollView {
-            // Lazy so a long history builds only the panels on screen.
             LazyVStack(alignment: .leading, spacing: WorkspaceStyle.cardGap) {
-                if !store.connected { connectionBanner }
+                if !store.connected { connectionBanner.transition(.card) }
                 heading(pending: pending)
                 if store.connected && store.project.isEmpty && overview { SetupCard(api: store.api) }
                 // Overview puts the banner in its heading instead.
@@ -70,8 +71,10 @@ struct BoardView: View {
                     try? await Task.sleep(for: .seconds(600))
                 }
             }
-            // The banner, across the page or in the heading, comes and goes with requests; the page below makes room.
-            .animation(Motion.reduced(Motion.reflow, reduceMotion), value: pending > 0)
+            // News moves the page by itself (`Motion.arrive`). A search is the page's own change, and so is a
+            // selection, which folds a finished stage it was holding open as it moves on.
+            .animation(Motion.reduced(Motion.reflow, reduceMotion), value: store.search)
+            .animation(Motion.reduced(Motion.reflow, reduceMotion), value: store.selectedJob)
             .background(OverlayScrollers())
             .padding(.horizontal, WorkspaceStyle.pageMargin).padding(.top, WorkspaceStyle.pageTop).padding(.bottom, WorkspaceStyle.pageMargin)
             .frame(maxWidth: WorkspaceStyle.pageMaxWidth).frame(maxWidth: .infinity)
@@ -115,47 +118,30 @@ struct BoardView: View {
     /// The heading's copy and summary side by side: below these the summary moves under the title.
     private static let headingCopyWidth: CGFloat = 340
     private static let summaryWidth: ClosedRange<CGFloat> = 430...500
-    /// The page's cards in two columns on a wide page, each stacked on its own, so a card that grows moves only
-    /// the cards below it in its own column. Cards alternate left and right in order and keep their column: filling
-    /// the shorter column instead would move cards across whenever one opens or closes. `left` and `right` end their
-    /// columns whatever the count above, in the order a single column shows them. With one column's worth of cards,
-    /// they keep the full width.
-    @ViewBuilder private func masonry<Card: View>(_ tiles: [Tile], left: Tile?, right: Tile?, @ViewBuilder card: @escaping (Tile) -> Card) -> some View {
-        let columns = [
-            stride(from: 0, to: tiles.count, by: 2).map { tiles[$0] } + [left].compactMap { $0 },
-            stride(from: 1, to: tiles.count, by: 2).map { tiles[$0] } + [right].compactMap { $0 },
-        ]
-        if wide && !columns[0].isEmpty && !columns[1].isEmpty {
-            HStack(alignment: .top, spacing: WorkspaceStyle.cardGap) {
-                ForEach(columns.indices, id: \.self) { column in
-                    LazyVStack(alignment: .leading, spacing: WorkspaceStyle.cardGap) {
-                        ForEach(columns[column]) { placed(card($0), $0) }
-                    }.frame(maxWidth: .infinity, alignment: .top)
-                }
+    /// Arranges cards in two independent columns on a wide page, so a card that grows only shifts cards below
+    /// it in that column. Cards alternate left and right in order rather than filling the shorter column, which
+    /// would move cards across whenever one opens or closes. `left` and `right` end their respective columns
+    /// regardless of the count above, and come last, in that order, in a single column. When all cards belong
+    /// to one column, they take the full width.
+    ///
+    /// Each card stays a single view inside `Columns`, so changing column or width moves it as itself and keeps
+    /// its state. `Columns` builds every card at once, which is why History pages its missions.
+    private func masonry<Card: View>(_ tiles: [Tile], left: Tile?, right: Tile?, @ViewBuilder card: @escaping (Tile) -> Card) -> some View {
+        let all = tiles + [left, right].compactMap { $0 }
+        let second = Set(stride(from: 1, to: tiles.count, by: 2).map { tiles[$0].id } + [right].compactMap { $0?.id })
+        // A lone column keeps the full width.
+        let paired = wide && !second.isEmpty && second.count < all.count
+        return Columns(count: paired ? 2 : 1, spacing: WorkspaceStyle.cardGap) {
+            ForEach(all) { tile in
+                card(tile).layoutValue(key: Columns.Column.self, value: second.contains(tile.id) ? 1 : 0).transition(.card)
             }
-        } else {
-            ForEach(tiles + [left, right].compactMap { $0 }) { placed(card($0), $0) }
         }
-    }
-    /// Matched within the page only: the same mission on another page must not fly across when the page changes.
-    private func placed<Card: View>(_ card: Card, _ tile: Tile) -> some View {
-        card.matchedGeometryEffect(id: "\(pageKey)/\(tile.id)", in: cards).transition(.card)
     }
     private var title: String {
         if !store.project.isEmpty { return projectName(store.project, among: store.projects) }
         return ["needs": String(localized: "Needs You"), "activity": String(localized: "Activity"), "history": String(localized: "History")][store.selection ?? ""] ?? String(localized: "Overview")
     }
     private func matches(_ text: String) -> Bool { store.search.isEmpty || text.localizedCaseInsensitiveContains(store.search) }
-    /// A folding mission's stages that fold by default, so a stage folding by itself as its last job ends moves the
-    /// cards like other work leaving. The user's own picks stay out: they animate within their card, as a mission's do.
-    private func foldedStages(_ mission: Mission, jobs: [Job], lead: ClaudeSession?) -> [String] {
-        guard jobs.count > MissionPanel.foldStagesAfter else { return [] }
-        return mission.stops.indices.filter { index in
-            let mine = jobs.filter { mission.jobStep($0) == index }, hasLead = lead != nil && index == mission.step
-            // A stage the panel does not draw has nothing to fold.
-            return (!mine.isEmpty || hasLead) && !store.stageOpensByDefault(mission, index, jobs: mine, hasLead: hasLead)
-        }.map { "\(mission.id)#\($0)" }
-    }
     private var connectionBanner: some View {
         HStack(alignment: .firstTextBaseline, spacing: Space.l) {
             Label(store.connectionMessage, systemImage: "wifi.exclamationmark").font(Typeface.callout).textSelection(.enabled)
@@ -211,7 +197,7 @@ struct BoardView: View {
             WorkspaceHeading(title: title, subtitle: store.project.isEmpty ? nil : store.project)
             if review > 0 {
                 if fills { Spacer().frame(height: Space.xxl) } else { Spacer(minLength: Space.xxl) }
-                attentionBanner(pending: review).frame(maxWidth: fills ? .infinity : Self.headingCopyWidth)
+                attentionBanner(pending: review).frame(maxWidth: fills ? .infinity : Self.headingCopyWidth).transition(.card)
             }
         }
     }
@@ -236,56 +222,51 @@ struct BoardView: View {
         let missionJobs: (Mission) -> [Job] = { mission in
             (store.search.isEmpty || !matches(mission.title) ? matchedByMission[mission.id] : allByMission[mission.id]) ?? []
         }
-        let shownMissions = history ? scopedMissions.filter { $0.state != "active" } : scopedMissions.filter { $0.state == "active" }
-        let recent = history ? [] : Array(scopedMissions.filter { $0.state != "active" }.prefix(2))
-        // Jobs of a recent mission already appear inside its panel.
-        let panelIDs = Set((shownMissions + recent).map(\.id))
+        let finished = scopedMissions.filter { $0.state != "active" }
+        let shownMissions = history ? Array(finished.prefix(historyShown)) : scopedMissions.filter { $0.state == "active" }
+        let recent = history ? [] : Array(finished.prefix(2))
+        // Jobs of a recent mission already appear inside its panel, and those of a History mission not shown yet
+        // wait with it.
+        let panelIDs = Set(((history ? finished : shownMissions) + recent).map(\.id))
         let loose = jobs.filter { !panelIDs.contains($0.mission ?? "") && (history ? !$0.isActive : $0.isActive) }.sorted { $0.createdAt > $1.createdAt }
         let recentJobs = history ? [] : Array(jobs.filter { !$0.isActive && $0.mission == nil }.sorted { ($0.endedAt ?? 0) > ($1.endedAt ?? 0) }.prefix(4))
         let sessions = history ? [] : store.state.claude.filter { (store.project.isEmpty || $0.projectPath == store.project) && matches($0.title) }
         let tiles: [Tile] = shownMissions.map(Tile.mission) + (loose.isEmpty ? [] : [.loose]) + recent.map(Tile.mission)
         let emptyHistory = history && shownMissions.isEmpty && loose.isEmpty
         let emptyWorkspace = !history && jobs.isEmpty && scopedMissions.isEmpty && !store.state.claude.contains { (store.project.isEmpty || $0.projectPath == store.project) && matches($0.title) }
-        // What is shown where. Work arriving or leaving changes it, and only then do the cards animate, so a status
-        // or timer updating in place does not set the page moving.
-        // A mission's rows as its panel places them: each job and the lead's session under their step, and its notes
-        // and outcome.
-        let missionRows = (shownMissions + recent).flatMap { mission in
-            let lead = store.state.leadRow(for: mission)
-            return ["\(mission.id):\(mission.notes?.count ?? 0):\(mission.outcome.isEmpty)"]
-                + missionJobs(mission).map { "\(mission.id)/\($0.id)@\(mission.jobStep($0))" }
-                + (lead.map { ["\(mission.id)/\($0.id)@\(mission.step)"] } ?? [])
-                + foldedStages(mission, jobs: missionJobs(mission), lead: lead)
-        }
-        let layout = tiles.map(\.id) + loose.map(\.id) + ["finished"] + recentJobs.map(\.id) + ["sessions"] + sessions.map(\.id)
-            + missionRows + [emptyHistory || emptyWorkspace ? "empty" : ""]
-        Group {
-        masonry(tiles, left: recentJobs.isEmpty ? nil : .finished, right: sessions.isEmpty ? nil : .sessions) { tile in
-            switch tile {
-            case .mission(let mission):
-                MissionPanel(store: store, mission: mission, jobs: missionJobs(mission))
-            case .loose:
-                ContentPanel(title: history ? String(localized: "Jobs") : String(localized: "Other jobs"), symbol: "rectangle.stack") {
-                    VStack(spacing: WorkspaceStyle.rowGap) { ForEach(loose) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) }.transition(.card) } }
-                }
-            case .finished:
-                ContentPanel(title: String(localized: "Recently finished"), symbol: "checkmark.circle") {
-                    VStack(spacing: WorkspaceStyle.rowGap) { ForEach(recentJobs) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) }.transition(.card) } }
-                }
-            case .sessions:
-                ContentPanel(title: String(localized: "Lead sessions"), symbol: "bubble.left.and.bubble.right") {
-                    VStack(spacing: WorkspaceStyle.rowGap) { ForEach(sessions) { session in SessionRow(session: session, selected: store.selectedSession == session.id, store: store) { store.toggleSession(session.id) }.transition(.card) } }
+        // The empty state lies over the cards' place, as on Needs You, so the last card leaves where it is.
+        ZStack(alignment: .top) {
+            masonry(tiles, left: recentJobs.isEmpty ? nil : .finished, right: sessions.isEmpty ? nil : .sessions) { tile in
+                switch tile {
+                case .mission(let mission):
+                    MissionPanel(store: store, mission: mission, jobs: missionJobs(mission))
+                case .loose:
+                    ContentPanel(title: history ? String(localized: "Jobs") : String(localized: "Other jobs"), symbol: "rectangle.stack") {
+                        VStack(spacing: WorkspaceStyle.rowGap) { ForEach(loose) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) }.transition(.card) } }
+                    }
+                case .finished:
+                    ContentPanel(title: String(localized: "Recently finished"), symbol: "checkmark.circle") {
+                        VStack(spacing: WorkspaceStyle.rowGap) { ForEach(recentJobs) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) }.transition(.card) } }
+                    }
+                case .sessions:
+                    ContentPanel(title: String(localized: "Lead sessions"), symbol: "bubble.left.and.bubble.right") {
+                        VStack(spacing: WorkspaceStyle.rowGap) { ForEach(sessions) { session in SessionRow(session: session, selected: store.selectedSession == session.id, store: store) { store.toggleSession(session.id) }.transition(.card) } }
+                    }
                 }
             }
+            if emptyHistory || emptyWorkspace {
+                EmptyState(title: store.search.isEmpty ? (emptyHistory ? String(localized: "No completed work yet") : String(localized: "Ready when you are")) : String(localized: "No matching work"),
+                           symbol: store.search.isEmpty ? "square.stack.3d.up" : "magnifyingglass",
+                           detail: store.search.isEmpty && !emptyHistory ? String(localized: "Hand a task to an agent, or run /crew:run in Claude Code or $crew:run in Codex.") : nil) {
+                    if store.search.isEmpty && !emptyHistory { Button("New Job", systemImage: "plus") { store.showingDispatch = true }.glassPillButton().disabled(!store.connected) }
+                }.transition(.card)
+            }
         }
-        if emptyHistory || emptyWorkspace {
-            EmptyState(title: store.search.isEmpty ? (emptyHistory ? String(localized: "No completed work yet") : String(localized: "Ready when you are")) : String(localized: "No matching work"),
-                       symbol: store.search.isEmpty ? "square.stack.3d.up" : "magnifyingglass",
-                       detail: store.search.isEmpty && !emptyHistory ? String(localized: "Hand a task to an agent, or run /crew:run in Claude Code or $crew:run in Codex.") : nil) {
-                if store.search.isEmpty && !emptyHistory { Button("New Job", systemImage: "plus") { store.showingDispatch = true }.glassPillButton().disabled(!store.connected) }
-            }.transition(.card)
+        if history && finished.count > historyShown {
+            Button("Show More", systemImage: "chevron.down") {
+                withAnimation(Motion.reduced(Motion.reflow, reduceMotion)) { historyShown += Self.historyPage }
+            }.pillButton().frame(maxWidth: .infinity).transition(.card)
         }
-        }.animation(Motion.reduced(Motion.reflow, reduceMotion), value: layout)
     }
     private var activity: some View {
         let events = store.scopedEvents.filter { matches("\($0.detail) \($0.agent)") }
@@ -310,7 +291,7 @@ struct AgentOverview: View {
             else {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: WorkspaceStyle.cardGap) {
-                        ForEach(agents, id: \.self) { agent in AgentCard(store: store, agent: agent) }
+                        ForEach(agents, id: \.self) { agent in AgentCard(store: store, agent: agent).transition(.card) }
                     }.fixedSize(horizontal: false, vertical: true)
                     compactAgents
                 }
@@ -704,63 +685,61 @@ struct NeedsYouView: View {
     /// Request cards fill the page in columns of this width.
     private static let requestWidth: ClosedRange<CGFloat> = 420...620
     @Bindable var store: CrewStore
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private func matches(_ text: String) -> Bool { store.search.isEmpty || text.localizedCaseInsensitiveContains(store.search) }
     private var jobs: [Job] { store.scopedWaitingJobs.filter { matches("\($0.title) \($0.projectPath) \($0.agent) \($0.waiting?.reason ?? "")") } }
     private var sessions: [ClaudeSession] { store.scopedWaitingSessions.filter { matches("\($0.title) \($0.projectPath) \(agentName($0.agent)) \($0.waitingFor ?? "")") } }
     var body: some View {
         let jobs = jobs, sessions = sessions
-        // Requests come and go as agents ask and get answered; the cards around them close up or make room.
-        Group { content(jobs: jobs, sessions: sessions) }
-            .animation(Motion.reduced(Motion.reflow, reduceMotion), value: jobs.map(\.id) + ["sessions"] + sessions.map(\.id))
-    }
-    @ViewBuilder private func content(jobs: [Job], sessions: [ClaudeSession]) -> some View {
-        if store.scopedPendingCount == 0 {
-            EmptyState(title: String(localized: "All caught up"), symbol: "checkmark.circle").transition(.card)
-        } else if jobs.isEmpty && sessions.isEmpty {
-            EmptyState(title: String(localized: "No matching requests"), symbol: "magnifyingglass").transition(.card)
-        }
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.requestWidth.lowerBound, maximum: Self.requestWidth.upperBound), spacing: WorkspaceStyle.cardGap)], alignment: .leading, spacing: WorkspaceStyle.cardGap) {
-            ForEach(jobs) { job in
-                VStack(alignment: .leading, spacing: Space.xl) {
-                    VStack(alignment: .leading, spacing: Space.ml) {
-                        requestHeader(job.waiting?.type == "approval" ? String(localized: "Approval") : String(localized: "Question"), agent: job.agent, who: agentName(job.agent),
-                                      project: job.projectPath, since: job.waiting?.since) { store.openJob(job.id) }
-                        Text(job.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(job.title)
-                    }
-                    AnswerView(store: store, job: job)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading).card()
-                .transition(.card)
-            }
-            // As on the web board: a lead session is answered in its own app, so its tile says so instead of offering a composer.
-            ForEach(sessions) { session in
-                VStack(alignment: .leading, spacing: Space.xl) {
-                    // Laid out as a job's tile: who on the header, the session's title under it.
-                    VStack(alignment: .leading, spacing: Space.ml) {
-                        HStack(spacing: Space.ml) {
-                            StatusLabel(state: "waiting", title: String(localized: "Input"))
-                            HStack(spacing: Space.s) {
-                                AgentMark(agent: session.agent, size: MarkSize.inline)
-                                Text(verbatim: agentName(session.agent)).lineLimit(1)
-                            }.font(Typeface.chip).foregroundStyle(.secondary).help(session.projectPath)
-                            Spacer(minLength: WorkspaceStyle.rowSpacer)
-                            OpenInAgentButton(session: session)
+        // Overlay the empty state on the grid instead of stacking it above, so the last leaving card and first
+        // arriving card stay in place rather than shifting by the empty state's height.
+        ZStack(alignment: .top) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.requestWidth.lowerBound, maximum: Self.requestWidth.upperBound), spacing: WorkspaceStyle.cardGap, alignment: .top)], alignment: .leading, spacing: WorkspaceStyle.cardGap) {
+                ForEach(jobs) { job in
+                    VStack(alignment: .leading, spacing: Space.xl) {
+                        VStack(alignment: .leading, spacing: Space.ml) {
+                            requestHeader(job.waiting?.type == "approval" ? String(localized: "Approval") : String(localized: "Question"), agent: job.agent, who: agentName(job.agent),
+                                          project: job.projectPath, since: job.waiting?.since) { store.openJob(job.id) }
+                            Text(job.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(job.title)
                         }
-                        Text(session.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(session.title)
+                        AnswerView(store: store, job: job)
                     }
-                    Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
-                    ClaudeAskView(session: session)
-                    if OpenInAgentButton.availableURL(for: session) == nil {
-                        Label("Answer in \(agentName(session.agent)).", systemImage: "bubble.left.and.bubble.right").font(Typeface.callout).foregroundStyle(.secondary)
-                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).card()
+                    .transition(.card)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading).card()
-                // The whole tile opens the details, as a row does.
-                .contentShape(.rect).onTapGesture { store.toggleSession(session.id) }
-                .accessibilityAction(named: "Show Details") { store.openSession(session.id) }
-                .transition(.card)
+                // As on the web board: a lead session is answered in its own app, so its tile says so instead of offering a composer.
+                ForEach(sessions) { session in
+                    VStack(alignment: .leading, spacing: Space.xl) {
+                        // Laid out as a job's tile: who on the header, the session's title under it.
+                        VStack(alignment: .leading, spacing: Space.ml) {
+                            HStack(spacing: Space.ml) {
+                                StatusLabel(state: "waiting", title: String(localized: "Input"))
+                                HStack(spacing: Space.s) {
+                                    AgentMark(agent: session.agent, size: MarkSize.inline)
+                                    Text(verbatim: agentName(session.agent)).lineLimit(1)
+                                }.font(Typeface.chip).foregroundStyle(.secondary).help(session.projectPath)
+                                Spacer(minLength: WorkspaceStyle.rowSpacer)
+                                OpenInAgentButton(session: session)
+                            }
+                            Text(session.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(session.title)
+                        }
+                        Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                        ClaudeAskView(session: session)
+                        if OpenInAgentButton.availableURL(for: session) == nil {
+                            Label("Answer in \(agentName(session.agent)).", systemImage: "bubble.left.and.bubble.right").font(Typeface.callout).foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).card()
+                    // The whole tile opens the details, as a row does.
+                    .contentShape(.rect).onTapGesture { store.toggleSession(session.id) }
+                    .accessibilityAction(named: "Show Details") { store.openSession(session.id) }
+                    .transition(.card)
+                }
+            }
+            if store.scopedPendingCount == 0 {
+                EmptyState(title: String(localized: "All caught up"), symbol: "checkmark.circle").transition(.card)
+            } else if jobs.isEmpty && sessions.isEmpty {
+                EmptyState(title: String(localized: "No matching requests"), symbol: "magnifyingglass").transition(.card)
             }
         }
     }
@@ -778,6 +757,39 @@ struct NeedsYouView: View {
                 ElapsedText(store: store, start: since, end: nil).font(Typeface.chip).monospacedDigit().foregroundStyle(.secondary)
             }
             Button("Details", systemImage: "arrow.up.right", action: details).pillButton()
+        }
+    }
+}
+
+/// Stacks its subviews in `count` columns of equal width, each in the column it names (`Column`), in the order
+/// given. With one column, every subview stacks in it.
+private struct Columns: Layout {
+    struct Column: LayoutValueKey { static let defaultValue = 0 }
+    var count: Int
+    var spacing: CGFloat
+    private func columnWidth(_ width: CGFloat) -> CGFloat { (width - spacing * CGFloat(count - 1)) / CGFloat(count) }
+    /// Each subview's column and height at `width`, and the height of the tallest column.
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> (cards: [(column: Int, height: CGFloat)], height: CGFloat) {
+        let proposal = ProposedViewSize(width: columnWidth(width), height: nil)
+        var heights = [CGFloat](repeating: 0, count: count)
+        let cards = subviews.map { subview in
+            let column = min(subview[Column.self], count - 1), height = subview.sizeThatFits(proposal).height
+            heights[column] += height + spacing
+            return (column, height)
+        }
+        return (cards, max(0, (heights.max() ?? 0) - spacing))
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.replacingUnspecifiedDimensions().width
+        return CGSize(width: width, height: arrange(subviews, width: width).height)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let width = columnWidth(bounds.width)
+        var tops = [CGFloat](repeating: bounds.minY, count: count)
+        for (subview, card) in zip(subviews, arrange(subviews, width: bounds.width).cards) {
+            subview.place(at: CGPoint(x: bounds.minX + CGFloat(card.column) * (width + spacing), y: tops[card.column]),
+                          proposal: ProposedViewSize(width: width, height: card.height))
+            tops[card.column] += card.height + spacing
         }
     }
 }

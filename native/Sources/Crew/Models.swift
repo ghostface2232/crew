@@ -72,6 +72,21 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     var debateConcluded: Bool { debate.map { state != "running" && state != "waiting" && turns >= $0.rounds } ?? false }
     /// Ended, but its worktree still awaits a merge or discard, or the lead has not read its result.
     var isUnsettled: Bool { worktree != nil || seq > (delivered ?? seq) }
+    /// The job with fields rewritten during a running turn cleared; see `BoardState.rearranges`.
+    /// Whether each field is present stays, since appearing for the first time adds a line or section,
+    /// and whether the job is unsettled stays, since the summary counts it.
+    var placed: Job {
+        var job = self
+        job.seq = isUnsettled ? 1 : 0; job.delivered = 0
+        job.phase = phase.isEmpty ? "" : "-"; job.activeAt = 0
+        job.tokens = tokens.map { _ in 0 }
+        job.tokenUse = tokenUse.map { _ in TokenUse(input: 0, cachedInput: 0, output: 0, turn: 0) }
+        job.context = context.map { _ in ContextUse(used: 0, size: 0) }
+        job.liveDiff = liveDiff.map { LiveDiff(turn: $0.turn, at: 0, chars: 0) }
+        // Only a job read by itself carries its prompt; the stream's copies do not.
+        job.prompt = nil
+        return job
+    }
     var kindTitle: String { debate != nil ? String(localized: "Debate") : ask == true ? String(localized: "Question") : roleNames[kind].map(localizedCrewLabel) ?? kind }
     var assignedRole: String { role ?? (debate != nil ? "debate" : kind == "review" && runsApp == true ? "verify" : kind) }
     var roundUnavailableReason: String? {
@@ -356,6 +371,14 @@ struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {
     /// What the waiting prompt asks beyond its one line; present only while waiting.
     var ask: ClaudeAsk?
     var projectPath: String { root ?? cwd }
+    /// The session without what it rewrites as it works; see `BoardState.rearranges`.
+    var placed: ClaudeSession {
+        var session = self
+        session.phase = phase.isEmpty ? "" : "-"; session.activeAt = 0; session.inTool = false
+        session.agents = agents?.map { var agent = $0; agent.phase = agent.phase.isEmpty ? "" : "-"; return agent }
+        session.workflows = workflows?.map { var run = $0; run.activeAt = 0; run.done = 0; return run }
+        return session
+    }
     /// The agent the session runs in, as jobs name theirs.
     var agent: String { host ?? "claude" }
     var resumeCommand: String { agent == "codex" ? "codex resume \(id)" : "claude --resume \(id)" }
@@ -751,6 +774,19 @@ struct BoardState: Codable, Sendable, Equatable {
     var waitingJobs: [Job] { jobs.filter { $0.state == "waiting" }.sorted { ($0.waiting?.since ?? 0) < ($1.waiting?.since ?? 0) } }
     var waitingSessions: [ClaudeSession] { claude.filter { $0.state == "waiting" } }
     var pendingCount: Int { waitingJobs.count + waitingSessions.count }
+
+    /// Whether this differs from `old` in what is shown where. Running jobs and sessions rewrite their
+    /// status line, clock, and counters many times a second in place; any other change may add, remove, or
+    /// move something.
+    func rearranges(_ old: BoardState) -> Bool {
+        guard jobs.count == old.jobs.count, claude.count == old.claude.count else { return true }
+        if zip(jobs, old.jobs).contains(where: { $0 != $1 && $0.placed != $1.placed }) { return true }
+        if zip(claude, old.claude).contains(where: { $0 != $1 && $0.placed != $1.placed }) { return true }
+        var rest = self, before = old
+        rest.jobs = []; before.jobs = []
+        rest.claude = []; before.claude = []
+        return rest != before
+    }
 
     func leadRow(for mission: Mission) -> ClaudeSession? {
         guard mission.state == "active", let owner = claude.first(where: { $0.id == mission.owner }),

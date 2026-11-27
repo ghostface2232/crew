@@ -66,6 +66,7 @@
 "%@ needs your input." = "%@가 응답을 기다리고 있어요.";
 "Answer in %@." = "%@에서 답변해 주세요.";
 "Show Details" = "상세 정보 보기";
+"Show More" = "더 보기";
 "Details" = "세부 정보";
 "All projects" = "모든 프로젝트";
 "Projects" = "프로젝트";

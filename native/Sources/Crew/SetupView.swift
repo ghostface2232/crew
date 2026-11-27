@@ -58,12 +58,12 @@ struct SetupCard: View {
                                 .glassPillButton().disabled(busy || setup.registering)
                         }
                     }.frame(maxWidth: .infinity, alignment: .trailing)
-                }
+                }.transition(.card)
             }
         }
         .task {
             while !Task.isCancelled {
-                if let next: SetupState = try? await api.request("/api/setup", timeout: SetupState.timeout) { setup = next }
+                if let next: SetupState = try? await api.request("/api/setup", timeout: SetupState.timeout) { Motion.arrive { setup = next } }
                 try? await Task.sleep(for: .seconds(60))
             }
         }
@@ -72,7 +72,10 @@ struct SetupCard: View {
         busy = true
         error = nil
         Task {
-            do { setup = try await call() } catch { self.error = error.localizedDescription }
+            do {
+                let next = try await call()
+                Motion.arrive { setup = next }
+            } catch { self.error = error.localizedDescription }
             busy = false
         }
     }
@@ -110,19 +113,20 @@ struct IssueSuggestions: View {
                     .padding(.leading, WorkspaceStyle.titleInset)
                 if across {
                     HStack(alignment: .top, spacing: WorkspaceStyle.cardGap) {
-                        ForEach(issues) { IssueCard(store: store, project: project, issue: $0) }
+                        ForEach(issues) { IssueCard(store: store, project: project, issue: $0).transition(.card) }
                         // Fewer issues keep the cards' width rather than stretching across the row.
                         ForEach(issues.count..<Self.shown, id: \.self) { _ in Color.clear.frame(maxWidth: .infinity, maxHeight: 0) }
                     }.fixedSize(horizontal: false, vertical: true)
                 } else {
                     VStack(spacing: WorkspaceStyle.cardGap) {
-                        ForEach(issues) { IssueCard(store: store, project: project, issue: $0) }
+                        ForEach(issues) { IssueCard(store: store, project: project, issue: $0).transition(.card) }
                     }
                 }
             }
             .onGeometryChange(for: Bool.self) {
                 $0.size.width >= CGFloat(Self.shown) * Self.cardMinWidth + CGFloat(Self.shown - 1) * WorkspaceStyle.cardGap
             } action: { across = $0 }
+            .transition(.card)
         }
     }
 }

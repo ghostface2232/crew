@@ -45,9 +45,17 @@ struct PresetSelection: Encodable, Sendable {
 
 @MainActor @Observable
 final class CrewStore {
-    var state = BoardState() {
+    /// The daemon's state as last heard. Updates that change what is shown where run inside `Motion.arrive`,
+    /// so views need not track which changes to animate.
+    var state: BoardState {
+        get { board }
+        set {
+            if newValue.rearranges(board) { Motion.arrive { board = newValue } } else { board = newValue }
+        }
+    }
+    private var board = BoardState() {
         didSet {
-            let pending = state.pendingCount
+            let pending = board.pendingCount
             if pending != pendingCount { pendingCount = pending }
         }
     }
@@ -236,9 +244,11 @@ final class CrewStore {
         }
     }
     func connectionFailed(_ error: Error) {
-        connected = false
-        signInRequired = error is DaemonSignInFailure
-        connectionMessage = error.localizedDescription
+        Motion.arrive {
+            connected = false
+            signInRequired = error is DaemonSignInFailure
+            connectionMessage = error.localizedDescription
+        }
     }
     func stop() { generation += 1; streamTask?.cancel(); heartbeatTask?.cancel() }
     func sendHeartbeat() async {
@@ -263,7 +273,8 @@ final class CrewStore {
             events = mergeEvents(events, [try JSONDecoder().decode(CrewEvent.self, from: event.data)])
             return
         case "usage":
-            usage = try JSONDecoder().decode(Usage.self, from: event.data)
+            let latest = try JSONDecoder().decode(Usage.self, from: event.data)
+            Motion.arrive { usage = latest }
             return
         case "turnTokenBudget": turnTokenBudgetRevision += 1
         case "projects": projectsRevision += 1
@@ -271,16 +282,24 @@ final class CrewStore {
             turnTokenBudgetRevision += 1
             projectsRevision += 1
         case "limits":
-            limits.merge(try JSONDecoder().decode([String: LimitUsage?].self, from: event.data)) { _, new in new }
+            let latest = try JSONDecoder().decode([String: LimitUsage?].self, from: event.data)
+            Motion.arrive { limits.merge(latest) { _, new in new } }
             return
         default: break
         }
-        if let id = try state.receive(event) { jobVersions[id, default: 0] += 1 }
-        // A daemon that predates the setting says nothing about it, which must not clear what Crew wrote.
-        if (event.name == "state" || event.name == "language") && state.hasLanguageSetting == true { applyLanguage(state.language) }
-        if event.name == "state" {
+        guard event.name == "state" else {
+            if let id = try state.receive(event) { jobVersions[id, default: 0] += 1 }
+            // A daemon that predates the setting says nothing about it, which must not clear what Crew wrote.
+            if event.name == "language" && state.hasLanguageSetting == true { applyLanguage(state.language) }
+            onStateChange?()
+            return
+        }
+        // A snapshot brings everything at once, the connection with it, so all of it arrives as one change.
+        try Motion.arrive {
+            try state.receive(event)
+            if state.hasLanguageSetting == true { applyLanguage(state.language) }
             events = state.events; limits = state.limits; usage = state.usage
-            state.events = []; state.limits = [:]; state.usage = nil
+            board.events = []; board.limits = [:]; board.usage = nil
             for id in Set(jobVersions.keys).union(state.jobs.map(\.id)) { jobVersions[id, default: 0] += 1 }
             signInRequired = false; connected = true; connectionMessage = String(localized: "Connected")
             greetIfNew()
@@ -409,13 +428,13 @@ final class CrewStore {
         components.queryItems = [URLQueryItem(name: "project", value: project)]
         // URLQueryItem leaves "+" as it is, which the daemon would read as a space in the path.
         components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
-        if let found: IssueList = try? await api.request(components.string!) { issues[project] = found }
+        if let found: IssueList = try? await api.request(components.string!) { Motion.arrive { issues[project] = found } }
     }
     func dismissIssue(_ url: String, project: String) async {
         struct Dismiss: Encodable, Sendable { var url: String }
         await run("issue:\(url)") {
             let _: EmptyReply = try await api.post("/api/issues/dismiss", Dismiss(url: url))
-            issues[project]?.issues.removeAll { $0.url == url }
+            Motion.arrive { issues[project]?.issues.removeAll { $0.url == url } }
         }
     }
     static let languageKey = "language"

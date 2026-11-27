@@ -205,6 +205,13 @@ These views keep their own geometry next to their code, built from the tokens ab
 
 Shared transitions use `Motion.reduced` to respect Reduce Motion. `WorkflowStrip` applies its pulse directly and checks `reduceMotion` before animating.
 
+**Where motion starts.** Incoming changes animate across the window under `reflow` from one place: `Motion.arrive`. `CrewStore.state` wraps daemon updates in it whenever `BoardState.rearranges` reports a layout or item change; updates confined to a running job's or session's status line, clock, or counters (`Job.placed`, `ClaudeSession.placed`) arrive many times a second and apply without animation. State outside `state`—usage, limits, connection status, issue suggestions, and view-loaded data such as the setup checklist—is also set inside `Motion.arrive` at its source. Views therefore keep no list of external values to animate. Blocks that come and go declare `.transition(.card)` (fade, 0.96 scale, and 4-point blur), and neighbors move into place around them. A view animates only changes of its own making, such as a search, a selection or Show More. The activity log is the exception: it is kept apart from `state` and applied without animation, and the Activity list animates on its newest event. Before this, each page animated only the values it listed by hand, so anything omitted, such as the connection banner or issue cards, shifted the page without motion.
+
+Two layout rules keep a moving block from travelling further than the change itself:
+
+- A card keeps one view identity wherever it sits. Because the page's cards are subviews of a single layout (`Columns` in `BoardView.swift`), a card that changes column or width moves there as itself and keeps its state. Inside separate per-column stacks, changing columns removed it from one stack and inserted a new view in the other, making it look like a card flying off while fading.
+- On Needs You and on the pages of cards, the empty state sits over the cards' area rather than above it, so the last leaving card and first arriving card stay in place instead of shifting by the empty state's height.
+
 A spinning status symbol (`StatusLabel(spins:)`, used for an active mission's chip and a working agent's) rotates through `Turning`, a layer animation on a picture of the symbol: clockwise, four seconds a turn, around the symbol's ink center, and stationary under Reduce Motion. A SwiftUI animation that never ends renders the window's whole view graph on every frame, which for one symbol took a quarter of a core. The symbol carries its own color into the picture: a picture does not follow a change to a foreground style it only inherits, so a chip that turned from Ready to Working would keep Ready's gray.
 
 | Token | Animation | Use |

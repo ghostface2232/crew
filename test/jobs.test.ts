@@ -822,6 +822,16 @@ test('a waiting job resumes on a decision and reports the limit kind on failure'
   await settled(waiting.jobs, job);
   assert.equal(job.state, 'done');
   assert.deepEqual(waiting.calls, ['answer:true']);
+  // Answered on the board, nothing says the lead passed it on.
+  assert.ok(!waiting.jobs.eventsFor(job.id, 0).some((e) => e.detail.startsWith('The lead passed on')));
+
+  // Crew cannot tell whether an approval the lead passes on came from the user, so the job's activity says it did.
+  const relayed = harness((ctl) => ctl.waiting('approval', 'run: npm install'));
+  const viaLead = await relayed.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } });
+  await relayed.jobs.wait(viaLead.id, 0, 2000);
+  await relayed.jobs.reply(viaLead.id, { decision: 'approve', request_id: viaLead.waiting!.id, lead_session: 'lead' });
+  await settled(relayed.jobs, viaLead);
+  assert.ok(relayed.jobs.eventsFor(viaLead.id, 0).some((e) => e.kind === 'progress' && e.detail === 'The lead passed on an approval: run: npm install'));
 
   const plain = harness((ctl) => ctl.waiting('approval', 'run: npm install'));
   const unscoped = await plain.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } });

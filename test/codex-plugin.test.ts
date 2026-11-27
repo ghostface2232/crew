@@ -45,7 +45,6 @@ test("writeCodexPlugin points the MCP server at the app's runtime and gives the 
       command: runtime,
       args: [path.join(root, 'plugin', 'bridge', 'mcp.js')],
       default_tools_approval_mode: 'approve',
-      tools: { reply: { approval_mode: 'prompt' } },
     },
   });
   // Codex would otherwise read Claude Code's hooks/hooks.json; Crew's own go in the user's hooks file.

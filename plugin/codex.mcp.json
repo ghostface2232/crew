@@ -6,12 +6,7 @@
         "./bridge/mcp.ts"
       ],
       "cwd": ".",
-      "default_tools_approval_mode": "approve",
-      "tools": {
-        "reply": {
-          "approval_mode": "prompt"
-        }
-      }
+      "default_tools_approval_mode": "approve"
     }
   }
 }

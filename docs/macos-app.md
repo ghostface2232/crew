@@ -52,7 +52,18 @@ npm run package:desktop
 
 The build copies the current Node executable and its `LICENSE`, using `otool -L` to reject Node binaries linked against non-system libraries. `CREW_NODE_LICENSE` overrides the license path when the Node layout differs, and `CREW_BUILD_CONFIGURATION=debug` selects a debug build.
 
-Local builds are ad-hoc signed and verified. Releases are signed with a self-signed certificate from `MACOS_SIGNING_P12` and `MACOS_SIGNING_P12_PASSWORD` to keep the app's designated requirement stable and preserve granted folder access across versions (`.github/workflows/release.yml` loads it into a temporary keychain as `CREW_SIGN_IDENTITY` and `CREW_SIGN_KEYCHAIN`). The 0.4.0 → 0.5.0 update kept folder access without asking again. Apple Developer ID signing, notarization, and login launch are not configured; this is a direct release, not an App Store build.
+Local builds are verified. `CREW_SIGN_IDENTITY` (which releases set) comes first; without it, `scripts/build-desktop.mjs` signs with a certificate named `Crew Local Signing` in the login keychain if present, and ad-hoc signs otherwise. An ad-hoc signature is tied to each build's hash, so macOS asks for folder access again after every build; with the certificate, the app's designated requirement stays the same from build to build, so access granted once is kept. The certificate is self-signed for code signing and made once per Mac:
+
+```bash
+cd "$(mktemp -d)" && umask 077
+printf '[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN=Crew Local Signing\n[ext]\nbasicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\n' > req.cnf
+/usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 3650 -config req.cnf
+/usr/bin/openssl pkcs12 -export -inkey key.pem -in cert.pem -out crew.p12 -passout pass:crew -name "Crew Local Signing"
+security import crew.p12 -k ~/Library/Keychains/login.keychain-db -P crew -T /usr/bin/codesign
+rm key.pem cert.pem crew.p12 req.cnf
+```
+
+It is a different certificate from the release's, so macOS asks once when switching between a release and a local build, and a local build signed with it does not accept a release as an in-app update (see [Updates](#updates)). Releases are signed with a self-signed certificate from `MACOS_SIGNING_P12` and `MACOS_SIGNING_P12_PASSWORD` to keep the app's designated requirement stable and preserve granted folder access across versions (`.github/workflows/release.yml` loads it into a temporary keychain as `CREW_SIGN_IDENTITY` and `CREW_SIGN_KEYCHAIN`). The 0.4.0 → 0.5.0 update kept folder access without asking again. Apple Developer ID signing, notarization, and login launch are not configured; this is a direct release, not an App Store build.
 
 ## Updates
 
@@ -95,3 +106,7 @@ Nine reviewers (concurrency, accessibility, build/tests, design/layout, motion, 
 - [Adopting Liquid Glass](https://developer.apple.com/documentation/TechnologyOverviews/adopting-liquid-glass)
 - [Applying Liquid Glass to custom views](https://developer.apple.com/documentation/SwiftUI/Applying-Liquid-Glass-to-custom-views)
 - [SwiftUI and AppKit integration](https://developer.apple.com/documentation/swiftui/appkit-integration)
+
+## History
+
+- **2026-11-27.** Previously, every local build was ad-hoc signed. Because macOS ties granted folder access to the app's signature, it asked for folder access again after every build. Local builds are now signed with the `Crew Local Signing` certificate when the login keychain has one, and ad-hoc signed without it ([Build and run](#build-and-run)).

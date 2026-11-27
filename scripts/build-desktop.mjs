@@ -94,9 +94,13 @@ const licenses = [
 ].map(([name, file]) => `${name}\n${fs.readFileSync(file, 'utf8')}`);
 licenses.push(`Node.js ${process.version}\nSee runtime/LICENSE for Node.js and its bundled dependencies.`);
 fs.writeFileSync(path.join(resources, 'THIRD-PARTY-NOTICES.txt'), licenses.join('\n\n'));
-// A release signs with one lasting certificate, so macOS keeps the folder access people grant across updates; an ad-hoc
-// signature is tied to each build's hash. Local builds stay ad hoc.
-const sign = ['--force', '--sign', process.env.CREW_SIGN_IDENTITY || '-', ...(process.env.CREW_SIGN_KEYCHAIN ? ['--keychain', process.env.CREW_SIGN_KEYCHAIN] : [])];
+// Releases sign with one certificate (`CREW_SIGN_IDENTITY`) so macOS keeps granted folder access across updates; an
+// ad-hoc signature is tied to each build's hash, so macOS asks for folder access again after every local build. Unless
+// `CREW_SIGN_IDENTITY` is set, local builds sign with `Crew Local Signing` from the login keychain if present
+// (docs/macos-app.md), and ad-hoc sign otherwise.
+const localIdentity = () => /^\s*\d+\) ([0-9A-F]{40}) "Crew Local Signing"/m
+  .exec(execFileSync('security', ['find-identity', '-p', 'codesigning'], { encoding: 'utf8' }))?.[1];
+const sign = ['--force', '--sign', process.env.CREW_SIGN_IDENTITY || localIdentity() || '-', ...(process.env.CREW_SIGN_KEYCHAIN ? ['--keychain', process.env.CREW_SIGN_KEYCHAIN] : [])];
 run('codesign', [...sign, path.join(resources, 'runtime/node')]);
 run('codesign', [...sign, app]);
 run('codesign', ['--verify', '--deep', '--strict', app]);

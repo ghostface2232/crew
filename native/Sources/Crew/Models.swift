@@ -752,6 +752,8 @@ struct BoardState: Codable, Sendable, Equatable {
     var presets: [String: Preset]?
     /// Whether the lead and the workers rate each other's work; absent from a daemon that predates peer ratings.
     var peerRatings: Bool?
+    /// Whether a lead's chat shows mission progress as a card; absent from a daemon that predates the setting.
+    var progressCards: Bool?
     /// The interface language ("en" or "ko"), or nil to follow macOS.
     var language: String?
     /// Whether the daemon has the language setting. One that predates it sends no `language`, which decoding cannot
@@ -819,6 +821,7 @@ struct BoardState: Codable, Sendable, Equatable {
             preset = change.preset; presets = change.presets
         case "modelScores": modelScores = try decoder.decode([ModelScore].self, from: event.data)
         case "peerRatings": peerRatings = try decoder.decode(Bool.self, from: event.data)
+        case "progressCards": progressCards = try decoder.decode(Bool.self, from: event.data)
         case "projects": projects = try decoder.decode([String: ProjectSettings].self, from: event.data)
         case "turnTokenBudget": turnTokenBudget = try decoder.decode(TurnTokenBudget.self, from: event.data)
         case "language":

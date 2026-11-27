@@ -981,6 +981,11 @@ test('peer ratings: a worker rates through its own tool, the review line gives t
   assert.match((await h.api('POST', `/api/jobs/${later.job.id}/rating`, { findings: 4, fact: 'x', token: later.server.env.CREW_JOB_TOKEN })).body.error, /not asked to rate/);
   // On again is the default, so the key leaves the file.
   assert.deepEqual((await h.api('POST', '/api/peer-ratings', { enabled: true })).body, { peerRatings: true });
+  // Progress cards are a switch of the same kind, which the state reports and the board may flip.
+  assert.equal((await h.api('GET', '/api/state')).body.progressCards, true);
+  assert.deepEqual((await h.api('POST', '/api/progress-cards', { enabled: false })).body, { progressCards: false });
+  assert.equal((await h.api('GET', '/api/state')).body.progressCards, false);
+  assert.deepEqual((await h.api('POST', '/api/progress-cards', { enabled: true })).body, { progressCards: true });
   const config = JSON.parse(fs.readFileSync(path.join(h.home, 'config.json'), 'utf8'));
   assert.equal('peerRatings' in config, false);
   // A fix starts from a review of someone else's work, so it is not asked to rate one.

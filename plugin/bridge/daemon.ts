@@ -36,7 +36,7 @@ import type { Registration, SetupItem } from './setup.ts';
 import { toastCommand } from './toast.ts';
 import { ANTIGRAVITY_MODELS, antigravityModels, codexModels } from './tiers.ts';
 import type { ModelChoice } from './tiers.ts';
-import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, savePreset, saveProjectSettings, saveRoles, saveTurnTokenBudget, writeInstructions } from './settings.ts';
+import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, saveProgressCards, savePreset, saveProjectSettings, saveRoles, saveTurnTokenBudget, writeInstructions } from './settings.ts';
 import { agentGaugeDir, fromCodexLimits, parseCache, route as routeWork, UsageMonitor } from './usage.ts';
 import type { RouteKind } from './usage.ts';
 import type { EventKind, Job, JobsHooks } from './jobs.ts';
@@ -412,6 +412,7 @@ fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {
   // Turning peer ratings off or on changes what the scores are made of.
   broadcast('peerRatings', live.peerRatings);
   broadcast('modelScores', modelScores());
+  broadcast('progressCards', live.progressCards);
   broadcast('projects', live.projects);
   broadcast('turnTokenBudget', live.turnTokenBudget);
   usage.setModels(usageModels(live));
@@ -448,6 +449,7 @@ function state() {
     preset: live.preset,
     presets: live.presets,
     peerRatings: live.peerRatings,
+    progressCards: live.progressCards,
     language: live.language,
     projects: live.projects,
     turnTokenBudget: live.turnTokenBudget,
@@ -606,7 +608,7 @@ const BOARD_POSTS = [
   /^\/api\/jobs$/,
   /^\/api\/jobs\/[\w-]+\/(?:reply|cancel|rounds\/\d+)$/,
   /^\/api\/missions\/[\w-]+$/,
-  /^\/api\/(?:instructions|setup\/repair|setup\/trust-hooks|peer-ratings|preset|language|roles|project-settings|turn-token-budget)$/,
+  /^\/api\/(?:instructions|setup\/repair|setup\/trust-hooks|peer-ratings|progress-cards|preset|language|roles|project-settings|turn-token-budget)$/,
 ];
 /**
  * Parts of those requests that only the lead sends: they speak for the user or the lead, or have the daemon read a
@@ -1171,6 +1173,11 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       const saved = savePeerRatings(HOME, (await readJson(req)).enabled);
       broadcast('peerRatings', saved.peerRatings);
       broadcast('modelScores', modelScores());
+      return saved;
+    }
+    if (pathname === '/api/progress-cards') {
+      const saved = saveProgressCards(HOME, (await readJson(req)).enabled);
+      broadcast('progressCards', saved.progressCards);
       return saved;
     }
     if (pathname === '/api/turn-token-budget') {

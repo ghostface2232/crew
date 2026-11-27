@@ -168,6 +168,9 @@ export class BoardStore {
       case 'peerRatings':
         this.update({ peerRatings: value as boolean });
         break;
+      case 'progressCards':
+        this.update({ progressCards: value as boolean });
+        break;
       case 'turnTokenBudget':
         this.update({ turnTokenBudget: value as BoardState['turnTokenBudget'] });
         break;

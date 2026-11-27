@@ -96,6 +96,11 @@ const server = http.createServer(async (req, res) => {
     send('turnTokenBudget', state.turnTokenBudget);
     return json({ turnTokenBudget: state.turnTokenBudget });
   }
+  if (url.pathname === '/api/progress-cards') {
+    state.progressCards = body.enabled;
+    send('progressCards', state.progressCards);
+    return json({ progressCards: state.progressCards });
+  }
   if (url.pathname === '/api/language') {
     state.language = body.language ?? null;
     send('language', { language: state.language });

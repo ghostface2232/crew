@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { canonicalPath, effectiveRole, PRESETS, projectSettings, resolveConfig } from '../plugin/bridge/config.ts';
 import { sharedInstructions } from '../plugin/bridge/instructions.ts';
-import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, savePreset, saveProjectSettings, saveRoles, saveTurnTokenBudget, writeInstructions } from '../plugin/bridge/settings.ts';
+import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, saveProgressCards, savePreset, saveProjectSettings, saveRoles, saveTurnTokenBudget, writeInstructions } from '../plugin/bridge/settings.ts';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-settings-'));
 
@@ -328,6 +328,19 @@ test('peer ratings are on unless the file says false, and turning them back on r
   assert.throws(() => savePeerRatings(home, 'off'), /true or false/);
   assert.deepEqual(savePeerRatings(home, true), { peerRatings: true });
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false });
+});
+
+test('progress cards are on unless the file says false, and turning them back on removes the key', () => {
+  const home = tempDir();
+  const file = path.join(home, 'config.json');
+  assert.equal(resolveConfig({}).progressCards, true);
+  assert.throws(() => resolveConfig({ progressCards: 'no' as never }), /progressCards must be true or false/);
+  fs.writeFileSync(file, JSON.stringify({ notify: false, peerRatings: false }));
+  assert.deepEqual(saveProgressCards(home, false), { progressCards: false });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false, peerRatings: false, progressCards: false });
+  assert.throws(() => saveProgressCards(home, 1), /true or false/);
+  assert.deepEqual(saveProgressCards(home, true), { progressCards: true });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false, peerRatings: false });
 });
 
 test('the turn token budget follows job difficulty unless set to one of its choices or unlimited', () => {

@@ -370,7 +370,7 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
   const replies: any[] = [];
   const order: string[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(handler)}; handle`, {
-    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude',
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude', carriesCard: () => false,
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),
     imageContent: () => [{ type: 'image', data: 'x'.repeat(900_000), mimeType: 'image/png' }],
     api: async (_method: string, route: string, body: any) => {
@@ -419,6 +419,53 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
   // However long a bad echo, the call it rode on still succeeds.
   await call({ ack: ['x'.repeat(30_000)] });
   assert.equal(replies.at(-1).result.isError, undefined);
+});
+
+test('the card goes with mission calls, under Codex only with those that move a mission, and its own refresh reads news of nothing', async () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
+  const handler = source.slice(source.indexOf('async function handle('), source.indexOf('readline.createInterface'));
+  const rule = source.slice(source.indexOf('const carriesCard ='), source.indexOf('function toolList()'));
+  const replies: any[] = [];
+  const routes: string[] = [];
+  let failCard = false;
+  let switchedOn = true;
+  const handle = (showsCards: boolean, host = 'claude') => vm.runInNewContext(`${stripTypeScriptTypes(rule + handler)}; handle`, {
+    loadConfig: () => ({ progressCards: switchedOn }),
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host,
+    showsCards, CARD_URI: 'ui://crew/progress.html', CARD_MIME: 'text/html;profile=mcp-app', cardHtml: () => '<html>', codexSession: async () => {},
+    clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg), imageContent: () => [],
+    api: async (_method: string, route: string) => { routes.push(route); return {}; },
+    callTool: async (name: string) => `${name} text`,
+    progressCard: async () => { if (failCard) throw new Error('daemon away'); return { asOf: 1, missions: [], jobs: [] }; },
+  });
+  const call = async (on: boolean, name: string, args: object = {}, host = 'claude') => {
+    await handle(on, host)({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
+    return replies.at(-1).result;
+  };
+  const shown = (result: any) => JSON.stringify([result.structuredContent, result._meta]);
+  assert.equal(shown(await call(true, 'mission', { tasks: [] })), JSON.stringify([{ asOf: 1, missions: [], jobs: [] }, { ui: { resourceUri: 'ui://crew/progress.html' } }]));
+  assert.equal((await call(true, 'status')).structuredContent, undefined);
+  assert.equal((await call(false, 'mission', { stage: 'fix' })).structuredContent, undefined);
+  // Codex draws the card a result names, so only a call that starts, moves or ends a mission carries one.
+  assert.equal((await call(true, 'mission', { tasks: [] }, 'codex')).structuredContent, undefined);
+  for (const args of [{ title: 'x' }, { stage: 'fix' }, { done: true }, { abandoned: true }]) assert.ok((await call(true, 'mission', args, 'codex')).structuredContent);
+  // The user's switch holds from the next call.
+  switchedOn = false;
+  assert.equal((await call(true, 'mission', { stage: 'fix' }, 'codex')).structuredContent, undefined);
+  assert.equal((await call(true, 'mission', { stage: 'fix' })).structuredContent, undefined);
+  switchedOn = true;
+  // A card that cannot be built leaves the call's own answer as it was.
+  failCard = true;
+  assert.equal(JSON.stringify(await call(true, 'mission', { stage: 'fix' })), JSON.stringify({ content: [{ type: 'text', text: 'mission text' }] }));
+  failCard = false;
+  routes.length = 0;
+  assert.equal((await call(true, 'progress')).structuredContent.asOf, 1);
+  assert.deepEqual(routes, []);
+  // Without cards the resource methods stay unknown, as before.
+  await handle(false)({ jsonrpc: '2.0', id: 2, method: 'resources/read', params: { uri: 'ui://crew/progress.html' } });
+  assert.equal(replies.at(-1).error.code, -32601);
+  await handle(true)({ jsonrpc: '2.0', id: 3, method: 'resources/read', params: { uri: 'ui://crew/progress.html' } });
+  assert.equal(replies.at(-1).result.contents[0].mimeType, 'text/html;profile=mcp-app');
 });
 
 test('status pages the latest full report during a follow-up and retained debate turns', async () => {
@@ -595,7 +642,7 @@ test('status and mission explicitly read this session\'s watch news without any 
   const missions: object[] = [];
   const offered: (string[] | undefined)[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(standing + tool + handler)}; handle`, {
-    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude', PROJECT: '/project', projectUnknown: false,
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude', PROJECT: '/project', projectUnknown: false, carriesCard: () => false,
     fresh: false, missionId: null, costMission: null, closedElsewhere: null,
     missionHead: () => 'Current mission', missionDetail: () => '', currentPolicy: () => '', globalPreset: () => null,
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),

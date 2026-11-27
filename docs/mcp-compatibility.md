@@ -152,3 +152,28 @@ Tested 2026-11-24 on Windows 11 with `codex-cli 0.170.0`, for [roadmap L1](roadm
 - **Injecting items.** `thread/inject_items` appends raw Responses API items to a loaded thread's model-visible history. It starts no turn, and only the process that has the thread loaded can call it.
 
 **Not verified:** a queued note to a session that is simply closed (not interrupted) on 0.172, and the TUI's queue handling on 0.172 in general, beyond the interrupted case above.
+
+## 6. MCP Apps (inline cards)
+
+Checked 2026-11-27 on macOS, to see whether a lead's chat can show Crew's progress as a card ([MCP Apps](https://modelcontextprotocol.io/extensions/apps)). A stand-in Node server logged each message and offered one tool, `crew_progress`, whose `_meta` named `ui://probe/card.html` under `ui.resourceUri`, `ui/resourceUri` and `openai/outputTemplate`. It served that resource as `text/html;profile=mcp-app`. The card completed the app handshake (`ui/initialize`, then `ui/notifications/initialized` and `ui/notifications/size-changed`) and printed every message the host sent it. CLI runs used the real accounts with `--mcp-config`/`-c` overrides; desktop runs used a scratch folder's `.mcp.json` or `.codex/config.toml`.
+
+| Host | Declares `io.modelcontextprotocol/ui` | Reads the `ui://` resource | Card |
+| --- | --- | --- | --- |
+| Claude Code 2.1.331 CLI (`claude -p`) | No | No | Text only |
+| Codex CLI 0.172.0 (`codex exec`) | No | No | Text only |
+| Claude desktop app 7.37095.0, Code tab (Claude Code 2.1.331) | Yes, `mimeTypes: ["text/html;profile=mcp-app"]` | After `tools/call` | Shown inline as "Widget from probe", with expand and collapse |
+| ChatGPT desktop app 26.1120.50957, Codex (`codex 0.171.0-alpha.13.2`) | Yes, beside `codex/connection-lease` | After `tools/list`, again after `tools/call` | Shown inline in a frame titled with the server's name |
+
+- **Handshake.** Without `ui/notifications/initialized`, ChatGPT's frame showed "Probe timed out" (the Claude app showed the widget collapsed, and it was not opened). With it, both rendered the card.
+- **What the card receives.** Both hosts answered `ui/initialize` with protocol `2026-01-26`, then sent `ui/notifications/tool-input` and `ui/notifications/tool-result` (the tool's `content` and `structuredContent`). The Claude app also sent `ui/notifications/host-context-changed` (`theme`, `locale`).
+- **Host capabilities.** The Claude app listed `openLinks`, `updateModelContext` (`text`, `image`), `message` (`text`), `serverResources`, `logging`, and `sandbox.csp` echoing the resource's `connectDomains`. ChatGPT listed the same kinds with more content types, plus `serverTools`, `downloadFile`, `experimental` `openai/*` capabilities, and `sandbox.csp`.
+- **Refreshing a shown card.** A second probe had the card retry every 3 seconds, ten times, by both routes below. The resource declared `csp.connectDomains` for `http://127.0.0.1:47699` and `http://localhost:47699`, and the server listened there with permissive CORS and private-network headers.
+  - **`tools/call` from the card.** ChatGPT passed each call to the server and returned its result, so a card there can poll Crew through the host. The Claude app does not declare `serverTools` and answered "IPC not available for MCP tool call".
+  - **`fetch` to `127.0.0.1`.** It failed with `TypeError: Failed to fetch` in both apps, and no request, not even a preflight, reached the server. So a card cannot read the daemon directly in either app.
+  - In the Claude app, a card therefore shows the state of the tool call that made it, and a newer state needs another tool call (a new card).
+- **Frame height.** The Claude app sizes the frame to the height the card reports in `ui/notifications/size-changed`. ChatGPT keeps an inline frame at least 200px tall: a card reporting 64px stayed at an `innerHeight` of 200, and its `containerDimensions` gave only `maxWidth`. Reporting the document's own height (`scrollHeight`) keeps a frame from ever shrinking, since a document is never shorter than its frame.
+- **Borders.** Both apps draw a rounded frame around the card, so a card that draws its own border shows two.
+- **Which calls get a card.** A tool that declares `ui.resourceUri` in `tools/list` gets a card in both apps on every call, even when its result has no `structuredContent`. Only ChatGPT also draws a card for a result that names `_meta.ui.resourceUri` while its tool declares none; the Claude app ignores that, so there a card goes with every call of a declaring tool or none.
+- **Reused servers.** Neither app asked a stdio server for its tool list again after the server's file changed: a new conversation reused the process an earlier one had started. Renaming the server in the config gave a fresh one.
+
+Crew's card is built on these findings; [jobs.md](jobs.md#progress-card) says what it shows and when.

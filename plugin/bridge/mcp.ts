@@ -19,6 +19,8 @@ import { TIERS } from './tiers.ts';
 import { CORRECTNESS_SCALE, DIFFICULTIES, FINDINGS_SCALE, MAX_REVIEWS, RATING_ITEMS } from './notes.ts';
 import { clip } from './text.ts';
 import { checkArguments } from './arguments.ts';
+import { CARD_MIME, CARD_URI, cardHtml, cardView, UI_EXTENSION } from './card.ts';
+import type { CardView } from './card.ts';
 
 /**
  * Stdio MCP server the lead session (Claude Code or Codex) talks to. It holds no state: every
@@ -425,10 +427,42 @@ const ackProperty = {
   anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 100 }],
   description: 'Receipt id(s) received earlier. Acknowledges only those snapshots, never the result of this call.',
 };
+/** Set from the client's initialize request: whether it draws MCP Apps, and so this server's progress card. */
+let showsCards = false;
+/**
+ * Whether a call's result carries the progress card: only `mission`, and under Codex only the calls that start, move or
+ * end a mission. The Claude app draws a card for every call of a tool that declares one and ignores a result's own;
+ * Codex draws the card a result names, so there the card can follow the mission's steps alone
+ * (docs/mcp-compatibility.md#6-mcp-apps-inline-cards).
+ */
+const carriesCard = (name: string, args: any) => showsCards && name === 'mission' && cardsOn()
+  && (host !== 'codex' || Boolean(args?.title || args?.stage || args?.done || args?.abandoned));
+/**
+ * The user's switch, read from the config on disk so a change on the board holds from the next call. The Claude app
+ * reads the card's declaration once, when its session starts, so there the switch applies to the sessions after it.
+ */
+function cardsOn(): boolean {
+  try {
+    return loadConfig().progressCards;
+  } catch {
+    return true;
+  }
+}
+/** Called by the card itself to refresh, where the host lets a card call tools; the model is not shown it. */
+const PROGRESS_TOOL = {
+  name: 'progress',
+  title: 'Crew progress card',
+  description: 'Refreshes the Crew progress card. The card calls it; there is no reason to call it yourself.',
+  annotations: { readOnlyHint: true },
+  inputSchema: { type: 'object', properties: {} },
+  _meta: { ui: { resourceUri: CARD_URI, visibility: ['app'] } },
+};
 function toolList() {
   const tools = buildTools();
   for (const tool of tools) Object.assign(tool.inputSchema.properties, { ack: ackProperty });
-  return tools;
+  if (!showsCards) return tools;
+  if (host !== 'codex' && cardsOn()) for (const tool of tools) if (tool.name === 'mission') Object.assign(tool, { _meta: { ui: { resourceUri: CARD_URI } } });
+  return [...tools, PROGRESS_TOOL as unknown as (typeof tools)[number]];
 }
 let TOOLS = toolList();
 
@@ -703,6 +737,13 @@ async function standing(): Promise<Standing> {
   const state = await api('GET', '/api/state');
   const all = ((state.missions ?? []) as Mission[]).filter((m) => m.project === PROJECT && (SESSION ? m.owner === SESSION : openedHere.has(m.id)));
   return { all, open: all.filter((m) => m.state === 'active').sort((a, b) => a.createdAt - b.createdAt), jobs: state.jobs ?? [], pulls: state.pulls ?? [] };
+}
+
+/** The card's view: this session's open missions, newest first, or else the one that ended last, with their jobs. */
+async function progressCard(): Promise<CardView> {
+  const now = await standing();
+  const missions = now.open.length ? [...now.open].reverse() : now.all.filter((m) => m.endedAt).sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0)).slice(0, 1);
+  return cardView(missions, now.jobs.filter((job) => job.project === PROJECT));
 }
 
 function sessionPulls(pulls: PullWatch[]): PullWatch[] {
@@ -1206,6 +1247,7 @@ async function handle(msg: any): Promise<void> {
   switch (method) {
     case 'initialize':
       canElicit = Boolean(params?.capabilities?.elicitation);
+      showsCards = Boolean(params?.capabilities?.extensions?.[UI_EXTENSION]);
       // Claude Code's session variable wins: a Claude session is never taken for a Codex one.
       host = !process.env.CLAUDE_CODE_SESSION_ID && /^codex/i.test(String(params?.clientInfo?.name ?? '')) ? 'codex' : 'claude';
       // Codex starts this server in the plugin's folder, which is no project: one is known only after a hello.
@@ -1218,7 +1260,7 @@ async function handle(msg: any): Promise<void> {
       TOOLS = toolList();
       return reply({
         protocolVersion: PROTOCOL_VERSIONS.includes(params?.protocolVersion) ? params.protocolVersion : PROTOCOL_VERSIONS[1],
-        capabilities: { tools: {} },
+        capabilities: showsCards ? { tools: {}, resources: {} } : { tools: {} },
         serverInfo: { name: 'crew', title: 'Crew', version: VERSION },
         instructions: instructions(),
       });
@@ -1226,6 +1268,13 @@ async function handle(msg: any): Promise<void> {
       return reply({});
     case 'tools/list':
       return reply({ tools: TOOLS });
+    case 'resources/list':
+      if (!showsCards) break;
+      return reply({ resources: [{ uri: CARD_URI, name: 'progress', title: 'Crew progress', mimeType: CARD_MIME }] });
+    case 'resources/read':
+      if (!showsCards) break;
+      if (params?.uri !== CARD_URI) return send({ jsonrpc: '2.0', id, error: { code: -32002, message: `Resource not found: ${String(params?.uri)}` } });
+      return reply({ contents: [{ uri: CARD_URI, mimeType: CARD_MIME, text: cardHtml(), _meta: { ui: { prefersBorder: true } } }] });
     case 'notifications/cancelled':
       inFlight.get(params?.requestId)?.abort();
       return;
@@ -1243,6 +1292,11 @@ async function handle(msg: any): Promise<void> {
         },
       };
       try {
+        if (params?.name === 'progress' && showsCards) {
+          // The card's own refresh: no acknowledgement, no news, and the session the lead's calls already named.
+          if (host === 'codex' && params?._meta?.sessionId) await codexSession(params._meta);
+          return reply({ content: [{ type: 'text', text: 'Crew progress card refreshed.' }], structuredContent: await progressCard() });
+        }
         const args = params.arguments ?? {};
         // Before anything else, acknowledgements included, so a refused call has had no effect.
         checkArguments(TOOLS, params.name, args, argumentHint);
@@ -1281,7 +1335,8 @@ async function handle(msg: any): Promise<void> {
         }
         // The limit is on text, which is what grew without bound; evidence images keep their own path as before.
         if (jsonBytes(text) > LEAD_BYTES) throw new Error('Crew response exceeds its size limit. Read one job at a time.');
-        reply({ content: [{ type: 'text', text }, ...imageContent(ctx.images)], isError });
+        const card = carriesCard(params.name, args) ? await progressCard().catch(() => undefined) : undefined;
+        reply({ content: [{ type: 'text', text }, ...imageContent(ctx.images)], isError, ...(card ? { structuredContent: card, _meta: { ui: { resourceUri: CARD_URI } } } : {}) });
       } catch (err) {
         reply({ content: [{ type: 'text', text: clipped(String((err as Error).message ?? err), 7000) }], isError: true });
       } finally {
@@ -1289,10 +1344,9 @@ async function handle(msg: any): Promise<void> {
       }
       return;
     }
-    default:
-      // Requests need an answer; unknown notifications are ignored.
-      if (id !== undefined) send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } });
   }
+  // Requests need an answer; unknown notifications are ignored.
+  if (id !== undefined) send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } });
 }
 
 readline.createInterface({ input: process.stdin }).on('line', (line) => {

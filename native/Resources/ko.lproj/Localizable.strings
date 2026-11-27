@@ -475,7 +475,6 @@
 "Discard unsaved instructions?" = "저장하지 않은 지침을 폐기할까요?";
 "Roles" = "역할";
 "Shared" = "공통";
-"About Crew" = "Crew 정보";
 "Model Presets" = "모델 프리셋";
 "Model Scores" = "모델 점수";
 "Same as %@" = "%@ 설정 따르기";
@@ -500,6 +499,8 @@
 "Reviewers" = "리뷰어";
 "Peer ratings" = "상호 평가";
 "Language" = "언어";
+"Progress cards in chat" = "대화에 진행 카드 표시";
+"Shows each mission step as a card in the Claude and Codex desktop apps." = "Claude와 Codex 데스크톱 앱에서 미션의 단계마다 카드로 보여 줘요.";
 "Match System" = "시스템 설정과 같게";
 "Shared instructions" = "공유 지침";
 "Unsaved changes" = "저장하지 않은 변경 사항";

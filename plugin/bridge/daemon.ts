@@ -695,7 +695,10 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       return undefined;
     }
     if (pathname === '/api/health') return { name: 'crew', version: VERSION, build: BUILD, root: PLUGIN_ROOT, pid: process.pid, active: jobs.activeCount + mutatingPosts, ...(PARTIAL_ENV ? { partialEnv: true } : {}) };
-    if (pathname === '/api/state') return state();
+    if (pathname === '/api/state') {
+      const session = url.searchParams.get('lead_session');
+      return session ? { ...state(), leadHooks: claude.leadHookState(session) } : state();
+    }
     if (pathname === '/api/instructions') {
       const file = await sharedFile(url.searchParams.get('project'));
       return { file, text: readInstructions(file) };
@@ -1020,9 +1023,13 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
         case 'release':
           delivery.release(session, body.generation);
           return {};
+        case 'stop-shown':
+          if (typeof body.receipt === 'string') delivery.shown(session, body.receipt, 'stop');
+          return {};
         case 'offer': {
           if (body.automatic !== undefined && typeof body.automatic !== 'boolean') throw new HttpError(400, 'automatic must be boolean');
-          const options = { automatic: body.automatic === true, watcher: body.generation, ids: body.job_ids, bytes: body.bytes };
+          const options = { automatic: body.automatic === true, watcher: body.generation, ids: body.job_ids, bytes: body.bytes,
+            source: body.tool_response === true && !body.automatic && body.generation === undefined && body.wait !== true ? 'tool' as const : undefined };
           let offer = delivery.offer(session, options);
           if (!offer && body.wait === true) {
             const abort = new AbortController();
@@ -1046,11 +1053,24 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     }
     if (pathname === '/api/hooks/claude') {
       const payload = await readJson(req);
-      if (payload?.hook_event_name === 'SessionEnd' && typeof payload.session_id === 'string') jobs.delivery.forget(payload.session_id);
+      const delivery = jobs.delivery;
+      const session = payload?.session_id;
+      const event = payload?.hook_event_name;
+      const main = typeof session === 'string' && session.trim() && session.length <= 200 && !payload.agent_id;
+      if (event === 'SessionEnd' && typeof session === 'string') delivery.forget(session);
       claude.ingest(payload);
       // A Codex desktop thread is known from its hello, which may come before or after the session's first hook.
-      if (typeof payload?.session_id === 'string' && jobs.delivery.desktopOf(payload.session_id)) claude.desktop(payload.session_id);
-      locate(claude.sessions.get(payload?.session_id));
+      if (typeof session === 'string' && delivery.desktopOf(session)) claude.desktop(session);
+      locate(claude.sessions.get(session));
+      if (!main || stopping) return {};
+      if (event === 'PostToolUse' && /^mcp__.*crew__/.test(payload.tool_name)) delivery.toolResponse(session, payload.tool_response);
+      if ((event === 'Stop' || event === 'UserPromptSubmit') && delivery.boundary(session)) {
+        for (const job of jobs.list().filter((job) => job.lead === session)) broadcast('job', view(job));
+      }
+      if (event === 'Stop' && payload.offer_news === true && !payload.stop_hook_active) {
+        if (delivery.touch(session)) void pulls.tick(session);
+        return { offer: delivery.offer(session, { automatic: true, source: 'stop' }) };
+      }
       return {};
     }
     if (pathname === '/api/roles') {

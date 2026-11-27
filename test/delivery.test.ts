@@ -51,12 +51,13 @@ test('offer then death before output, main tool completion, and context injectio
   assert.equal(job.delivered, job.seq);
 });
 
-test('a surviving watcher recovers an expired offering lease; new receipts do not reset budgets', async (t) => {
+test('without boundary hooks the watcher retries expired offers and explicit receipts stay valid', async (t) => {
   const h = harness(t);
   const job = await h.create();
   h.jobs.ask(job.id, 'Question');
   const now = Date.now();
   const watcher = h.delivery.watch('lead', now + 100_000, now)!;
+  const tool = h.delivery.offer('lead', { source: 'tool' }, now - OFFER_MS)!;
   const first = h.delivery.offer('lead', { automatic: true }, now)!;
   assert.equal(h.delivery.offer('lead', { automatic: true, watcher: watcher.generation }, now + 1), null);
   const second = h.delivery.offer('lead', { automatic: true, watcher: watcher.generation }, now + OFFER_MS + 1)!;
@@ -66,7 +67,7 @@ test('a surviving watcher recovers an expired offering lease; new receipts do no
   const explicit = h.delivery.offer('lead', {}, now + OFFER_MS * 2 + 2)!;
   assert.ok(explicit);
   assert.equal(job.news![0].offers, 2);
-  h.delivery.ack('lead', first.receipt);
+  h.delivery.ack('lead', tool.receipt);
   assert.equal(job.ackedSeq, 1, 'a receipt remains valid after its offering lease expires');
 });
 
@@ -280,19 +281,20 @@ test('sync Stop guards continuation; subagents never arm a lead watcher; context
   const request = (async (_method: string, route: string, body: unknown) => { calls.push(route); bodies.push(body); return { text: 'news ids' }; }) as typeof api;
   assert.deepEqual(await leadHook({ session_id: 'lead', stop_hook_active: true }, 'stop', request), { code: 0 });
   assert.deepEqual(await leadHook({ session_id: 'lead', agent_id: 'child' }, 'watch', request), { code: 0 });
-  assert.deepEqual(calls, []);
+  assert.deepEqual(calls, ['/api/hooks/claude']);
+  assert.equal(bodies[0].stop_hook_active, true);
   const context = await leadHook({ session_id: 'lead', hook_event_name: 'UserPromptSubmit' }, 'context', request);
   assert.equal(JSON.parse(context.stdout!).hookSpecificOutput.additionalContext, 'news ids');
-  assert.deepEqual(calls, ['/api/lead/context']);
+  assert.deepEqual(calls, ['/api/hooks/claude', '/api/lead/context']);
   // The daemon adds the follow-up reminder only for this event.
-  assert.equal(bodies[0].event, 'UserPromptSubmit');
+  assert.equal(bodies[1].event, 'UserPromptSubmit');
 });
 
-test('a Codex Stop hook asks to continue in JSON, which survives pwsh, and a Claude one by exit code', async () => {
-  const request = (async () => ({ offer: { text: 'Crew news' } })) as typeof api;
+test('a Codex Stop hook continues by JSON decision and a Claude one by additional context', async () => {
+  const request = (async () => ({ offer: { text: 'Crew news', receipt: 'receipt' } })) as typeof api;
   // Not exit code 2, which Claude Code labels a hook error.
   assert.deepEqual(await leadHook({ session_id: 'lead' }, 'stop', request),
-    { code: 0, stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'Stop', additionalContext: 'Crew news' } }) });
+    { code: 0, stopReceipt: 'receipt', stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'Stop', additionalContext: 'Crew news' } }) });
   const codex = await leadHook({ session_id: 'thread' }, 'stop-json', request);
   assert.equal(codex.code, 0);
   assert.deepEqual(JSON.parse(codex.stdout!), { decision: 'block', reason: 'Crew news' });
@@ -300,7 +302,7 @@ test('a Codex Stop hook asks to continue in JSON, which survives pwsh, and a Cla
   assert.deepEqual(await leadHook({ session_id: 'thread' }, 'stop-json', none), { code: 0 });
 });
 
-test('notification routes require authentication; hook ingestion cannot ACK; shutdown fences delayed delivery', async (t) => {
+test('notification routes require authentication; boundaries acknowledge confirmed receipts; shutdown fences delayed delivery', async (t) => {
   const h = harness(t);
   const job = await h.create();
   h.jobs.ask(job.id, 'question');
@@ -317,11 +319,11 @@ test('notification routes require authentication; hook ingestion cannot ACK; shu
     readJson: async (req: any) => { reads++; if (req.stopDuringBody) context.stopping = true; return req.body; },
     jobs: h.jobs, view: (job: unknown) => job, broadcast: () => {},
     claude: { sessions: new Map(), ingest: () => { ingested++; } }, locate: () => {},
-    missions: { followUpHint: (session: string) => `hint for ${session}`, resumeText: (session: string) => `plan of ${session}`, finish: (id: string, input: unknown) => ({ id, input }) },
+    missions: { list: () => [], followUpHint: (session: string) => `hint for ${session}`, resumeText: (session: string) => `plan of ${session}`, finish: (id: string, input: unknown) => ({ id, input }) },
     pulls: { list: () => [], tick: async (session: string) => { appeared.push(session); } },
   });
   const route = vm.runInContext(`${stripTypeScriptTypes(handler)}; route`, context);
-  for (const action of ['context', 'watch', 'heartbeat', 'release', 'offer', 'ack']) {
+  for (const action of ['context', 'watch', 'heartbeat', 'release', 'offer', 'ack', 'stop-shown']) {
     await assert.rejects(route({ method: 'POST', url: `/api/lead/${action}`, body: { session: 'lead', ack: receipt } }, {}), /unauthorized/);
   }
   assert.equal(reads, 0, 'authentication happens before reading a notification body');
@@ -354,6 +356,52 @@ test('notification routes require authentication; hook ingestion cannot ACK; shu
   context.stopping = false;
   await route({ method: 'POST', url: '/api/lead/ack', auth: true, body: { session: 'lead', ack: receipt } }, {});
   assert.equal(job.ackedSeq, 1);
+
+  const hook = (event: string, extra = {}) => route({ method: 'POST', url: '/api/hooks/claude', auth: true,
+    body: { session_id: 'lead', hook_event_name: event, ...extra } }, {});
+  const lead = (action: string, extra: object) => route({ method: 'POST', url: `/api/lead/${action}`, auth: true, body: { session: 'lead', ...extra } }, {});
+  await t.test('a main-loop tool receipt is acknowledged at the next Stop, which can offer newer news', async () => {
+    h.jobs.ask(job.id, 'tool news');
+    const { offer: tool } = await lead('offer', { tool_response: true });
+    const response = { tool_name: 'mcp__plugin_crew_crew__status', tool_response: [{ type: 'text', text: `Status\n\n${tool.text}` }] };
+    await hook('PostToolUse', { ...response, agent_id: 'child' });
+    await hook('Stop');
+    assert.equal(job.ackedSeq, 1, 'a subagent receiving the response does not show it to the lead');
+    await hook('PostToolUse', response);
+    assert.equal(job.ackedSeq, 1, 'the tool result itself is not a boundary');
+    h.jobs.ask(job.id, 'new news');
+    const { offer: stop } = await hook('Stop', { offer_news: true });
+    assert.equal(job.ackedSeq, 2);
+    assert.deepEqual(stop.items, [{ jobId: job.id, newsSeq: 3 }]);
+    assert.equal(h.delivery.state.receipts[stop.receipt].acknowledged, undefined, 'the Stop that issued it cannot acknowledge it');
+    await lead('stop-shown', { receipt: stop.receipt });
+    assert.equal(job.ackedSeq, 2, 'the hook output itself is not a boundary');
+    await hook('Stop', { offer_news: true, stop_hook_active: true });
+    assert.equal(job.ackedSeq, 3, 'the continued turn reaches its own boundary');
+  });
+
+  await t.test('a prompt acknowledges Stop output only after it was handed out', async () => {
+    h.jobs.ask(job.id, 'next Stop news');
+    const { offer } = await hook('Stop', { offer_news: true, host: 'codex' });
+    await hook('UserPromptSubmit');
+    assert.equal(job.ackedSeq, 3, 'an issued offer missing output confirmation stays pending');
+    await lead('stop-shown', { receipt: offer.receipt });
+    await hook('UserPromptSubmit', { agent_id: 'child' });
+    assert.equal(job.ackedSeq, 3);
+    await hook('UserPromptSubmit', { host: 'codex' });
+    assert.equal(job.ackedSeq, 4);
+  });
+
+  await t.test('an asynchronous offer still needs an explicit acknowledgement', async () => {
+    h.jobs.ask(job.id, 'watcher news');
+    const { watch } = await lead('watch', { deadline: Date.now() + 60_000 });
+    const { offer } = await lead('offer', { automatic: true, generation: watch.generation });
+    await hook('UserPromptSubmit');
+    await hook('Stop');
+    assert.equal(job.ackedSeq, 4);
+    await lead('ack', { ack: offer.receipt });
+    assert.equal(job.ackedSeq, 5);
+  });
 });
 
 test('the receipt store stays bounded, dropping acknowledged receipts before recent unacknowledged ones', () => {
@@ -387,10 +435,12 @@ test('the wake hook runs when its plugin folder is reached through a link', asyn
   t.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 }));
   const linked = path.join(dir, 'bridge');
   fs.symlinkSync(fileURLToPath(new URL('../plugin/bridge', import.meta.url)), linked, 'junction');
+  const requests: (string | undefined)[] = [];
   const daemon = http.createServer((req, res) => {
+    requests.push(req.url);
     req.resume();
     res.setHeader('content-type', 'application/json');
-    res.end(JSON.stringify(req.url === '/api/lead/offer' ? { offer: { text: 'news for the lead' } } : {}));
+    res.end(JSON.stringify(req.url === '/api/hooks/claude' ? { offer: { text: 'news for the lead', receipt: 'receipt' } } : {}));
   });
   await new Promise<void>((resolve) => daemon.listen(0, '127.0.0.1', resolve));
   t.after(() => daemon.close());
@@ -401,6 +451,7 @@ test('the wake hook runs when its plugin folder is reached through a link', asyn
   hook.stdin.end(JSON.stringify({ session_id: 'lead', hook_event_name: 'Stop' }));
   const [code] = await once(hook, 'close');
   assert.deepEqual([code, JSON.parse(stdout).hookSpecificOutput.additionalContext], [0, 'news for the lead']);
+  assert.deepEqual(requests, ['/api/hooks/claude', '/api/lead/stop-shown']);
 });
 
 test('a wake-up names its jobs for the user, and says when one asks a question', () => {

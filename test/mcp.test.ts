@@ -11,6 +11,7 @@ import type { TestContext } from 'node:test';
 import { followUpTitle, missionDetail, missionHead, Missions, NAME_THE_MISSION, normalizeTitle } from '../plugin/bridge/missions.ts';
 import { TIERS } from '../plugin/bridge/tiers.ts';
 import { checkArguments } from '../plugin/bridge/arguments.ts';
+import { ClaudeSessions } from '../plugin/bridge/claude.ts';
 import { assignHint, canonicalPath, defaultHolder, disabledAgents, LEAD, PRESET_NAMES, projectSettings, ROLE_INFO, WORKERS } from '../plugin/bridge/config.ts';
 import { addNews, clipped, Delivery, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from '../plugin/bridge/delivery.ts';
 import type { Job } from '../plugin/bridge/jobs.ts';
@@ -439,7 +440,7 @@ test('the card goes with mission calls, under Codex only with those that move a 
     progressCard: async () => { if (failCard) throw new Error('daemon away'); return { asOf: 1, missions: [], jobs: [] }; },
   });
   const call = async (on: boolean, name: string, args: object = {}, host = 'claude') => {
-    await handle(on, host)({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
+    await handle(on, host)({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args, ...(host === 'codex' ? { _meta: { sessionId: 'lead' } } : {}) } });
     return replies.at(-1).result;
   };
   const shown = (result: any) => JSON.stringify([result.structuredContent, result._meta]);
@@ -643,7 +644,8 @@ test('a task job without a mission cannot open a follow-up', async (t) => {
   assert.ok(calls.slice(before).every(({ method }) => method === 'GET'));
 });
 
-test('status and mission explicitly read this session\'s watch news without any jobs', async () => {
+test('status and mission explicitly read this session\'s watch news without any jobs', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
   const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
   const tool = source.slice(source.indexOf('async function callTool('), source.indexOf('// --- MCP stdio transport'));
   const handler = source.slice(source.indexOf('async function handle('), source.indexOf('readline.createInterface'));
@@ -657,23 +659,29 @@ test('status and mission explicitly read this session\'s watch news without any 
   const replies: any[] = [];
   const missions: object[] = [];
   const offered: (string[] | undefined)[] = [];
-  const handle = vm.runInNewContext(`${stripTypeScriptTypes(standing + tool + handler)}; handle`, {
-    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude', PROJECT: '/project', projectUnknown: false, carriesCard: () => false,
-    fresh: false, missionId: null, costMission: null, closedElsewhere: null, lastFooter: { text: '', at: 0 }, FOOTER_MS: 60_000,
+  const sessions = new ClaudeSessions(300, { onSession() {}, onEvent() {}, onAttention() {} });
+  const context = vm.createContext({
+    Date, AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude', PROJECT: '/project', projectUnknown: false, carriesCard: () => false,
+    fresh: false, missionId: null, costMission: null, closedElsewhere: null, lastFooter: { text: '', at: 0 }, FOOTER_MS: 30 * 60_000,
+    codexSession: async () => {},
     missionHead: () => 'Current mission', missionDetail: () => '', currentPolicy: () => '', globalPreset: () => null,
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),
     imageContent: () => [], baseUrl: () => 'board', summarize: () => '',
     api: async (_method: string, route: string, body: any) => {
-      if (route === '/api/state') return { jobs: [], pulls: watches.map(({ news, ...pull }) => pull), missions, limits: {} };
+      const url = new URL(route, 'http://localhost');
+      if (url.pathname === '/api/state') return { jobs: [], pulls: watches.map(({ news, ...pull }) => pull), missions, limits: {},
+        leadHooks: sessions.leadHookState(url.searchParams.get('lead_session') ?? '') };
       assert.equal(route, '/api/lead/offer');
       // A listing offers all of the session's news; other calls only that of what they show.
       offered.push(body.job_ids && Array.from(body.job_ids));
       assert.equal(body.bytes, 4000);
+      assert.equal(body.tool_response, true);
       return { offer: delivery.offer(body.session, { ids: body.job_ids, bytes: body.bytes }) };
     },
   });
-  const call = async (name: string, args = {}) => {
-    await handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
+  const handle = vm.runInContext(`${stripTypeScriptTypes(standing + tool + handler)}; handle`, context);
+  const call = async (name: string, args = {}, sessionId?: string) => {
+    await handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args, _meta: { sessionId } } });
     return replies.at(-1).result;
   };
   const status = await call('status');
@@ -694,6 +702,31 @@ test('status and mission explicitly read this session\'s watch news without any 
   assert.match(current.content[0].text, /Current mission[^]*\[pr-0\] news 1/);
   assert.equal(unread(watches[0])[0].offers, 2);
   assert.deepEqual(offered, [undefined, undefined, ['pr-0'], ['pr-0']]);
+
+  await t.test('status repeats the footer after compaction, with a time fallback only without hooks', async () => {
+    const full = /Board: board/;
+    const unchanged = /Roles, usage and board: unchanged since the last list\./;
+    const hook = (session_id: string, hook_event_name: string, extra: object = {}) => sessions.ingest({ session_id, hook_event_name, ...extra });
+    t.mock.timers.tick(30 * 60_000);
+    assert.match((await call('status')).content[0].text, full, 'no hooks heard, so the age fallback applies');
+    hook('lead', 'SessionStart', { source: 'resume' });
+    hook('other', 'SessionStart', { source: 'compact' });
+    t.mock.timers.tick(31 * 60_000);
+    assert.match((await call('status')).content[0].text, unchanged, 'recent hooks and another session’s compaction do not resend it');
+    hook('lead', 'SessionStart', { source: 'compact' });
+    hook('lead', 'SessionEnd');
+    hook('lead', 'SessionStart', { source: 'resume' });
+    assert.match((await call('status')).content[0].text, full);
+    assert.match((await call('status')).content[0].text, unchanged);
+
+    context.host = 'codex';
+    assert.match((await call('status', {}, 'thread')).content[0].text, full, 'a new session gets its own footer');
+    assert.match((await call('status', {}, 'thread')).content[0].text, unchanged);
+    t.mock.timers.tick(500);
+    hook('thread', 'PreCompact', { host: 'codex' });
+    assert.match((await call('status', {}, 'thread')).content[0].text, full);
+    assert.match((await call('status', {}, 'thread')).content[0].text, unchanged);
+  });
 });
 
 test('a Codex session says hello once, retries a failed hello or one with no folder, refuses a call naming no session, and starts a new session fresh', async () => {

@@ -134,6 +134,8 @@ export interface UserPrompt {
  */
 export class ClaudeSessions {
   readonly sessions = new Map<string, ClaudeSession>();
+  /** Retained after the board forgets an idle or closed session, which can resume with the same context. */
+  private leadHooks = new Map<string, { compactedAt?: number }>();
   /** Kept apart from the session so the prompts never reach the board's state. Memory only. */
   private prompts = new Map<string, UserPrompt[]>();
   /** Descriptions of Agent calls, claimed by the sub-agent each one starts. */
@@ -187,6 +189,10 @@ export class ClaudeSessions {
       return;
     }
     this.mainAt.set(id, now);
+    if (!p.agent_id) {
+      if (p.hook_event_name === 'PreCompact' || (p.hook_event_name === 'SessionStart' && p.source === 'compact')) this.leadHooks.set(id, { compactedAt: now });
+      else if (!this.leadHooks.has(id)) this.leadHooks.set(id, {});
+    }
 
     switch (p.hook_event_name) {
       case 'SessionStart':
@@ -366,6 +372,10 @@ export class ClaudeSessions {
   /** The session's recent prompts, oldest first. */
   recentPrompts(id: string): UserPrompt[] {
     return [...(this.prompts.get(id) ?? [])];
+  }
+
+  leadHookState(id: string): { compactedAt?: number } | undefined {
+    return this.leadHooks.get(id);
   }
 
   private forget(id: string): void {

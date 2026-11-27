@@ -10,6 +10,8 @@ try {
   let raw = '';
   for await (const chunk of process.stdin) raw += chunk;
   const payload = JSON.parse(raw);
+  // The sync wake hook reports the main Stop and asks for news in one request.
+  if (payload.hook_event_name === 'Stop' && !payload.agent_id) process.exit(0);
   if (process.argv[2] === 'codex') payload.host = 'codex';
   // The desktop app's own id for the session (local_…), which its claude:// links open. A CLI session has none, and a
   // Codex started from a Claude Code terminal inherits the variable, so only Claude's hooks pass it.

@@ -22,7 +22,7 @@ function actedOn(input: HookInput): string[] {
   const started = STARTS_JOB.test(input.tool_name ?? '') ? JSON.stringify(input.tool_response ?? '').match(JOB_ID)?.[1] : undefined;
   return [...new Set([...named, started].filter((id): id is string => typeof id === 'string' && new RegExp(`^${ANY_JOB}$`).test(id)))].slice(0, 50);
 }
-interface HookOutput { code: number; stderr?: string; stdout?: string }
+interface HookOutput { code: number; stderr?: string; stdout?: string; stopReceipt?: string }
 
 /**
  * The line Claude Code shows the user when a watcher wakes the lead, in place of its default "Stop hook feedback".
@@ -38,20 +38,22 @@ export function rewakeSummary(offer: { text: string; items?: { jobId: string }[]
 export async function leadHook(input: HookInput, mode: string, request: typeof api = api, deadline = Date.now() + (HOOK_SECONDS - 10) * 1000): Promise<HookOutput> {
   const session = input.session_id;
   if (!session || input.agent_id) return { code: 0 };
-  const send = (action: string, body: object = {}) => request('POST', `/api/lead/${action}`, { session, ...body }, AbortSignal.timeout(Math.max(1, Math.min(25_000, deadline - Date.now()))));
+  const signal = () => AbortSignal.timeout(Math.max(1, Math.min(25_000, deadline - Date.now())));
+  const send = (action: string, body: object = {}) => request('POST', `/api/lead/${action}`, { session, ...body }, signal());
   if (mode === 'context') {
     const { text } = await send('context', { event: input.hook_event_name });
     return { code: 0, ...(text ? { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: text } }) } : {}) };
   }
   if (mode === 'stop' || mode === 'stop-json') {
-    if (input.stop_hook_active) return { code: 0 };
-    const { offer } = await send('offer', { automatic: true });
+    const host = mode === 'stop-json' ? { host: 'codex' } : { desktop_session_id: process.env.CLAUDE_CODE_HOST_SESSION_ID };
+    const { offer } = await request('POST', '/api/hooks/claude', { ...input, ...host, hook_event_name: 'Stop', offer_news: true }, signal());
     if (!offer) return { code: 0 };
     // Codex runs a hook under pwsh on Windows, which turns node's exit code 2 into 1, so its hooks ask to continue
     // through the JSON decision instead (docs/mcp-compatibility.md#5-codex-as-a-lead-host). Claude Code continues the
     // turn on a Stop hook's additionalContext without labeling the news a hook error, as exit code 2 does.
-    return mode === 'stop-json' ? { code: 0, stdout: JSON.stringify({ decision: 'block', reason: offer.text }) }
-      : { code: 0, stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'Stop', additionalContext: offer.text } }) };
+    const stdout = mode === 'stop-json' ? { decision: 'block', reason: offer.text }
+      : { hookSpecificOutput: { hookEventName: 'Stop', additionalContext: offer.text } };
+    return { code: 0, stdout: JSON.stringify(stdout), stopReceipt: offer.receipt };
   }
   // The hook knows the session for certain; the lead's MCP server may not (an older server, /clear, no session
   // variable). So the session whose Crew call just acted on these jobs takes them over, before it watches for news.
@@ -118,8 +120,11 @@ if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.
       codexJob();
       await ensureDaemon().catch(() => {});
     }
-    const result = await leadHook(JSON.parse(raw), mode, api, deadline);
-    if (result.stdout) await new Promise<void>((resolve) => process.stdout.write(result.stdout + '\n', () => resolve()));
+    const input: HookInput = JSON.parse(raw);
+    const result = await leadHook(input, mode, api, deadline);
+    if (result.stdout) await new Promise<void>((resolve, reject) => process.stdout.write(result.stdout + '\n', (error) => error ? reject(error) : resolve()));
+    // The host waits for the synchronous hook to exit before it can report another boundary.
+    if (result.stopReceipt) await api('POST', '/api/lead/stop-shown', { session: input.session_id, receipt: result.stopReceipt }, AbortSignal.timeout(1000)).catch(() => {});
     if (result.stderr) await new Promise<void>((resolve) => process.stderr.write(result.stderr + '\n', () => resolve()));
     process.exitCode = result.code;
   } catch {

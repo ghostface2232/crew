@@ -617,6 +617,7 @@ interface CallContext {
   /** Evidence images to show with the text result. */
   images: Evidence[];
   jobs: JobView[];
+  session?: string;
   pullIds?: string[];
   /** False for a listing: it shows jobs without acting on them, so it offers their news but takes none over. */
   adopt?: boolean;
@@ -747,8 +748,8 @@ async function progressCard(): Promise<CardView> {
   return cardView(missions, now.jobs.filter((job) => job.project === PROJECT));
 }
 
-function sessionPulls(pulls: PullWatch[]): PullWatch[] {
-  return SESSION ? pulls.filter((pull) => pull.lead === SESSION) : [];
+function sessionPulls(pulls: PullWatch[], session = SESSION): PullWatch[] {
+  return session ? pulls.filter((pull) => pull.lead === session) : [];
 }
 
 const listed = (missions: Mission[]) => missions.map((m) => `${m.id} "${m.title}" (${m.stage})`).join(', ');
@@ -955,7 +956,7 @@ function describePaged(job: JobView, waitingHint?: string): string {
 }
 
 /** The roles, usage and board lines this session's status list last showed in full, and when. */
-let lastFooter = { text: '', at: 0 };
+let lastFooter: { text: string; at: number; session?: string; compactedAt?: number } = { text: '', at: 0 };
 const FOOTER_MS = 30 * 60_000;
 
 /** The follow-up mission being opened, which a job started meanwhile waits for. */
@@ -1171,7 +1172,8 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
         }
         return describeJob(job, ctx);
       }
-      const state = await api('GET', '/api/state');
+      const session = ctx.session;
+      const state = await api('GET', session ? `/api/state?lead_session=${encodeURIComponent(session)}` : '/api/state');
       const jobs: JobView[] = state.jobs.filter((j: JobView) => j.project === PROJECT);
       const active = jobs.filter((j) => !j.endedAt);
       const recent = jobs.filter((j) => j.endedAt).slice(0, 8);
@@ -1183,7 +1185,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const elsewhere = state.jobs.filter((j: JobView) => j.project !== PROJECT && !j.endedAt).length;
       if (elsewhere) lines.push(`(${elsewhere} active job(s) belong to other projects; they are on the board.)`);
       if (recent.length) lines.push('', 'Recent:', ...recent.map(summarize));
-      const pulls = sessionPulls(state.pulls ?? []);
+      const pulls = session ? sessionPulls(state.pulls ?? [], session) : [];
       ctx.pullIds = pulls.map((pull) => pull.id);
       if (pulls.length) {
         lines.push('', 'Watched pull requests:', ...pulls.slice(0, 8).map((pull) => `[${pull.id}] ${pull.repo}#${pull.number} · ${pull.state}`));
@@ -1198,13 +1200,14 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const windows = measured.length ? [] : (state.limits.codex?.windows ?? []);
       if (windows.length) footer.push('', `Codex usage: ${windows.map((w: any) => `${Math.round(w.usedPercent)}% of the ${w.minutes >= 1440 ? `${Math.round(w.minutes / 1440)}-day` : `${Math.round(w.minutes / 60)}-hour`} window`).join(', ')}`);
       footer.push('', `Board: ${baseUrl()}`);
-      // A recent list's roles, usage and board are still in the lead's context, unless compaction dropped them, which
-      // this server is not told of: repeat them once they change or the last full copy is a while old.
+      // A compaction can drop the last full footer. Use the age fallback only when the daemon has heard no hooks.
       const shown = footer.join('\n');
-      if (shown === lastFooter.text && Date.now() - lastFooter.at < FOOTER_MS) lines.push('', 'Roles, usage and board: unchanged since the last list.');
+      const hooked = state.leadHooks;
+      const stale = hooked ? (hooked.compactedAt ?? 0) > (lastFooter.compactedAt ?? 0) : Date.now() - lastFooter.at >= FOOTER_MS;
+      if (session === lastFooter.session && shown === lastFooter.text && !stale) lines.push('', 'Roles, usage and board: unchanged since the last list.');
       else {
         lines.push(shown);
-        lastFooter = { text: shown, at: Date.now() };
+        lastFooter = { text: shown, at: Date.now(), session, compactedAt: hooked?.compactedAt };
       }
       return lines.join('\n');
     }
@@ -1325,11 +1328,13 @@ async function handle(msg: any): Promise<void> {
         checkArguments(TOOLS, params.name, args, argumentHint);
         await ensureDaemon();
         if (host === 'codex') await codexSession(params?._meta);
+        const session = host === 'codex' ? params._meta.sessionId : SESSION;
+        ctx.session = session;
         // Echoes refer to earlier responses. Process them before creating any new offer. A bad echo must not block
         // the call it rode on (a delegate, a reply): it is reported and the receipts stay unacknowledged.
         let ackNote = '';
         if (args.ack !== undefined) {
-          await api('POST', '/api/lead/ack', { session: SESSION, ack: args.ack }).then(({ ignored }) => {
+          await api('POST', '/api/lead/ack', { session, ack: args.ack }).then(({ ignored }) => {
             if (ignored?.length) ackNote = clipped(`\n\nack not applied for ${ignored.join(', ')}: unknown, or for news this session no longer owns.`, 600);
           }, (err) => {
             ackNote = clipped(`\n\nack not applied: ${String((err as Error).message ?? err).split('\n')[0].replace(/\.$/, '')}. The news stays unacknowledged; read it with status.`, 600);
@@ -1344,15 +1349,15 @@ async function handle(msg: any): Promise<void> {
           isError = true;
           text = clipped(String((err as Error).message ?? err), 7000);
         }
-        if (SESSION && (ctx.jobs.length || ctx.pullIds?.length || ctx.allNews)) {
+        if (session && (ctx.jobs.length || ctx.pullIds?.length || ctx.allNews)) {
           // The call has already taken effect; failing it now over a missing offer would invite a duplicate retry.
           // The news stays in the ledger for the watcher, the Stop hook, or the next call.
           const ids = [...new Set(ctx.jobs.map((job) => job.id))];
           // Take over the jobs this response actually shows, as the wake hook would after this call, so it can carry their
           // news. A job cut off by the bound stays with its owner.
           const shown = ctx.adopt === false ? [] : ids.filter((jobId) => text.includes(`[${jobId}]`)).slice(0, 50);
-          const offer = await (shown.length ? api('POST', '/api/lead/adopt', { session: SESSION, job_ids: shown }) : Promise.resolve())
-            .then(() => api('POST', '/api/lead/offer', { session: SESSION, job_ids: ctx.allNews ? undefined : [...ids, ...(ctx.pullIds ?? [])], bytes: 4000 }))
+          const offer = await (shown.length ? api('POST', '/api/lead/adopt', { session, job_ids: shown }) : Promise.resolve())
+            .then(() => api('POST', '/api/lead/offer', { session, job_ids: ctx.allNews ? undefined : [...ids, ...(ctx.pullIds ?? [])], bytes: 4000, tool_response: true }))
             .then(({ offer }) => offer, () => null);
           if (offer) text += `\n\n${offer.text}`;
         }

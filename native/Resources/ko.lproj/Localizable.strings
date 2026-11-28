@@ -653,6 +653,6 @@
 "By Difficulty" = "난이도별";
 "Unlimited" = "무제한";
 "Open at Login" = "로그인 시 열기";
-"Starts in the menu bar at login so limit-stopped jobs resume with no session." = "로그인하면 메뉴 막대에서 시작돼 세션 없이도 사용량 한도로 멈춘 작업을 재개해요.";
+"Starts in the menu bar at login so jobs stopped by a limit resume without a session open." = "로그인하면 메뉴 막대에서 시작돼 세션 없이도 사용량 한도로 멈춘 작업을 재개해요.";
 "Crew is turned off in Login Items. Turn it on there to open at login." = "로그인 항목에서 Crew가 꺼져 있어요. 로그인 시 열려면 거기서 켜 주세요.";
 "Open Login Items" = "로그인 항목 열기";

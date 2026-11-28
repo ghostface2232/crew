@@ -22,8 +22,7 @@ enum ProjectIcons {
             Icon(key: "archivebox", name: "Archive"), Icon(key: "briefcase", name: "Briefcase"), Icon(key: "house", name: "Home"),
             Icon(key: "lock", name: "Lock"),
         ]),
-        // Keyed apart from the Code icon, which reads differently in Korean.
-        Group(title: LocalizedStringResource("Code icons", defaultValue: "Code"), icons: [
+        Group(title: "Development", icons: [
             Icon(key: "apple.terminal", name: "Terminal"), Icon(key: "chevron.left.forwardslash.chevron.right", name: "Code"),
             Icon(key: "hammer", name: "Tools"), Icon(key: "gearshape", name: "Settings"), Icon(key: "cpu", name: "Chip"),
             Icon(key: "server.rack", name: "Server"), Icon(key: "ant", name: "Bug"), Icon(key: "puzzlepiece", name: "Extension"),
@@ -80,10 +79,10 @@ struct ProjectIconPicker: View {
     let path: String
     let name: String
     /// A grid of these, one row of `columns` per group.
-    static let cell: CGFloat = 28
+    static let cell: CGFloat = 40
     static let columns = 10
-    static let cellRadius: CGFloat = 6
-    static let glyph = Font.system(size: 16)
+    static let cellRadius: CGFloat = 8
+    static let glyph = Font.system(size: 18)
     /// The current icon in the header.
     static let tile: CGFloat = 36
     static let tileGlyph = Font.system(size: 20)
@@ -103,9 +102,9 @@ struct ProjectIconPicker: View {
                         .lineLimit(1).truncationMode(.middle)
                 }
             }
-            VStack(alignment: .leading, spacing: Space.l) {
+            VStack(alignment: .leading, spacing: Space.xl) {
                 ForEach(ProjectIcons.groups) { group in
-                    VStack(alignment: .leading, spacing: Space.xs) {
+                    VStack(alignment: .leading, spacing: Space.s) {
                         Text(group.title).font(Typeface.caption).foregroundStyle(.secondary)
                             .padding(.leading, WorkspaceStyle.rowTitleInset)
                         HStack(spacing: 0) {

@@ -2,15 +2,15 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import { flushSync } from 'react-dom';
 import {
   bundleIcon, AddRegular, AlertFilled, AlertRegular, ArrowCircleDownRegular, ArrowClockwiseRegular,
-  ArrowRight16Filled, ClockFilled, ClockRegular, ErrorCircleRegular, FlashFilled, FlashRegular, FolderFilled,
-  FolderRegular, GridFilled, GridRegular, LockClosedKeyRegular, PanelLeftRegular, SearchRegular, SettingsRegular,
+  ArrowRight16Filled, ClockFilled, ClockRegular, ErrorCircleRegular, FlashFilled, FlashRegular,
+  FolderRegular, GridFilled, GridRegular, IconsRegular, LockClosedKeyRegular, PanelLeftRegular, SearchRegular, SettingsRegular,
   StackFilled, StackRegular, WifiOffRegular,
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import { board } from './store.ts';
 import { formatDate, longDay } from './dates.ts';
 import { detailFromFragment, eventsIn, isNewJobKey, knownProjects, projectNames, projectOf, searchShortcut } from './model.ts';
-import { AskHost, ClockProvider, CopyMenu, Icon, tNodes, LeavingContext, PANEL_EXIT_MS, RollingNumber, SHEET_EXIT_MS, useClock, useLanguage, useLinger, useStableItems } from './ui.tsx';
+import { AskHost, ClockProvider, ContextMenu, CopyMenu, Icon, tNodes, LeavingContext, PANEL_EXIT_MS, RollingNumber, SHEET_EXIT_MS, useClock, useLanguage, useLinger, useStableItems } from './ui.tsx';
 import appIcon from './icons/CrewAppIcon.png';
 import { Activity, History, Workspace } from './Overview.tsx';
 import { NeedsYou } from './NeedsYou.tsx';
@@ -20,7 +20,8 @@ import { Dispatch } from './Dispatch.tsx';
 import { captureLayout, dropLayout, playLayout } from './flip.ts';
 import { Palette } from './Palette.tsx';
 import { Onboarding } from './Onboarding.tsx';
-import { NavList, PageTabs, ProjectPeek, useFold } from './Shell.tsx';
+import { NavList, PageTabs, ProjectIconPicker, ProjectPeek, useFold } from './Shell.tsx';
+import { projectIcon } from './projectIcons.ts';
 import { Notifier } from './notify.ts';
 import { desktop, useAppUpdate } from './desktop.ts';
 import { followSetting, t, translated } from './i18n.ts';
@@ -31,7 +32,6 @@ const AlertNavIcon = bundleIcon(AlertFilled, AlertRegular);
 const FlashNavIcon = bundleIcon(FlashFilled, FlashRegular);
 const ClockNavIcon = bundleIcon(ClockFilled, ClockRegular);
 const StackNavIcon = bundleIcon(StackFilled, StackRegular);
-const FolderNavIcon = bundleIcon(FolderFilled, FolderRegular);
 export const PAGES = translated((): [Page, string, FluentIcon][] => [
   ['overview', t('Overview'), GridNavIcon],
   ['needs', t('Needs You'), AlertNavIcon],
@@ -463,8 +463,23 @@ function ProjectNav({ projects, names, project, state, go }: {
   const items = useStableItems([
     { id: '', label: t('All projects'), icon: StackNavIcon, dot: undefined },
     // No tooltip: the preview beside the list shows the path, and a tooltip would cover it.
-    ...projects.map((dir) => ({ id: dir, label: names.get(dir) ?? dir, icon: FolderNavIcon, dot: dots.get(dir) })),
-  ], (a, b) => a.id === b.id && a.label === b.label && a.dot === b.dot);
+    ...projects.map((dir) => ({ id: dir, label: names.get(dir) ?? dir, icon: projectIcon(state.projects?.[dir]?.icon), dot: dots.get(dir), menu: true })),
+  ], (a, b) => a.id === b.id && a.label === b.label && a.dot === b.dot && a.icon === b.icon);
+  // A project's context menu, and the icon picker it opens, each beside the project's row.
+  const [menu, setMenu] = useState<{ dir: string; row: HTMLElement; at: { x: number; y: number } } | null>(null);
+  const [picker, setPicker] = useState<{ dir: string; row: HTMLElement } | null>(null);
+  const openMenu = useCallback((dir: string, row: HTMLElement, at?: { x: number; y: number }) => {
+    clearTimeout(timer.current);
+    setPeek(null);
+    setPicker(null);
+    const box = row.getBoundingClientRect();
+    const point = at ?? { x: box.left + 24, y: box.bottom + 4 };
+    setMenu({ dir, row, at: { x: Math.min(point.x, innerWidth - 200), y: Math.min(point.y, innerHeight - 48) } });
+  }, []);
+  const closePicker = useCallback((refocus: boolean) => {
+    if (refocus) picker?.row.focus({ preventScroll: true });
+    setPicker(null);
+  }, [picker]);
   /** Another project keeps the page, so its requests, activity or history are one click away. */
   const selectProject = useCallback((id: string) => {
     setPeek(null);
@@ -472,14 +487,18 @@ function ProjectNav({ projects, names, project, state, go }: {
   }, [go]);
   const hoverProject = useCallback((id: string, element: HTMLElement | null) => {
     clearTimeout(timer.current);
-    if (!hover) return;
+    // The menu and the picker sit where the preview would.
+    if (!hover || menu || picker) return;
     // A short rest before the first preview, none while moving between projects.
     const open = () => setPeek(id && element ? { dir: id, top: element.getBoundingClientRect().top } : null);
     if (!id) timer.current = setTimeout(open, 120);
     else if (peek) open();
     else timer.current = setTimeout(open, 260);
-  }, [hover, peek]);
+  }, [hover, peek, menu, picker]);
   useEffect(() => () => clearTimeout(timer.current), []);
+  // A project that leaves the list takes its menu and picker with it.
+  if (menu && !projects.includes(menu.dir)) setMenu(null);
+  if (picker && !projects.includes(picker.dir)) setPicker(null);
   return (
     <>
       <NavList
@@ -488,8 +507,33 @@ function ProjectNav({ projects, names, project, state, go }: {
         current={project}
         onSelect={selectProject}
         onHover={hoverProject}
+        onMenu={openMenu}
       />
       {peek && <ProjectPeek dir={peek.dir} name={names.get(peek.dir) ?? peek.dir} top={peek.top} state={state} />}
+      {menu && (
+        <ContextMenu at={menu.at} label={names.get(menu.dir) ?? menu.dir} onClose={() => setMenu(null)}>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setMenu(null);
+              setPicker({ dir: menu.dir, row: menu.row });
+            }}
+          >
+            <Icon icon={IconsRegular} />
+            {t('Change Icon…')}
+          </button>
+        </ContextMenu>
+      )}
+      {picker && (
+        <ProjectIconPicker
+          key={picker.dir}
+          dir={picker.dir}
+          name={names.get(picker.dir) ?? picker.dir}
+          stored={state.projects?.[picker.dir]?.icon}
+          anchor={picker.row}
+          close={closePicker}
+        />
+      )}
     </>
   );
 }

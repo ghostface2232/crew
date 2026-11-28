@@ -893,6 +893,40 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .peek-stats > span[data-state] svg { color: var(--tone); }
 .peek-line { color: var(--secondary); font-size: 12px; }
 .peek-mission { padding: 7px 10px; border-radius: var(--inset-radius); background: var(--surface-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A project's icon choices, beside the sidebar where the preview opens: a row of ten per group. */
+dialog.icon-picker {
+  position: fixed;
+  inset: auto;
+  z-index: 9;
+  display: grid;
+  gap: 12px;
+  width: calc(10 * 40px + 2 * 14px);
+  max-height: calc(100dvh - 24px);
+  margin: 0;
+  padding: 14px;
+  overflow-y: auto;
+  border: 0;
+  border-radius: var(--panel-radius);
+  background: var(--surface);
+  color: var(--label);
+  box-shadow: var(--shadow-pop);
+  transform-origin: left top;
+  animation: peek-in 420ms var(--ease-out);
+}
+.icon-picker-head { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 2px 2px 0; }
+.icon-picker-tile { display: grid; flex: none; place-items: center; width: 36px; height: 36px; border-radius: var(--inset-radius); background: var(--surface-2); color: var(--accent); }
+.icon-picker-tile svg { width: 20px; height: 20px; }
+.icon-picker-title { display: grid; gap: 2px; min-width: 0; }
+.icon-picker-groups { display: grid; gap: 12px; }
+.icon-picker-group { display: grid; gap: 6px; }
+.icon-picker-label { padding-inline: 10px; color: var(--secondary); font-size: 11px; font-weight: 600; }
+.icon-picker-grid { display: grid; grid-template-columns: repeat(10, 40px); }
+.icon-picker-grid > button { width: 40px; min-height: 40px; padding: 0; border-radius: var(--inset-radius); corner-shape: var(--smooth); background: none; color: var(--secondary); }
+.icon-picker-grid > button svg { width: 20px; height: 20px; }
+@media (hover: hover) { .icon-picker-grid > button:not([aria-checked="true"]):hover { background: var(--fill-strong); color: var(--label); } }
+.icon-picker-grid > button[aria-checked="true"] { background: var(--accent); color: var(--on-ink); }
+.icon-picker-grid > button:focus-visible { outline-offset: 0; }
+.icon-picker-foot { display: flex; justify-content: flex-end; }
 
 .workspace { min-width: 0; height: 100dvh; display: flex; flex-direction: column; }
 .topbar {

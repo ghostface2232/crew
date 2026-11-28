@@ -2,7 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   AddRegular, AlertOffRegular, AlertRegular, ArrowTurnDownLeftRegular, ChatMultipleRegular, ClockRegular,
-  FlagRegular, FlashRegular, FolderRegular, GridRegular, HandWaveRegular, SearchRegular, SettingsRegular, StackRegular, WrenchRegular,
+  FlagRegular, FlashRegular, GridRegular, HandWaveRegular, SearchRegular, SettingsRegular, StackRegular, WrenchRegular,
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { Snapshot } from './types.ts';
@@ -11,6 +11,7 @@ import { jobLabel, missionStep, missionStops, NAMES, projectOf, roleLabel, jobRo
 import { AgentMark, Chip, EASE_IN_OUT, EASE_OUT, Icon, reducedMotion, Elapsed, tNodes, useClock, useLanguage, WordReveal } from './ui.tsx';
 import { jobStatusState, missionStateLabel, sessionStateLabel } from './Missions.tsx';
 import { t, translated } from './i18n.ts';
+import { projectIcon } from './projectIcons.ts';
 import { notificationPermission, notificationsWanted, requestNotifications, setNotificationsWanted } from './notify.ts';
 
 interface Entry {
@@ -82,7 +83,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
   const top = Math.max(origin ? Math.max(8, origin.top) : 72, below);
   // The morph to and from the search control would pass under those buttons, so a palette moved below them fades instead.
   const anchor = below ? undefined : origin;
-  const { jobs, claude, missions, roleInfo } = state;
+  const { jobs, claude, missions, roleInfo, projects: projectSettings } = state;
   const notifyState = useClock(notificationPermission);
   const notifyOn = useClock(() => notifyState === 'granted' && notificationsWanted(), notifyState === 'granted');
   const locale = useLanguage();
@@ -122,7 +123,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
       const activeJobs = projectJobs.filter((job) => job.endedAt == null).length;
       const activeMissions = missions.filter((mission) => projectOf(mission) === dir && mission.state === 'active').length;
       list.push({
-        id: `project:${dir}`, group: 'Projects', title: names.get(dir) ?? dir, subtitle: dir, icon: FolderRegular,
+        id: `project:${dir}`, group: 'Projects', title: names.get(dir) ?? dir, subtitle: dir, icon: projectIcon(projectSettings?.[dir]?.icon),
         // As in the sidebar, the page stays.
         run: () => actions.go({ project: dir }),
         preview: () => ({
@@ -183,7 +184,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
       });
     }
     return list;
-  }, [jobs, claude, missions, roleInfo, names, projects, actions, notifyState, notifyOn, locale]);
+  }, [jobs, claude, missions, roleInfo, projectSettings, names, projects, actions, notifyState, notifyOn, locale]);
   const shown = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (words.length) return entries.filter((entry) =>

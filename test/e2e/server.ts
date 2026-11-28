@@ -101,6 +101,20 @@ const server = http.createServer(async (req, res) => {
     send('progressCards', state.progressCards);
     return json({ progressCards: state.progressCards });
   }
+  if (url.pathname === '/api/project-settings') {
+    // As the daemon stores them: null and off are the defaults, so they drop out.
+    const settings: Record<string, unknown> = { ...state.projects?.[body.project] };
+    const projects: Record<string, unknown> = { ...state.projects };
+    for (const [key, value] of Object.entries(body.changes)) {
+      if (value === null || value === false) delete settings[key];
+      else settings[key] = value;
+    }
+    if (Object.keys(settings).length) projects[body.project] = settings;
+    else delete projects[body.project];
+    state.projects = projects as typeof state.projects;
+    send('projects', state.projects);
+    return json({ projects: state.projects });
+  }
   if (url.pathname === '/api/language') {
     state.language = body.language ?? null;
     send('language', { language: state.language });

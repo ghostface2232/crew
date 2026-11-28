@@ -1,12 +1,15 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { AlertBadgeRegular, FlagRegular, SpinnerIosRegular } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
-import type { Snapshot } from './types.ts';
+import type { ProjectSettings, Snapshot } from './types.ts';
 import { projectOf, relativeDuration } from './model.ts';
 import { EASE_OUT, Icon, useFade, useClock, WordReveal } from './ui.tsx';
 import { t } from './i18n.ts';
+import { board } from './store.ts';
+import { request } from './api.ts';
+import { DEFAULT_PROJECT_ICON, ICON_GROUPS, projectIcon, shownIconKey } from './projectIcons.ts';
 
 export interface NavItem {
   id: string;
@@ -16,17 +19,21 @@ export interface NavItem {
   title?: string;
   /** A state the item is in, drawn as a dot: working or waiting. */
   dot?: string;
+  /** Whether a right-click or the menu key opens the list's `onMenu` for this item. */
+  menu?: boolean;
 }
 /**
  * A list of sidebar items. A soft highlight glides to the item under the pointer while the others dim, and comes
  * to rest on nothing when the pointer leaves, as the reference menus behave.
  */
-export const NavList = memo(function NavList({ label, items, current, onSelect, onHover }: {
+export const NavList = memo(function NavList({ label, items, current, onSelect, onHover, onMenu }: {
   label: string;
   items: NavItem[];
   current: string;
   onSelect: (id: string) => void;
   onHover?: (id: string, element: HTMLElement | null) => void;
+  /** Asks for an item's context menu: at the pointer from a right-click, or beside the item from the keyboard. */
+  onMenu?: (id: string, element: HTMLElement, at?: { x: number; y: number }) => void;
 }) {
   const list = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -69,6 +76,15 @@ export const NavList = memo(function NavList({ label, items, current, onSelect, 
               onHover?.(item.id, event.currentTarget);
             }}
             onClick={() => onSelect(item.id)}
+            onContextMenu={onMenu && item.menu ? (event) => {
+              event.preventDefault();
+              onMenu(item.id, event.currentTarget, { x: event.clientX, y: event.clientY });
+            } : undefined}
+            onKeyDown={onMenu && item.menu ? (event) => {
+              if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+              event.preventDefault();
+              onMenu(item.id, event.currentTarget);
+            } : undefined}
           >
             <Icon icon={item.icon} filled={current === item.id} />
             <NavLabel label={item.label} current={current === item.id} />
@@ -261,5 +277,133 @@ export function ProjectPeek({ dir, name, top, state }: { dir: string; name: stri
         ))}
       </div>
     </div>
+  );
+}
+
+/** The grid's row length: each group is one row. */
+const ICON_COLUMNS = 10;
+/**
+ * A project's icon choices beside the sidebar, as the app's popover offers them. A pick is saved at once and the sidebar
+ * follows the daemon's broadcast; the popover stays open so another can be tried. Escape returns focus to the project.
+ */
+export function ProjectIconPicker({ dir, name, stored, anchor, close }: {
+  dir: string;
+  name: string;
+  /** The project's saved key, which may be one this board does not know. */
+  stored: string | undefined;
+  anchor: HTMLElement;
+  close: (refocus: boolean) => void;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const shown = shownIconKey(stored);
+  const groups = ICON_GROUPS();
+  const keys = groups.flatMap((group) => group.icons.map((icon) => icon.key));
+  const [focused, setFocused] = useState(shown);
+  const [error, setError] = useState('');
+  // Saves run one after another, so quick picks land in the order they were made.
+  const saving = useRef(Promise.resolve());
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  const save = (icon: string | null) => {
+    setError('');
+    saving.current = saving.current.then(async () => {
+      try {
+        // A newer state from the stream, such as the app's pick, wins over this save's older answer.
+        const revision = board.getProjectsRevision();
+        const saved = await request<{ projects: Record<string, ProjectSettings> }>('/api/project-settings', { project: dir, changes: { icon } });
+        if (board.getProjectsRevision() === revision) board.receive('projects', saved.projects);
+      } catch (error) {
+        setError(t('Not saved: {error}', { error: (error as Error).message }));
+      }
+    });
+  };
+  // The folder is the default, so picking it clears the setting as Reset does.
+  const pick = (key: string) => save(key === DEFAULT_PROJECT_ICON ? null : key);
+  useLayoutEffect(() => {
+    const element = ref.current!;
+    const row = anchor.getBoundingClientRect();
+    const edge = anchor.closest('.sidebar')?.getBoundingClientRect().right ?? row.right;
+    element.style.left = `${Math.max(8, Math.min(edge + 10, innerWidth - element.offsetWidth - 8))}px`;
+    element.style.top = `${Math.max(12, Math.min(row.top - 12, innerHeight - element.offsetHeight - 12))}px`;
+    element.querySelector<HTMLElement>('[tabindex="0"]')?.focus({ preventScroll: true });
+  }, [anchor]);
+  useEffect(() => {
+    const away = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) closeRef.current(false);
+    };
+    // Taken before the page's own Escape handlers, so an open detail panel or drawer stays as it is.
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      event.preventDefault();
+      closeRef.current(true);
+    };
+    document.addEventListener('pointerdown', away);
+    document.addEventListener('keydown', escape, true);
+    return () => {
+      document.removeEventListener('pointerdown', away);
+      document.removeEventListener('keydown', escape, true);
+    };
+  }, []);
+  const focusIcon = (key: string) => {
+    setFocused(key);
+    ref.current?.querySelector<HTMLElement>(`[data-icon="${CSS.escape(key)}"]`)?.focus();
+  };
+  // Arrows move through the grid as it is drawn, a row per group; Enter and Space pick, as on any button.
+  const move = (event: ReactKeyboardEvent) => {
+    const at = keys.indexOf(focused);
+    const steps: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -ICON_COLUMNS, ArrowDown: ICON_COLUMNS, Home: -at, End: keys.length - 1 - at };
+    if (!(event.key in steps)) return;
+    event.preventDefault();
+    const next = keys[at + steps[event.key]];
+    if (next) focusIcon(next);
+  };
+  return (
+    <dialog className="icon-picker" open ref={ref} aria-label={t('Change Icon')}>
+      <header className="icon-picker-head">
+        <span className="icon-picker-tile"><Icon icon={projectIcon(stored)} size={20} /></span>
+        <span className="icon-picker-title">
+          <span className="peek-name">{name}</span>
+          <span className="peek-path">{dir}</span>
+        </span>
+      </header>
+      <div className="icon-picker-groups" onKeyDown={move}>
+        {groups.map((group, index) => (
+          <div key={group.label} className="icon-picker-group" role="radiogroup" aria-labelledby={`icon-group-${index}`}>
+            <span className="icon-picker-label" id={`icon-group-${index}`}>{group.label}</span>
+            <div className="icon-picker-grid">
+              {group.icons.map(({ key, icon, name }) => (
+                <button
+                  key={key}
+                  role="radio"
+                  aria-checked={key === shown}
+                  aria-label={name}
+                  title={name}
+                  data-icon={key}
+                  tabIndex={key === focused ? 0 : -1}
+                  onFocus={() => setFocused(key)}
+                  onClick={() => pick(key)}
+                >
+                  <Icon icon={icon} size={20} />
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      {error && <p className="action-message" data-tone="failed" role="alert">{error}</p>}
+      <footer className="icon-picker-foot">
+        <button
+          className="small"
+          disabled={shown === DEFAULT_PROJECT_ICON}
+          onClick={() => {
+            save(null);
+            // The button is disabled once the folder shows, so focus moves to the folder rather than fall to the page.
+            focusIcon(DEFAULT_PROJECT_ICON);
+          }}
+        >
+          {t('Reset to Folder')}
+        </button>
+      </footer>
+    </dialog>
   );
 }

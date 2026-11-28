@@ -236,6 +236,7 @@ test('a built copy registers with Codex, records it as complete only when both h
   const failVersion = path.join(profile, 'fail-version');
   const claudeAuth = path.join(profile, 'claude-auth');
   const missingCodexPlugin = path.join(profile, 'missing-codex-plugin');
+  const strictList = path.join(profile, 'strict-list');
   const codexVersion = JSON.parse(fs.readFileSync('plugin/.codex-plugin/plugin.json', 'utf8')).version;
   const log = `require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(1)) + '\\n');`;
   writeFakeBin(path.join(profile, 'claude'), `${log}
@@ -251,7 +252,11 @@ test('a built copy registers with Codex, records it as complete only when both h
   writeFakeBin(path.join(profile, 'codex'), `${log}
     const fs = require('node:fs'); const args = process.argv.slice(2).join(' ');
     if (args === '--version' && fs.existsSync(${JSON.stringify(failVersion)})) { console.error('temporary version failure'); process.exit(1); }
-    if (args === 'plugin marketplace list') console.log('MARKETPLACE  ROOT\\n' + (fs.existsSync(${JSON.stringify(marketplaces)}) ? fs.readFileSync(${JSON.stringify(marketplaces)}, 'utf8') : ''));
+    const listed = fs.existsSync(${JSON.stringify(marketplaces)}) ? fs.readFileSync(${JSON.stringify(marketplaces)}, 'utf8') : '';
+    // Like Codex 0.172, which lists nothing while a registered root has no marketplace manifest.
+    const broken = fs.existsSync(${JSON.stringify(strictList)}) && listed.split('\\n').filter(Boolean).find((row) => !fs.existsSync(require('node:path').join(/^\\S+\\s+(.+?)\\s*$/.exec(row)[1], '.claude-plugin', 'marketplace.json')));
+    if (args === 'plugin marketplace list' && broken) { console.error('Error: failed to load marketplace(s): marketplace root does not contain a supported manifest'); process.exit(1); }
+    if (args === 'plugin marketplace list') console.log('MARKETPLACE  ROOT\\n' + listed);
     if (args === 'plugin add crew@crew' && fs.existsSync(${JSON.stringify(failAdd)})) { console.error('no space left'); process.exit(1); }
     if (args === 'plugin list --marketplace crew') console.log(fs.existsSync(${JSON.stringify(missingCodexPlugin)}) ? 'crew@crew  not installed  local' : 'crew@crew  installed, enabled  ${codexVersion}  local');
     if (args === 'app-server') require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
@@ -371,6 +376,17 @@ test('a built copy registers with Codex, records it as complete only when both h
   fs.writeFileSync(marketplaces, `crew  ${earlier}\n`);
   assert.equal((await register(true)).ok, true);
   assert.deepEqual(codexCalls().filter((call) => /remove|add/.test(call)), ['plugin marketplace remove crew', `plugin marketplace add ${ours}`, 'plugin add crew@crew']);
+
+  // A registered marketplace folder that has gone missing stops Codex listing any, so the app writes it again first.
+  fs.rmSync(record);
+  fs.rmSync(calls);
+  fs.writeFileSync(marketplaces, `crew  ${ours}\n`);
+  fs.rmSync(ours, { recursive: true });
+  fs.writeFileSync(strictList, '');
+  assert.equal((await register(true)).ok, true);
+  assert.ok(fs.existsSync(path.join(ours, '.crew-codex-marketplace')));
+  assert.deepEqual(codexCalls().filter((call) => /marketplace/.test(call)), ['plugin marketplace list', 'plugin marketplace list', `plugin marketplace add ${ours}`]);
+  fs.rmSync(strictList);
 
   // A failed query is different from an agent that is absent. Keep earlier copies until both can be checked.
   const oldCopy = path.join(home, 'plugins', 'earlier-test-build');

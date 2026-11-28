@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -39,18 +40,69 @@ export function writeCodexPlugin(root: string, runtime: string, dest: string): s
   const marketplace = path.join(dest, 'marketplace');
   if (fs.existsSync(marketplace) && !writtenByCrew(marketplace)) throw new Error(`${marketplace} was not written by Crew, so it is left as it is.`);
 
-  fs.rmSync(marketplace, { recursive: true, force: true });
-  fs.mkdirSync(marketplace, { recursive: true });
-  fs.writeFileSync(path.join(marketplace, MARKER), 'Written by Crew for Codex from a built copy; rewritten at each registration.\n');
-  fs.cpSync(path.join(root, '.claude-plugin', 'marketplace.json'), path.join(marketplace, '.claude-plugin', 'marketplace.json'));
-  const out = path.join(marketplace, 'plugin');
-  // The skills send Codex to ../../agents for their subagents' instructions.
-  for (const folder of ['.codex-plugin', 'skills', 'agents']) fs.cpSync(path.join(plugin, folder), path.join(out, folder), { recursive: true });
-  const mcp = codexMcp(JSON.parse(fs.readFileSync(path.join(plugin, pointer(manifest.mcpServers)), 'utf8')), runtime, bridge);
-  writeJson(path.join(out, pointer(manifest.mcpServers)), mcp);
-  fs.cpSync(path.join(plugin, pointer(manifest.hooks)), path.join(out, pointer(manifest.hooks)));
+  // Built beside the old folder and swapped in, since Codex fails to list any marketplace while one registered root
+  // is incomplete, and a folder left half deleted (Windows refuses to remove files another process holds open) would
+  // also have lost the marker that lets the next registration replace it.
+  fs.mkdirSync(dest, { recursive: true });
+  for (const name of fs.readdirSync(dest)) {
+    // Recent ones may belong to a registration another Crew process is running now.
+    const leftover = path.join(dest, name);
+    if (LEFTOVER.test(name) && Date.now() - (fs.statSync(leftover, { throwIfNoEntry: false })?.mtimeMs ?? Date.now()) > LEFTOVER_AGE_MS) removeLeftover(leftover);
+  }
+  const temp = `${marketplace}.${randomBytes(6).toString('hex')}`;
+  try {
+    fs.mkdirSync(temp);
+    fs.writeFileSync(path.join(temp, MARKER), 'Written by Crew for Codex from a built copy; rewritten at each registration.\n');
+    fs.cpSync(path.join(root, '.claude-plugin', 'marketplace.json'), path.join(temp, '.claude-plugin', 'marketplace.json'));
+    const out = path.join(temp, 'plugin');
+    // The skills send Codex to ../../agents for their subagents' instructions.
+    for (const folder of ['.codex-plugin', 'skills', 'agents']) fs.cpSync(path.join(plugin, folder), path.join(out, folder), { recursive: true });
+    const mcp = codexMcp(JSON.parse(fs.readFileSync(path.join(plugin, pointer(manifest.mcpServers)), 'utf8')), runtime, bridge);
+    writeJson(path.join(out, pointer(manifest.mcpServers)), mcp);
+    fs.cpSync(path.join(plugin, pointer(manifest.hooks)), path.join(out, pointer(manifest.hooks)));
+    const old = `${temp}.old`;
+    const replacing = fs.existsSync(marketplace);
+    if (replacing) renameRetrying(marketplace, old);
+    try {
+      renameRetrying(temp, marketplace);
+    } catch (err) {
+      try {
+        if (replacing) renameRetrying(old, marketplace);
+      } catch (restore) {
+        throw new Error(`${(err as Error).message}; putting the old folder back failed too: ${(restore as Error).message}`);
+      }
+      throw err;
+    }
+    // A copy that cannot be removed yet is cleared at the next registration.
+    if (replacing) removeLeftover(old);
+  } finally {
+    removeLeftover(temp);
+  }
   return marketplace;
 }
+
+/** A marketplace being built, or one swapped out, that an earlier registration could not remove. */
+const LEFTOVER = /^marketplace\.[0-9a-f]{12}(\.old)?$/;
+const LEFTOVER_AGE_MS = 10 * 60_000;
+
+/** Renames a folder, waiting out Windows refusing it for a moment while a scanner holds new files open. */
+function renameRetrying(from: string, to: string): void {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return fs.renameSync(from, to);
+    } catch (err) {
+      if (attempt >= 4 || !['EPERM', 'EACCES', 'EBUSY'].includes((err as NodeJS.ErrnoException).code ?? '')) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100 * (attempt + 1));
+    }
+  }
+}
+const removeLeftover = (folder: string) => {
+  try {
+    fs.rmSync(folder, { recursive: true, force: true, maxRetries: 3 });
+  } catch {
+    // Still held open; it does no harm where it is.
+  }
+};
 
 /** Marks a marketplace folder Crew wrote, the only kind registration replaces or removes. */
 const MARKER = '.crew-codex-marketplace';

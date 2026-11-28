@@ -208,10 +208,21 @@ async function registerCodex(root: string): Promise<HostRegistration | null> {
   const version = await run(bin, ['--version']);
   if (version.missing) return null;
   if (!version.ok) return { ok: false, current: false, detail: `Could not check the Codex version: ${lastLine(version.out)}` };
-  const list = await run(bin, ['plugin', 'marketplace', 'list'], 60_000);
-  if (!list.ok) return { ok: false, current: false, detail: `Could not list Codex marketplaces: ${lastLine(list.out)}` };
-  const current = codexMarketplaces(list.out).get('crew');
   const marketplace = PACKAGED ? path.join(CODEX_DIR, 'marketplace') : MARKETPLACE;
+  let list = await run(bin, ['plugin', 'marketplace', 'list'], 60_000);
+  let repair = '';
+  // Codex lists no marketplace while a registered root is missing or incomplete, so one Crew wrote is repaired first.
+  if (!list.ok && PACKAGED && !fs.existsSync(path.join(marketplace, '.claude-plugin', 'marketplace.json'))) {
+    const bundled = bundledRuntime(root);
+    try {
+      if (bundled) writeCodexPlugin(root, bundled, CODEX_DIR);
+      list = await run(bin, ['plugin', 'marketplace', 'list'], 60_000);
+    } catch (err) {
+      repair = ` Could not write Crew's marketplace again: ${(err as Error).message}`;
+    }
+  }
+  if (!list.ok) return { ok: false, current: false, detail: `Could not list Codex marketplaces: ${lastLine(list.out)}${repair}` };
+  const current = codexMarketplaces(list.out).get('crew');
   const other = current !== undefined && !sameFolder(current, marketplace);
   // A source checkout's hooks run on the Node in PATH, as its own MCP server does.
   let runtime = 'node';

@@ -76,6 +76,35 @@ test('a marketplace folder Crew did not write is never replaced', () => {
   assert.equal(fs.readFileSync(path.join(checkout, 'plugin', 'bridge', 'mcp.ts'), 'utf8'), 'keep');
 });
 
+test('a marketplace that cannot be replaced stays whole, and what an earlier attempt left behind is cleared', (t) => {
+  const root = built('swap');
+  const dest = path.join(temp, 'codex-swap');
+  const marketplace = writeCodexPlugin(root, '/runtime/node', dest);
+  const leftover = path.join(dest, 'marketplace.0123456789ab.old');
+  fs.mkdirSync(leftover);
+  // One another registration is building now stays.
+  const building = path.join(dest, 'marketplace.ba9876543210');
+  fs.mkdirSync(building);
+  const hourAgo = new Date(Date.now() - 3_600_000);
+  fs.utimesSync(leftover, hourAgo, hourAgo);
+  // Windows refuses to move a folder another process holds open.
+  const rename = fs.renameSync;
+  t.mock.method(fs, 'renameSync', (from: fs.PathLike, to: fs.PathLike) => {
+    if (to === marketplace && !String(from).endsWith('.old')) throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' });
+    rename(from, to);
+  });
+  assert.throws(() => writeCodexPlugin(root, '/runtime/node2', dest), /EPERM/);
+  assert.ok(writtenByCrew(marketplace));
+  assert.ok(fs.existsSync(path.join(marketplace, '.claude-plugin', 'marketplace.json')));
+  assert.match(fs.readFileSync(path.join(marketplace, 'plugin', 'codex.mcp.json'), 'utf8'), /"\/runtime\/node"/);
+  assert.deepEqual(fs.readdirSync(dest).sort(), ['marketplace', 'marketplace.ba9876543210']);
+  t.mock.restoreAll();
+  fs.utimesSync(building, hourAgo, hourAgo);
+  writeCodexPlugin(root, '/runtime/node2', dest);
+  assert.match(fs.readFileSync(path.join(marketplace, 'plugin', 'codex.mcp.json'), 'utf8'), /"\/runtime\/node2"/);
+  assert.deepEqual(fs.readdirSync(dest), ['marketplace']);
+});
+
 test("installCodexHooks keeps the user's hooks and replaces Crew's where they stand", () => {
   const dir = path.join(temp, 'codex-home');
   const file = path.join(dir, 'hooks.json');

@@ -956,7 +956,8 @@ export const SessionDrawer = memo(function SessionDrawer({ id, state, close }: {
       ) : (
         <>
           {session.state === 'waiting' && (
-            <div className="card answer-card answer">
+            // Untinted, unlike a job's waiting card: the session is answered in its own app, not from this panel.
+            <div className="answer">
               <p className="headline selectable">{session.waitingFor ?? t('{agent} needs your input.', { agent: NAMES[sessionAgent(session)] })}</p>
               <ClaudeAsk session={session} />
               {!sessionAppLink(session) && <p className="callout secondary">{t('Answer in {agent}.', { agent: NAMES[sessionAgent(session)] })}</p>}

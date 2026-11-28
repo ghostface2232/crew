@@ -368,10 +368,13 @@ struct SessionDetailView: View {
     @ViewBuilder private func contents(_ session: ClaudeSession) -> some View {
         if session.state == "waiting" {
             VStack(alignment: .leading, spacing: Space.m) {
-                Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.callout).textSelection(.enabled)
+                Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
                 ClaudeAskView(session: session)
                 if OpenInAgentButton.availableURL(for: session) == nil { Text("Answer in \(agentName(session.agent)).").font(Typeface.callout).foregroundStyle(.secondary) }
-            }.card(fill: Palette.attention(Palette.warning))
+            }
+            // Untinted, unlike a job's waiting card: the session is answered in its own app, not from this panel.
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         Grid(alignment: .leading, horizontalSpacing: WorkspaceStyle.factColumnGap, verticalSpacing: WorkspaceStyle.factRowGap) {
             fact(String(localized: "Agent"), String(localized: "\(agentName(session.agent)) · Lead"))

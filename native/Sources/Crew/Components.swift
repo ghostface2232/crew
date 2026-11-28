@@ -708,16 +708,26 @@ struct ClaudeAskView: View {
     var body: some View {
         if session.state == "waiting", let ask = session.ask {
             if let questions = ask.questions {
-                VStack(alignment: .leading, spacing: Space.m) {
+                // Each further question starts apart from the choices above it, so it reads as a question of its own.
+                VStack(alignment: .leading, spacing: Space.xxl) {
                     ForEach(Array(questions.enumerated()), id: \.offset) { index, question in
-                        // The first question is the headline above.
-                        if index > 0 { Text(question.question).font(Typeface.callout).textSelection(.enabled) }
-                        ForEach(Array(question.options.enumerated()), id: \.offset) { _, option in
-                            Text(option).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled)
-                                // About a pill's height, as on the board, rather than a thin row.
-                                .padding(.horizontal, Space.l).padding(.vertical, Space.ml)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius).strokeBorder(WorkspaceStyle.hairline))
+                        VStack(alignment: .leading, spacing: Space.m) {
+                            // The first question is the headline above, so the others take its style.
+                            if index > 0 {
+                                Text(question.question).font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            // A question's choices as one gray group, rows parted by hairlines: they are read here and
+                            // answered in the agent's app, so they are not drawn as buttons.
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(Array(question.options.enumerated()), id: \.offset) { n, option in
+                                    if n > 0 { WorkspaceStyle.hairline.frame(height: 1).padding(.leading, Space.l) }
+                                    Text(option).font(Typeface.callout).textSelection(.enabled)
+                                        .padding(.horizontal, Space.l).padding(.vertical, Space.ml)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                            .background(WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
                         }
                     }
                 }

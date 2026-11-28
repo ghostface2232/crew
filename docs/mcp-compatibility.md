@@ -66,7 +66,7 @@ No credentials were copied into the temporary homes, so after MCP listing Claude
 
 ## 3. Crew today and impact
 
-Both [lead MCP transport](../plugin/bridge/mcp.ts) (`PROTOCOL_VERSIONS`, `handle`) and [worker MCP transport](../plugin/bridge/worker-mcp.ts) advertise accepted revisions `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05` in `initialize`, echoing a recognized request version or falling back to `2025-06-18`. Both advertise only `capabilities: { tools: {} }`, return `-32601` for unknown methods, and do not implement `server/discover`, the Tasks extension, or MRTR (which replaces server-initiated requests in `2026-07-28`).
+Both [lead MCP transport](../plugin/bridge/mcp.ts) (`PROTOCOL_VERSIONS`, `handle`) and [worker MCP transport](../plugin/bridge/worker-mcp.ts) advertise accepted revisions `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05` in `initialize`, echoing a recognized request version or falling back to `2025-06-18`. The worker transport advertises only `capabilities: { tools: {} }`; the lead transport adds `resources: {}` (for `resources/list` and `resources/read`) when the client declares `io.modelcontextprotocol/ui` ([progress card](jobs.md#progress-card)). Both return `-32601` for unknown methods, and do not implement `server/discover`, the Tasks extension, or MRTR (which replaces server-initiated requests in `2026-07-28`).
 
 The lead transport also checks `params?.capabilities?.elicitation` and can send `elicitation/create` as a server-initiated request (`request` in `mcp.ts`), which remains a legacy-protocol path.
 

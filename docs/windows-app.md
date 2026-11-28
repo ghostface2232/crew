@@ -13,7 +13,7 @@ Electron main (desktop/main.ts) ── ensureDaemon ── independent daemon �
 
 - The main process imports the bridge's own `client.ts`, so startup reuses `ensureDaemon`, including version negotiation and active-job protection. The daemon starts using the app's Electron executable in Node mode (`ELECTRON_RUN_AS_NODE`), so no separate Node install is needed.
 - The main process signs the board window's requests to the daemon: it makes a board credential from `~/.crew/token` and adds it as a header (`signBoard` in `desktop/main.ts`), so the page holds nothing and neither a cookie nor an address carries the secret. The tray's Open in browser command opens the board with a one-time ticket in the launch fragment ([daemon-api.md](daemon-api.md)).
-- The renderer runs with `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. Its preload script (`desktop/preload.cts`) exposes only the updater, as `window.crewDesktop`, and the main process answers it only from the main window's board page. Navigation outside the board and webviews are denied, except for session links checked by `isSessionAppLink` in `desktop/window-state.ts`. The main process passes Claude desktop links (`claude://code/continue?session=local_…`) and Codex thread links (`codex://threads/<uuid>`) to Windows to open in the matching app. The only granted permission is clipboard write access for the board's origin, used by its copy buttons.
+- The renderer runs with `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. Its preload script (`desktop/preload.cts`) exposes only `window.crewDesktop` (`update`, `welcome`, and `login`), and the main process answers it only from the main window's board page. Navigation outside the board and webviews are denied, except for session links checked by `isSessionAppLink` in `desktop/window-state.ts`. The main process passes Claude desktop links (`claude://code/continue?session=local_…`) and Codex thread links (`codex://threads/<uuid>`) to Windows to open in the matching app. The only granted permission is clipboard write access for the board's origin, used by its copy buttons.
 - Links in reports open in the default browser. Evidence images are the daemon's to serve, so they open in a separate sandboxed app window that cannot navigate, by an address that carries the file's seal. All other new-window requests are denied.
 
 ## Window
@@ -82,7 +82,7 @@ The smoke test (`scripts/smoke-electron.mjs`) runs the app in English against an
 - unobstructed UI controls at full and narrow widths (including with Settings open)
 - clipboard write permission, tray waiting counts, and drift-free window bounds restoration
 - the updater against a local feed: Check for Updates downloads and verifies the release, the update button appears above Settings and again after a relaunch, and an evidence window cannot reach the updater
-- a relaunch with `CREW_UPDATE_FAILED`: **Update failed** replaces the update button, opens About with the reason, and gives the button back once Settings closes
+- a relaunch with `CREW_UPDATE_FAILED`: **Update failed** replaces the update button, opens the Crew page with the reason, and gives the button back once Settings closes
 
 Set `CREW_APP_PATH` to `release/win-unpacked/Crew.exe` to test the packaged app.
 

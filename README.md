@@ -71,6 +71,8 @@ When something hangs, `crew doctor` checks prerequisites, `crew daemon logs` sho
 
 `crew gc` previews orphan worktrees, Git metadata, and unused worker branches with their merge status against `HEAD`. `crew gc --apply` removes orphan directories and prunes metadata; add `--branches` to delete branches merged into `HEAD`. Unmerged branches stay, with a `git branch -D <name>` command for manual removal. Active and owned worktrees are protected, and Windows cleanup failures name leftovers in job status and notes.
 
+### Status board and missions
+
 The status board runs at http://127.0.0.1:47615, or on a fallback port in `~/.crew/daemon.json` when the system reserves that one. Open it with `crew board` or from the app to sign in; a browser tab holds a scoped credential in memory (valid up to 7 days, cleared on close or reload). Direct clients send the secret in `~/.crew/token` ([docs/daemon-api.md](docs/daemon-api.md)).
 
 Each `/crew:run` command appears as a mission with its jobs grouped under it, and the Needs You view lists every job and session waiting on you. Click a job to read its report, changed files, evidence, and activity, or to send a follow-up.
@@ -85,7 +87,7 @@ If [AgentGauge](https://github.com/ghostface2232/AgentGauge) is installed, each 
 
 Job turns appear as rounds that can be undone or kept one by one. New Job also accepts a read-only question or a piece of information to pin ([docs/jobs.md](docs/jobs.md), [docs/board.md](docs/board.md)).
 
-When a worker asks for approval or has a question, an input dialog pops up in the lead's app; you can also answer on the status board or in the desktop app. A computer-use request about one app or a simple Antigravity command can be allowed for the rest of its job so the worker stops asking on every call. Codex's built-in automatic reviewer answers approval requests first; you are asked only about what it refuses twice ([docs/approvals.md](docs/approvals.md)).
+When a worker asks for approval or has a question, an input dialog pops up in the lead's app; you can also answer on the status board or in the desktop app. A computer-use request about one app or a simple Antigravity command can be allowed for the rest of its job so the worker stops asking on every call. Approval requests go first to Codex's built-in automatic reviewer for Codex workers and to Claude Code's automatic mode for writable Claude workers; you are asked only about what either refuses twice ([docs/approvals.md](docs/approvals.md)).
 
 ## Desktop app
 
@@ -103,7 +105,7 @@ The board can start jobs directly for any role except debate, using the configur
 
 - Each implementation or polish job runs in an isolated git worktree under `~/.crew/worktrees/` on branch `crew-<job id>`. Nothing touches your working branch until the lead inspects the diff and merges it.
 - Gitignored files needed for tests (such as `node_modules` or `.env`) are copied into the worktree (or cloned/linked read-only for directories) when listed in `.worktreeinclude` at the repository root. It uses `.gitignore` syntax and shares Claude Code's native worktree file.
-- Codex runs via `codex app-server` and Antigravity runs via `agy acp`. Crew executes only the official binaries and never reads authentication files or tokens.
+- Codex runs via `codex app-server`, Antigravity via `agy acp`, and a Claude worker via `claude -p`. Crew executes only the official binaries and never reads authentication files or tokens.
 - When a background job finishes, asks the lead a question, or needs a decision, the lead session wakes automatically.
 - Agents share the machine without colliding ([docs/sandbox.md](docs/sandbox.md)):
   - Each starts an isolated instance of any service it runs.

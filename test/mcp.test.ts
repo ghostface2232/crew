@@ -698,6 +698,7 @@ test('status and mission explicitly read this session\'s watch news without any 
   const replies: any[] = [];
   const missions: object[] = [];
   const offered: (string[] | undefined)[] = [];
+  const jobs: object[] = [];
   const sessions = new ClaudeSessions(300, { onSession() {}, onEvent() {}, onAttention() {} });
   const context = vm.createContext({
     Date, AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude', PROJECT: '/project', projectUnknown: false, carriesCard: () => false,
@@ -705,10 +706,10 @@ test('status and mission explicitly read this session\'s watch news without any 
     codexSession: async () => {},
     missionHead: () => 'Current mission', missionDetail: () => '', currentPolicy: () => '', globalPreset: () => null,
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),
-    imageContent: () => [], baseUrl: () => 'board', summarize: () => '',
+    imageContent: () => [], baseUrl: () => 'board', summarize: (job: { id: string }) => `[${job.id}]`,
     api: async (_method: string, route: string, body: any) => {
       const url = new URL(route, 'http://localhost');
-      if (url.pathname === '/api/state') return { jobs: [], pulls: watches.map(({ news, ...pull }) => pull), missions, limits: {},
+      if (url.pathname === '/api/state') return { jobs, pulls: watches.map(({ news, ...pull }) => pull), missions, limits: {},
         leadHooks: sessions.leadHookState(url.searchParams.get('lead_session') ?? '') };
       assert.equal(route, '/api/lead/offer');
       // A listing offers all of the session's news; other calls only that of what they show.
@@ -765,6 +766,21 @@ test('status and mission explicitly read this session\'s watch news without any 
     hook('thread', 'PreCompact', { host: 'codex' });
     assert.match((await call('status', {}, 'thread')).content[0].text, full);
     assert.match((await call('status', {}, 'thread')).content[0].text, unchanged);
+  });
+
+  await t.test('status lists only this session\'s finished jobs, and every active one', async () => {
+    context.host = 'claude';
+    jobs.push(
+      { id: 'cx-own', project: '/project', lead: 'lead', endedAt: 2 },
+      { id: 'cx-old', project: '/project', lead: 'earlier', endedAt: 1 },
+      { id: 'cx-board', project: '/project', endedAt: 1 },
+      { id: 'cx-busy', project: '/project', lead: 'earlier' },
+    );
+    const text = (await call('status')).content[0].text;
+    assert.match(text, /Active:\n\[cx-busy\]/);
+    assert.match(text, /Recent:\n\[cx-own\]\n\(2 finished job\(s\) from other sessions are on the board\.\)/);
+    assert.doesNotMatch(text, /cx-old|cx-board/);
+    jobs.length = 0;
   });
 });
 

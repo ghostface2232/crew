@@ -18,7 +18,9 @@ function fixture(t: TestContext, platform: NodeJS.Platform = process.platform) {
   const repo = path.join(home, 'repo');
   fs.mkdirSync(repo);
   const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
-  git('init', '-q');
+  // Tests block a branch with a loose `refs/heads/<branch>.lock`, which only the files backend has, whatever the
+  // user's init.defaultRefFormat is.
+  git('-c', 'init.defaultRefFormat=files', 'init', '-q');
   git('config', 'user.name', 'Test');
   git('config', 'user.email', 't@example.com');
   git('commit', '--allow-empty', '-qm', 'init');

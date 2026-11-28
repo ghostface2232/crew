@@ -103,7 +103,7 @@ Rules:
 - Job calls return at once. Do your part and end your turn: you are woken when a job ends, needs a decision, or asks a question. Do not sit in \`wait\` on a running job; the user cannot talk to you then.
 - Acknowledge a receipt only by passing its id as \`ack\` on your next Crew call.
 - Approval is the user's; never approve on your own. Decline requests clearly outside the task or role with \`reply\`; otherwise call \`wait\` so the user is asked, or relay their prior answer. A result with a REFUSED action says how to send it back if the user's request covers it; never run it yourself. Answer worker questions (ask_lead) yourself with \`answer\`.
-- Workers do not see this conversation: give only what they need (goal, decisions, how it is judged), accurately and briefly. The brief goes in \`task\` for delegate and polish, \`focus\` for review, and \`topic\` and \`position\` for debate; criteria go in \`done_when\`. A call with an argument its tool does not take fails and starts nothing.
+- Workers do not see this conversation: give only what they need (goal, decisions, how it is judged), accurately and briefly. The brief goes in \`task\` for delegate and polish and \`focus\` for review, each with criteria in \`done_when\`; debate takes \`topic\` and \`position\` and no \`done_when\`. A call with an argument its tool does not take fails and starts nothing.
 - Omit \`tier\` and \`effort\` for ordinary work so role or preset settings apply; pass one only when a job clearly needs another, as it overrides them.
 - If a job hits a usage limit, do it yourself and say what was skipped, unless its result says Crew resumes it. If Crew cannot start a job, retry once, then tell the user the error and do it yourself.
 - ${skill('run')} sets when to review; outside it, review only if the user asks (never hold a commit or push for one). After a review and its fix, record the result with \`note\`: facts only, no impressions.
@@ -203,7 +203,7 @@ const buildTools = () => [
   {
     name: 'polish',
     title: 'Polish wording',
-    description: `Have the editor (${holder('polish')}) improve UI strings, comments, and documentation in the given files, in its own worktree. It may not change logic or structure. Not a merge gate: run it after the code is settled. Antigravity as editor runs no commands, so name the files and lines to polish rather than a command such as git diff.`,
+    description: `Have the editor (${holder('polish')}) review and improve wording in the given files—UI strings, comments, docs, and instruction files—in its own worktree. It may not change logic or structure. Not a merge gate: run it after the code is settled. Antigravity as editor runs no commands, so name the files and lines to read rather than a command such as git diff.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -1186,7 +1186,10 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const state = await api('GET', session ? `/api/state?lead_session=${encodeURIComponent(session)}` : '/api/state');
       const jobs: JobView[] = state.jobs.filter((j: JobView) => j.project === PROJECT);
       const active = jobs.filter((j) => !j.endedAt);
-      const recent = jobs.filter((j) => j.endedAt).slice(0, 8);
+      // Finished jobs from other sessions (like an earlier run's in the same folder) are history this lead does not act on.
+      const ended = jobs.filter((j) => j.endedAt);
+      const own = session ? ended.filter((j) => j.lead === session) : ended;
+      const recent = own.slice(0, 8);
       ctx.jobs.push(...active.slice(0, 8), ...recent);
       // Another lead session in this project may own these; a glance at the list must not take its news.
       ctx.adopt = false;
@@ -1195,6 +1198,8 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const elsewhere = state.jobs.filter((j: JobView) => j.project !== PROJECT && !j.endedAt).length;
       if (elsewhere) lines.push(`(${elsewhere} active job(s) belong to other projects; they are on the board.)`);
       if (recent.length) lines.push('', 'Recent:', ...recent.map(summarize));
+      const others = ended.length - own.length;
+      if (others) lines.push(`(${others} finished job(s) from other sessions are on the board.)`);
       const pulls = session ? sessionPulls(state.pulls ?? [], session) : [];
       ctx.pullIds = pulls.map((pull) => pull.id);
       if (pulls.length) {

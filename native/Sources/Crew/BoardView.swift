@@ -732,7 +732,7 @@ struct NeedsYouView: View {
                             }
                             Text(session.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(session.title)
                         }
-                        Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
+                        Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.headline).lineSpacing(Space.xs).textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
                         ClaudeAskView(session: session)
                         if OpenInAgentButton.availableURL(for: session) == nil {

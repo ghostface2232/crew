@@ -376,7 +376,7 @@ struct AnswerView: View {
         if job.state == "waiting", let waiting = job.waiting {
             VStack(alignment: .leading, spacing: Space.xl) {
                 // The request itself is what the person acts on, so it leads the hierarchy.
-                Text(waiting.reason).font(Typeface.headline).lineSpacing(4).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                Text(waiting.reason).font(Typeface.headline).lineSpacing(Space.xs).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if waiting.type == "question" {
                     composer

@@ -474,7 +474,7 @@
 /* ProjectIcons.swift */
 "Change Icon…" = "아이콘 변경…";
 "Reset to Folder" = "폴더로 되돌리기";
-"General" = "기본";
+"General" = "일반";
 "Development" = "개발";
 "Platforms" = "플랫폼";
 "Data & AI" = "데이터·AI";
@@ -488,7 +488,7 @@
 "Tag" = "태그";
 "Archive" = "보관함";
 "Briefcase" = "서류 가방";
-"Home" = "집";
+"Home" = "홈";
 "Lock" = "자물쇠";
 "Terminal" = "터미널";
 "Code" = "코드";
@@ -514,10 +514,10 @@
 "Pie Chart" = "원형 차트";
 "Database" = "데이터베이스";
 "Table" = "표";
-"Math" = "수식";
+"Math" = "수학";
 "Search" = "검색";
 "Idea" = "아이디어";
-"Lab" = "실험";
+"Lab" = "실험실";
 "Document" = "문서";
 "Book" = "책";
 "Writing" = "글쓰기";

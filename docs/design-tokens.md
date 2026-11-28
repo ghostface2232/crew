@@ -190,7 +190,7 @@ These views keep their own geometry next to their code, built from the tokens ab
 - A round's open or folded state is fixed when it first appears, so a round arriving later does not fold the one being read.
 - When the first turns predate the recorded conversation, a caption says which turns are missing.
 
-**Project icon picker (`ProjectIconPicker`).** Each group is a `caption` label `Space.s` above one row of ten `cell` (40-point) buttons with an 18-point glyph and `cellRadius` (8-point) corners, groups `Space.xl` apart, so the icons stay easy to scan. The popover is as wide as the grid. Glyphs are drawn monochrome and unfilled; `desktopcomputer` is drawn as `display`, whose screen is not solid. The header tile is `tile` (36 points) with a 20-point glyph.
+**Project icon picker (`ProjectIconPicker`).** Groups sit `Space.xl` apart for easy scanning, each a `caption` label `Space.s` above one row of ten `cell` (40-point) buttons with an 18-point glyph and `cellRadius` (8-point) corners. The popover is as wide as the grid. Glyphs are drawn monochrome and unfilled; `desktopcomputer` is drawn as `display`, whose screen is not solid. The header tile is `tile` (36 points) with a 20-point glyph.
 
 **Panel resize (`PanelResizeHandle`).**
 - Dragging the detail panel's leading edge resizes it with no animation, so it follows the pointer. The width is kept across launches.

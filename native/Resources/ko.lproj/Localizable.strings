@@ -136,7 +136,7 @@
 "Settings…" = "설정…";
 "1 job is still running." = "작업 1개가 아직 실행 중이에요.";
 "%lld jobs are still running." = "작업 %lld개가 아직 실행 중이에요.";
-"Crew will install the update as soon as they finish. Nothing is stopped, and jobs, missions and settings are kept." = "실행 중인 작업이 끝나면 업데이트를 설치해요.";
+"Crew will install the update as soon as they finish. Nothing is stopped, and jobs, missions and settings are kept." = "실행 중인 작업이 끝나면 업데이트를 설치해요. 아무것도 중단되지 않고 작업, 미션, 설정은 그대로 유지돼요.";
 "Update When Finished" = "작업 완료 후 업데이트";
 "Cancel" = "취소";
 "The Crew daemon (process %lld) did not stop." = "Crew 데몬(프로세스 %lld)이 종료되지 않았어요.";

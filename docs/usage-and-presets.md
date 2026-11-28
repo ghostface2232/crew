@@ -20,7 +20,7 @@ Antigravity checks both account-wide windows (when present) and the configured m
 
 The board classifies each window by remaining quota. Routing also considers how soon quota resets. It ignores recent burn because a pace projection once marked Codex `tight` with 57% of its weekly quota left. Usage readings retain `projectedExhaustion` for compatibility.
 
-On the board, a provider that is `stale`, `unknown`, or `exhausted` by a reported limit shows that status on its account-wide gauges instead of each window's own.
+On the board, a provider that is `stale`, `unknown`, or `exhausted` by a reported limit shows that status on its account-wide gauges instead of each window's own. When Antigravity reports no account-wide window, both the board and the app show its Gemini five-hour and weekly windows.
 
 ## Where usage comes from
 

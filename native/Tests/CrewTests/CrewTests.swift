@@ -885,6 +885,25 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         let values = sent.withLock { $0 }
         #expect(values == ["star", "null"])
     }
+    @Test func anIconPickedWhileASaveIsPendingIsSentAfterIt() async throws {
+        let sent = Mutex<[String]>([])
+        let release = DispatchSemaphore(value: 0)
+        let api = api { request in
+            let changes = try #require(try requestBody(request)["changes"] as? [String: Any])
+            let icon = changes["icon"] as? String ?? "null"
+            // Hold the first save open so the next pick arrives while it is pending.
+            if sent.withLock({ $0.append(icon); return $0.count == 1 }) { release.wait() }
+            return (200, Data(#"{"projects":{"/work/app":{"icon":"\#(icon)"}}}"#.utf8), 0)
+        }
+        let store = try store(api: api)
+        let first = Task { await store.setProjectIcon("/work/app", "star") }
+        while store.actions[CrewStore.projectIconKey("/work/app")]?.pending != true { await Task.yield() }
+        await store.setProjectIcon("/work/app", "heart")
+        release.signal()
+        await first.value
+        #expect(sent.withLock { $0 } == ["star", "heart"])
+        #expect(store.state.projects?["/work/app"]?.icon == "heart")
+    }
     /// The checklist is loaded by the store, not by the card, which is empty until the checklist arrives.
     @Test func setupChecklistLoadsIntoTheStore() async throws {
         let api = api { request in

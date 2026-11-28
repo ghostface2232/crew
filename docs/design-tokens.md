@@ -192,6 +192,8 @@ These views keep their own geometry next to their code, built from the tokens ab
 
 **Project icon picker (`ProjectIconPicker`).** Groups sit `Space.xl` apart for easy scanning, each a `caption` label `Space.s` above one row of ten `cell` (40-point) buttons with an 18-point glyph and `cellRadius` (8-point) corners. The popover is as wide as the grid. Glyphs are drawn monochrome and unfilled; `desktopcomputer` is drawn as `display`, whose screen is not solid. The header tile is `tile` (36 points) with a 20-point glyph.
 
+**Project row menu (`RowMenu`).** While a project's right-click menu is open, its row shows a `Pill.fill` fill with `radius` (8-point) corners, `inset` (10 points) from the sidebar's edges, so it matches the selected row's shape. A selected row keeps its selection instead.
+
 **Panel resize (`PanelResizeHandle`).**
 - Dragging the detail panel's leading edge resizes it with no animation, so it follows the pointer. The width is kept across launches.
 - Double-clicking the edge returns the panel to `panelWidth` with `Motion.panel`.

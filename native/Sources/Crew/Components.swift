@@ -712,11 +712,20 @@ struct ClaudeAskView: View {
                     ForEach(Array(questions.enumerated()), id: \.offset) { index, question in
                         // The first question is the headline above.
                         if index > 0 { Text(question.question).font(Typeface.callout).textSelection(.enabled) }
-                        ForEach(Array(question.options.enumerated()), id: \.offset) { _, option in
-                            Text(option).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled)
-                                .padding(.horizontal, Space.ml).padding(.vertical, Space.s)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius).strokeBorder(WorkspaceStyle.hairline))
+                        // Two choices sit side by side and more fill rows of two, as on the board; a lone one keeps the full width.
+                        let columns = question.options.count > 1 ? 2 : 1
+                        Grid(horizontalSpacing: Space.m, verticalSpacing: Space.m) {
+                            ForEach(Array(stride(from: 0, to: question.options.count, by: columns)), id: \.self) { start in
+                                GridRow {
+                                    ForEach(start..<min(start + columns, question.options.count), id: \.self) { n in
+                                        Text(question.options[n]).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                                            // About a pill's height, as on the board, rather than a thin row.
+                                            .padding(.horizontal, Space.l).padding(.vertical, Space.ml)
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                                            .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius).strokeBorder(WorkspaceStyle.hairline))
+                                    }
+                                }
+                            }
                         }
                     }
                 }

@@ -837,17 +837,22 @@ struct ProjectSidebar: View {
             Label("All projects", systemImage: "square.stack").tag("")
             ForEach(projects, id: \.self) { path in
                 let name = projectName(path, among: projects)
+                let menu = RowMenu(items: [
+                    // A daemon that sends no project settings cannot store an icon either.
+                    store.state.projects != nil ? .init(title: String(localized: "Change Icon…")) { choosingIcon = path } : nil,
+                    store.state.projects != nil ? .separator : nil,
+                    .init(title: String(localized: "Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) },
+                ].compactMap { $0 }, open: Binding(get: { menuTarget == path }, set: { menuTarget = $0 ? path : nil }))
                 ProjectRow(name: name, icon: ProjectIcons.symbol(store.state.projects?[path]?.icon), waiting: waiting.contains(path))
                     .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                    .overlay(RowMenu(items: [
-                        // A daemon that sends no project settings cannot store an icon either.
-                        store.state.projects != nil ? .init(title: String(localized: "Change Icon…")) { choosingIcon = path } : nil,
-                        store.state.projects != nil ? .separator : nil,
-                        .init(title: String(localized: "Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) },
-                    ].compactMap { $0 }, open: Binding(get: { menuTarget == path }, set: { menuTarget = $0 ? path : nil })))
-                    .listRowBackground(menuTarget == path && store.project != path
-                        ? RoundedRectangle(cornerRadius: RowMenu.radius, style: .continuous).fill(Pill.fill).padding(.horizontal, RowMenu.inset)
-                        : nil)
+                    .overlay(menu)
+                    // The row's insets lie outside the content, so the background catches right-clicks there too.
+                    .listRowBackground(ZStack {
+                        if menuTarget == path && store.project != path {
+                            RoundedRectangle(cornerRadius: RowMenu.radius, style: .continuous).fill(Pill.fill).padding(.horizontal, RowMenu.inset)
+                        }
+                        menu
+                    })
                     // VoiceOver's Show Menu does not reach the AppKit menu, so its items are offered as actions too.
                     .accessibilityActions {
                         if store.state.projects != nil { Button("Change Icon…") { choosingIcon = path } }

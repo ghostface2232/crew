@@ -149,24 +149,23 @@ export const PageTabs = memo(function PageTabs({ label, items, current, onSelect
   );
 });
 
-/** Room left beside the top bar's controls, for the Windows app's window to be dragged by. */
+/** Drag handle room reserved beside top-bar controls for the Windows app window. */
 const DRAG_ROOM = 48;
 const FOLD_MS = 360;
 export type Fold = '' | 'buttons' | 'icons';
-/** The window width at which the sidebar folds into a drawer (board.css), giving the bar its room. */
+/** Breakpoint where the sidebar becomes a drawer (board.css), widening the top bar. */
 const DRAWER = '(max-width: 760px)';
 /**
- * How far the top bar folds: not at all while every name fits with room to drag the window by, then with Search and
- * New Job as icons, and last with the tabs as icons too, since the pages are named nowhere else. Read from what the
- * names need rather than set as a width, so it follows the language. The buttons stay folded once the sidebar has
- * become a drawer, so the room it gives back does not bring their names back as the window narrows. Each fold resizes
- * the controls in motion; the tabs' thumb follows them. `names` changes whenever their words do.
+ * Responsive fold state for top-bar controls (`''` -> `'buttons'` -> `'icons'`).
+ * Measures rendered label widths instead of fixed breakpoints so thresholds follow the language.
+ * Keeps action buttons folded once the sidebar becomes a drawer so reclaimed space does not restore labels
+ * while narrowing. Animates control widths on transitions; `names` triggers re-measurement when labels change.
  */
 export function useFold(names: unknown): [Fold, (element: HTMLElement | null) => void] {
-  // The bar as mounted: absent behind the sign-in screen, and a new element once the board comes back from it.
+  // Tracks the mounted bar element (absent behind sign-in and replaced on return).
   const [bar, setBar] = useState<HTMLElement | null>(null);
   const [fold, setFold] = useState<Fold>('');
-  // Whether the names are on show to be measured, as when the bar first draws and whenever they change.
+  // Temporarily renders all labels uncollapsed so their widths can be measured.
   const [measuring, setMeasuring] = useState(true);
   const needs = useRef({ full: 0, buttons: 0 });
   const widths = useRef<Map<HTMLElement, number> | null>(null);
@@ -178,7 +177,7 @@ export function useFold(names: unknown): [Fold, (element: HTMLElement | null) =>
   const decide = (room: number): Fold =>
     room >= needs.current.full && !matchMedia(DRAWER).matches ? '' : room >= needs.current.buttons ? 'buttons' : 'icons';
   useLayoutEffect(() => setMeasuring(true), [names, bar]);
-  // The board's font arrives after the first paint, and its names are wider or narrower than the fallback's.
+  // Re-measure once web fonts load, since label widths differ from fallback metrics.
   useEffect(() => {
     let live = true;
     document.fonts?.ready.then(() => { if (live) setMeasuring(true); });
@@ -188,7 +187,7 @@ export function useFold(names: unknown): [Fold, (element: HTMLElement | null) =>
     if (!measuring || !bar) return;
     const gap = parseFloat(getComputedStyle(bar).columnGap) || 0;
     const full = [...bar.children].reduce((sum, child) => sum + (child as HTMLElement).offsetWidth + gap, -gap) + DRAG_ROOM;
-    // Folded, each button is a circle as tall as it is.
+    // When folded, each button shrinks to a circle equal to its height.
     const buttons = [...bar.querySelectorAll<HTMLElement>('.search-pill, .new-job')].reduce((sum, button) => sum + button.offsetWidth - button.offsetHeight, 0);
     needs.current = { full, buttons: full - buttons - DRAG_ROOM };
     setMeasuring(false);
@@ -199,10 +198,10 @@ export function useFold(names: unknown): [Fold, (element: HTMLElement | null) =>
     const observer = new ResizeObserver(() => {
       const next = decide(bar.clientWidth);
       if (next === shown.current) return;
-      // Widths as they stand, mid-fold included, for the next fold to start from.
+      // Capture current widths (including mid-animation) as the starting point for the next fold.
       widths.current = new Map(controls(bar).map((control) => [control, control.offsetWidth]));
       hidden.current = new Set(words(bar).filter((word) => word.offsetWidth <= 1));
-      // Before the next paint, so a narrowing bar never shows names it has no room for.
+      // Commit synchronously before paint so shrinking never flashes overflowing labels.
       flushSync(() => setFold(next));
     });
     observer.observe(bar);
@@ -216,10 +215,10 @@ export function useFold(names: unknown): [Fold, (element: HTMLElement | null) =>
       for (const animation of control.getAnimations()) if (animation.id === 'fold') animation.cancel();
       const [was, now] = [from.get(control), control.offsetWidth];
       if (was === undefined || was === now) continue;
-      // Clipped while it resizes, so a name that comes back does not spill over its neighbours.
+      // Clip during resize so expanding labels do not overlap neighboring controls.
       control.animate([{ width: `${was}px`, overflow: 'clip' }, { width: `${now}px`, overflow: 'clip' }], { id: 'fold', duration: FOLD_MS, easing: EASE_OUT });
     }
-    // Words that come back fade in as their room opens.
+    // Fade restored labels in as space opens.
     for (const word of words(bar)) {
       if (hidden.current.has(word) && word.offsetWidth > 1) word.animate([{ opacity: 0 }, { opacity: 0, offset: 0.3 }, { opacity: 1 }], { duration: FOLD_MS, easing: 'ease-out' });
     }

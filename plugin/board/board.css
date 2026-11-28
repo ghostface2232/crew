@@ -908,7 +908,7 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 }
 .topbar button { flex: none; white-space: nowrap; }
 .topbar-sidebar { display: none; }
-/* The pages in a pill of their own, with search and New Job as pills of the same height after them. */
+/* Page tabs sit in their own pill, followed by Search and New Job as same-height pill buttons. */
 .topbar-bar { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
 /* The tabs sit flat on the pill and rise only for the current page and under the pointer, as the sidebar's items rise. */
 .tabs { position: relative; flex: none; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 999px; corner-shape: round; background: var(--fill); }
@@ -1081,7 +1081,7 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .column { display: grid; gap: var(--card-gap); min-width: 0; align-content: start; }
 .placed { display: contents; }
 .placed[data-still] > .card { animation: none; }
-/* Cards on their way out, over the stage (flip.ts). Their own animations would play again on being moved here. */
+/* Ghost overlay for exiting cards over the stage (flip.ts); suppresses CSS animations that would replay on reparenting. */
 .flip-ghosts { position: fixed; z-index: 2; box-sizing: border-box; overflow: hidden; pointer-events: none; container: page / inline-size; }
 .flip-ghosts, .flip-ghosts * { animation: none !important; transition: none !important; }
 
@@ -1497,8 +1497,8 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
 .sign-in { display: grid; justify-items: center; gap: 12px; max-width: 420px; margin: 20vh auto; padding: 0 16px; text-align: center; animation: rise 520ms var(--ease-out) backwards; }
 .sign-in-mark { display: grid; place-items: center; color: var(--secondary); }
 
-/* A bar too narrow for every name keeps one row (`useFold` in Shell.tsx decides): first Search and New Job fold to their
-   icons, and then every tab together, so no page is named while the others are not. */
+/* Keep the top bar on one row when space narrows (`useFold` in Shell.tsx): Search and New Job fold to icons first,
+   then all page tabs together so tabs are never partially labeled. */
 .topbar-bar[data-fold] :is(.search-pill, .new-job) { width: 36px; padding: 0; }
 .topbar-bar[data-fold="icons"] .tab { --inset: 9px; padding-inline-end: 9px; }
 .topbar-bar[data-fold] :is(.search-label, .new-job-label),

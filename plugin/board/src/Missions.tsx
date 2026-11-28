@@ -47,6 +47,7 @@ export const JobRow = memo(function JobRow({ job, selected, openJob, kind, index
     <button
       className="job-row"
       data-job={job.id}
+      data-flip={`job:${job.id}`}
       data-opens-panel=""
       data-state={jobStatusState(job)}
       data-waiting={job.state === 'waiting' ? '' : undefined}
@@ -149,6 +150,7 @@ export const SessionRow = memo(function SessionRow({ session, selected, openSess
     <button
       className="job-row"
       data-session={session.id}
+      data-flip={`session:${session.id}`}
       data-opens-panel=""
       data-state={session.stalled ? 'stalled' : session.state}
       data-waiting={session.state === 'waiting' ? '' : undefined}
@@ -373,6 +375,7 @@ export const MissionPanel = memo(function MissionPanel({
     <section
       className="card mission"
       data-key={mission.id}
+      data-flip={`mission:${mission.id}`}
       data-state={mission.state}
       data-expanded={expanded || undefined}
       style={{ '--i': index } as CSSProperties}

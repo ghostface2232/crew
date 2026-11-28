@@ -908,25 +908,14 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 }
 .topbar button { flex: none; white-space: nowrap; }
 .topbar-sidebar { display: none; }
-/* One pill holds the pages, search and New Job. Its controls sit flat on it and rise only for the current page and under
-   the pointer, as the sidebar's items rise. */
-.topbar-bar {
-  /* Its own width decides when its controls fold to icons, so the Windows app's caption buttons and the sidebar count. */
-  container: topbar-bar / inline-size;
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 999px; corner-shape: round;
-  background: var(--fill);
-}
-.tabs { position: relative; flex: none; display: flex; align-items: center; gap: 2px; }
+/* The pages in a pill of their own, with search and New Job as pills of the same height after them. */
+.topbar-bar { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+/* The tabs sit flat on the pill and rise only for the current page and under the pointer, as the sidebar's items rise. */
+.tabs { position: relative; flex: none; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 999px; corner-shape: round; background: var(--fill); }
 .tabs-thumb {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: 3px;
+  bottom: 3px;
   left: var(--left);
   width: var(--width);
   border-radius: 999px; corner-shape: round;
@@ -944,36 +933,15 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .tab[aria-current="page"] { color: var(--label); }
 .tab[aria-current="page"] svg { color: var(--accent); }
 @media (hover: hover) { .tab:hover { color: var(--label); } }
-.search-pill {
-  justify-content: flex-start;
-  gap: 8px;
-  min-width: 0;
-  min-height: 30px;
-  margin-inline-start: auto;
-  padding: 0 8px 0 12px;
-  background: none;
-  color: var(--tertiary);
-  font-weight: 450;
-  transition: opacity 120ms ease-out, background-color 160ms ease-out, box-shadow 200ms ease-out;
-}
-.search-pill > span { flex: 1; text-align: start; overflow: hidden; text-overflow: ellipsis; }
-/* Shrinks before the tabs would run into it, over `.topbar button`'s `flex: none`. */
-.topbar .search-pill { flex: 0 1 260px; }
+.search-pill, .new-job { min-height: 36px; padding: 0 14px 0 12px; gap: 7px; }
+.search-pill { margin-inline-start: auto; transition: opacity 120ms ease-out, background-color 160ms ease-out; }
 .search-pill svg { color: var(--secondary); }
 .search-pill[data-hidden] { opacity: 0; }
-/* The shortcut shows only where the search is about to be used: under the pointer or with keyboard focus. */
-.search-pill > kbd { opacity: 0; transition: opacity 160ms ease-out; }
-.search-pill:focus-visible > kbd { opacity: 1; }
-@media (hover: hover) {
-  .search-pill:not(:disabled):hover { background: var(--raised); box-shadow: var(--shadow-raised); }
-  .search-pill:not(:disabled):hover > kbd { opacity: 1; }
-}
 .connection { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 999px; corner-shape: round; color: var(--secondary); font-size: 12px; white-space: nowrap; }
 .connection > i { width: 7px; height: 7px; border-radius: 50%; corner-shape: round; background: var(--tertiary); }
 .connection[data-state="live"] > i { background: var(--green); }
 .connection[data-state="lost"] { color: var(--orange); }
 .connection[data-state="lost"] > i { background: var(--orange); }
-.new-job { min-height: 30px; padding: 0 14px 0 11px; }
 .new-job svg { transition: rotate 420ms var(--ease-out); }
 @media (hover: hover) { .new-job:not(:disabled):hover svg { rotate: 90deg; } }
 
@@ -1113,6 +1081,9 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .column { display: grid; gap: var(--card-gap); min-width: 0; align-content: start; }
 .placed { display: contents; }
 .placed[data-still] > .card { animation: none; }
+/* Cards on their way out, over the stage (flip.ts). Their own animations would play again on being moved here. */
+.flip-ghosts { position: fixed; z-index: 2; box-sizing: border-box; overflow: hidden; pointer-events: none; container: page / inline-size; }
+.flip-ghosts, .flip-ghosts * { animation: none !important; transition: none !important; }
 
 /* Agents */
 .agent-cards { display: grid; gap: 4px; }
@@ -1526,15 +1497,12 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
 .sign-in { display: grid; justify-items: center; gap: 12px; max-width: 420px; margin: 20vh auto; padding: 0 16px; text-align: center; animation: rise 520ms var(--ease-out) backwards; }
 .sign-in-mark { display: grid; place-items: center; color: var(--secondary); }
 
-/* A bar too narrow for every name keeps one row: search and every tab fold to their icons together, so no page is
-   named while the others are not. 794px is inside an 800px bar, which leaves the widest (English) names room to drag
-   the Windows app's window by: a 1040px browser window, about 1190px in the Windows app with its caption buttons. */
-@container topbar-bar (max-width: 794px) {
-  .topbar .search-pill { flex: none; width: 30px; padding: 0; justify-content: center; }
-  .search-pill > span, .search-pill > kbd { display: none; }
-  .tab { --inset: 9px; padding-inline-end: 9px; }
-  .tab > .tab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-}
+/* A bar too narrow for every name keeps one row (`useFold` in Shell.tsx decides): first Search and New Job fold to their
+   icons, and then every tab together, so no page is named while the others are not. */
+.topbar-bar[data-fold] :is(.search-pill, .new-job) { width: 36px; padding: 0; }
+.topbar-bar[data-fold="icons"] .tab { --inset: 9px; padding-inline-end: 9px; }
+.topbar-bar[data-fold] :is(.search-label, .new-job-label),
+.topbar-bar[data-fold="icons"] .tab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* Narrow windows fold the sidebar away, to float out over the page. */
 @media (max-width: 760px) {
   .app { grid-template-columns: minmax(0, 1fr); }
@@ -1558,8 +1526,6 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
   .topbar { gap: 8px; min-height: 54px; padding: 8px var(--window-inset); }
   /* As tall as the bar beside it. */
   button.topbar-sidebar { display: inline-flex; width: 36px; min-height: 36px; }
-  .new-job { width: 30px; padding: 0; }
-  .new-job-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .page { margin-inline-start: var(--window-inset); padding: 20px 12px 32px; }
   .page-title { font-size: 28px; }
   .dash-side { grid-template-columns: minmax(0, 1fr); }

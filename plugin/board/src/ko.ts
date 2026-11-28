@@ -418,7 +418,6 @@ export const ko: Record<string, string> = {
   'Search (⌘K)': '검색 (⌘K)',
   'Search work, projects and actions': '작업, 프로젝트, 동작 검색',
   'Search work, projects and actions…': '작업, 프로젝트, 동작 검색…',
-  'Search work, projects…': '작업, 프로젝트 검색…',
   'Send': '보내기',
   'Send Job': '작업 보내기',
   'Send {what}': '{what} 보내기',

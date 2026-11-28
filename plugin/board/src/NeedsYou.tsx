@@ -145,7 +145,7 @@ export function NeedsYou({
       {(jobs.length > 0 || sessions.length > 0) && (
         <div className="needs-grid">
           {jobs.map((job, index) => (
-            <article className="card need" key={job.id} data-job={job.id} style={{ '--i': index } as CSSProperties}>
+            <article className="card need" key={job.id} data-job={job.id} data-flip={`need:${job.id}`} style={{ '--i': index } as CSSProperties}>
               <div className="need-head">
                 <div className="need-bar">
                   <Chip state="waiting">{job.waiting?.type === 'approval' ? t('Approval') : t('Question')}</Chip>
@@ -172,6 +172,7 @@ export function NeedsYou({
               className="card need need-session"
               key={session.id}
               data-session={session.id}
+              data-flip={`need:session:${session.id}`}
               data-opens-panel=""
               style={{ '--i': jobs.length + index } as CSSProperties}
               onClick={() => {

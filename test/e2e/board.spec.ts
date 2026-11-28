@@ -1354,7 +1354,6 @@ test('Return adds a newline in an answer and the next question gets a fresh draf
 test('the top bar keeps its controls on one row at every width', async ({ page }) => {
   const bar = page.locator('.topbar');
   const split: number[] = [];
-  // Past 1000px every tab names itself and search shows its words, so the widths just above matter as much.
   for (let width = 320; width <= 1200; width += 10) {
     await page.setViewportSize({ width, height: 800 });
     const { rows, overlap } = await bar.evaluate((element) => {
@@ -1366,14 +1365,51 @@ test('the top bar keeps its controls on one row at every width', async ({ page }
     if (overlap || rows.some((row) => Math.abs(row - rows[0]) > 2) || await bar.evaluate((element) => element.scrollWidth > element.clientWidth)) split.push(width);
   }
   expect(split, 'widths where the top bar splits or overflows').toEqual([]);
-  // The bar's own width decides when the tabs fold, so the Windows app's caption buttons (about 150px) fold them in a
-  // window that would show their names in a browser.
-  const named = () => page.locator('.tab-label').first().evaluate((element) => element.getBoundingClientRect().width > 1);
+  // The bar's own width decides how far it folds, so the Windows app's caption buttons (about 150px) count: Search and
+  // New Job fold to icons first, and the tabs only once their names no longer fit.
+  const named = (selector: string) => () => page.locator(selector).first().evaluate((element) => element.getBoundingClientRect().width > 1);
   await page.setViewportSize({ width: 1100, height: 800 });
-  expect(await named()).toBe(true);
-  await bar.evaluate((element) => { element.style.paddingInlineEnd = '158px'; });
-  await expect.poll(named).toBe(false);
+  expect(await named('.search-label')()).toBe(true);
+  expect(await named('.tab-label')()).toBe(true);
+  await bar.evaluate((element) => { element.style.paddingInlineEnd = '260px'; });
+  await expect.poll(named('.search-label')).toBe(false);
+  expect(await named('.tab-label')()).toBe(true);
+  await bar.evaluate((element) => { element.style.paddingInlineEnd = '420px'; });
+  await expect.poll(named('.tab-label')).toBe(false);
   await expect(page.locator('.tab').first()).toHaveAttribute('title', 'Overview');
+  // A window narrow enough for the sidebar to become a drawer keeps the buttons folded, though it gives the bar room.
+  await bar.evaluate((element) => { element.style.paddingInlineEnd = ''; });
+  await page.setViewportSize({ width: 760, height: 800 });
+  await expect.poll(named('.tab-label')).toBe(true);
+  expect(await named('.search-label')()).toBe(false);
+});
+
+test('cards arrive, move, and leave with the daemon\'s updates, as in the app', async ({ page, request }) => {
+  // Tall enough that every card is in view: one out of it neither arrives nor leaves in motion.
+  await page.setViewportSize({ width: 1440, height: 2000 });
+  // The suite runs with Reduce Motion, under which nothing moves.
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  // Whether an element the selector finds is running flip.ts's animation of the property.
+  const animating = (selector: string, property: string) => () => page.evaluate(([found, name]) => [...document.querySelectorAll(found)]
+    .some((element) => element.getAnimations().some((animation) => !(animation instanceof CSSAnimation) && !(animation instanceof CSSTransition)
+      && name in (animation.effect as KeyframeEffect).getKeyframes()[0])), [selector, property]);
+  const data = fixture();
+  data.jobs.push(job({ id: 'cx-loose', mission: undefined, title: 'A loose job', createdAt: NOW - 1000 }));
+  await request.post('/__push', { data: { type: 'state', data } });
+  // The panel arrives with its row in it, so only the panel animates.
+  await expect.poll(animating('[data-flip="panel:Other jobs"]', 'opacity')).toBe(true);
+  expect(await animating('[data-flip="job:cx-loose"]', 'opacity')()).toBe(false);
+  await page.waitForTimeout(600);
+  // Into the mission: a new element for the same job, which glides from where the old one was.
+  data.jobs.at(-1)!.mission = 'mission-1';
+  await request.post('/__push', { data: { type: 'state', data } });
+  await expect.poll(animating('[data-flip="job:cx-loose"]', 'transform')).toBe(true);
+  await page.waitForTimeout(600);
+  data.jobs.pop();
+  await request.post('/__push', { data: { type: 'state', data } });
+  await expect(page.locator('.flip-ghosts [data-job="cx-loose"]')).toHaveCount(1);
+  await expect(page.locator('.flip-ghosts')).toHaveCount(0);
+  await expect(page.locator('main [data-job="cx-loose"]')).toHaveCount(0);
 });
 
 test('a waiting count that changes mid-slide leaves the thumb sliding', async ({ page, request }) => {

@@ -17,9 +17,10 @@ import { NeedsYou } from './NeedsYou.tsx';
 import { DecisionsDrawer, JobDrawer, SessionDrawer } from './JobDrawer.tsx';
 import { Settings } from './Settings.tsx';
 import { Dispatch } from './Dispatch.tsx';
+import { captureLayout, dropLayout, playLayout } from './flip.ts';
 import { Palette } from './Palette.tsx';
 import { Onboarding } from './Onboarding.tsx';
-import { NavList, PageTabs, ProjectPeek } from './Shell.tsx';
+import { NavList, PageTabs, ProjectPeek, useFold } from './Shell.tsx';
 import { Notifier } from './notify.ts';
 import { desktop, useAppUpdate } from './desktop.ts';
 import { followSetting, t, translated } from './i18n.ts';
@@ -55,12 +56,20 @@ function storedView(): View {
   }
 }
 /** The open detail panel, kept in the URL fragment: a job's id, `session:<id>` for a Claude session, or `decisions:<id>` for a mission's decisions. */
+/** The page is measured before each update renders, and the measure dropped if none did. */
+const subscribe = (listener: () => void) => board.subscribe(() => {
+  captureLayout();
+  listener();
+  queueMicrotask(dropLayout);
+});
 const detailFromHash = () => detailFromFragment(location.hash);
 const typing = (target: EventTarget | null) =>
   target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
 
 export function App() {
-  const state = useSyncExternalStore(board.subscribe, board.getSnapshot);
+  const state = useSyncExternalStore(subscribe, board.getSnapshot);
+  // Each update the daemon sends rearranges the page with motion, as the app's does (flip.ts).
+  useLayoutEffect(playLayout);
   const shown = useLanguage();
   const search = searchShortcut(navigator.platform);
   const [view, setView] = useState(storedView);
@@ -96,6 +105,7 @@ export function App() {
   const toggle = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
   const searchButton = useRef<HTMLButtonElement>(null);
+  const [barFold, barRef] = useFold(shown);
   const folded = narrow && !drawer;
   useEffect(() => {
     if (!narrow) setDrawer(false);
@@ -321,8 +331,7 @@ export function App() {
             >
               <Icon icon={PanelLeftRegular} />
             </button>
-            {/* One pill holds the pages, search and New Job, as the app's toolbar holds them. */}
-            <div className="topbar-bar">
+            <div className="topbar-bar" ref={barRef} data-fold={barFold || undefined}>
               <PageTabs label={t('Pages')} items={pageItems} current={page} onSelect={selectPage} />
               <button
                 className="search-pill"
@@ -334,8 +343,7 @@ export function App() {
                 data-hidden={palette ? '' : undefined}
               >
                 <Icon icon={SearchRegular} />
-                <span>{t('Search work, projects…')}</span>
-                <kbd>{search.keys}</kbd>
+                <span className="search-label">{t('Search')}</span>
               </button>
               <button className="new-job prominent" disabled={!live} title={t('New job (N)')} aria-keyshortcuts="N" onClick={(event) => newJob(event.currentTarget)}>
                 <Icon icon={AddRegular} />
@@ -345,7 +353,7 @@ export function App() {
           </header>
           <main className="page" key={`${project}\n${page}`}>
             {state.connection === 'lost' && (
-              <div className="banner" role="alert">
+              <div className="banner" role="alert" data-flip="banner">
                 <Icon icon={WifiOffRegular} />
                 <span>{t('Lost the connection to Crew. Reconnecting…')}</span>
                 <button onClick={board.retry}>{t('Retry')}</button>

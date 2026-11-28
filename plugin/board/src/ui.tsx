@@ -770,7 +770,7 @@ export function tNodes(text: string, values: Record<string, ReactNode>): ReactNo
 /** A light, centered empty state. */
 export function EmptyState({ title, icon, detail, children }: { title: string; icon: FluentIcon; detail?: string; children?: ReactNode }) {
   return (
-    <div className="empty-state">
+    <div className="empty-state" data-flip="empty">
       <Icon icon={icon} />
       <b>{title}</b>
       {detail && <p>{detail}</p>}

@@ -34,7 +34,7 @@ const inProject = (project: string, item: Parameters<typeof projectOf>[0]) => !p
 /** A card with a small caps label, the dashboard's one surface. */
 function Panel({ label, action, className, children, style }: { label: string; action?: ReactNode; className?: string; children: ReactNode; style?: CSSProperties }) {
   return (
-    <section className={`card panel ${className ?? ''}`} aria-label={label} style={style}>
+    <section className={`card panel ${className ?? ''}`} aria-label={label} style={style} data-flip={`panel:${label}`}>
       <header className="panel-head">
         <h2 className="label">{label}</h2>
         {action}
@@ -157,7 +157,7 @@ export const Kpis = memo(function Kpis({ state, project }: { state: Snapshot; pr
   const tokens = useClock((now) => tokenJobs.reduce((sum, job) =>
     now - job.createdAt < 86_400_000 ? sum + job.tokens! : sum, 0), tokenJobs.length > 0);
   return (
-    <section className="kpis" aria-label={t('Jobs by state')}>
+    <section className="kpis" aria-label={t('Jobs by state')} data-flip="kpis">
       <ul className="kpi-row">
         {metrics.map((metric, index) => (
           <li className="kpi" key={metric.label} data-state={metric.state} data-zero={metric.count === 0 || undefined} style={{ '--i': index } as CSSProperties}>
@@ -311,7 +311,7 @@ export const AgentPanel = memo(function AgentPanel({ state, project }: { state: 
           // Claude and Codex alike say Lead while one of their sessions is open here.
           const role = [...(leads ? [t('Lead')] : []), ...held].join(' · ');
           return (
-            <li className="agent-card" key={agent} data-agent={agent} style={{ '--i': index } as CSSProperties}>
+            <li className="agent-card" key={agent} data-agent={agent} data-flip={`agent:${agent}`} style={{ '--i': index } as CSSProperties}>
               <div className="agent-card-head">
                 <span className="agent-avatar" data-state={mark}><AgentMark agent={agent} size={26} /></span>
                 <div>
@@ -453,7 +453,7 @@ export const EventList = memo(function EventList({ events, openJob, limit }: { e
 const EventRow = memo(function EventRow({ event, index, openJob }: { event: CrewEvent; index: number; openJob?: (id: string) => void }) {
   useLanguage();
   return (
-    <li className="event" data-kind={event.kind} style={{ '--i': index } as CSSProperties}>
+    <li className="event" data-kind={event.kind} data-flip={`event:${event.seq}`} style={{ '--i': index } as CSSProperties}>
       <span className="event-mark"><Icon icon={event.kind === 'error' ? ErrorCircle16Regular : event.kind === 'done' ? CheckmarkCircle16Regular : CircleMultipleConcentric16Regular} /></span>
       <div>
         <p className="event-head">
@@ -506,7 +506,7 @@ export const Activity = memo(function Activity({ events, jobs, missions, openJob
   const times = useStableItems(useMemo(() => [...jobs.map((job) => job.createdAt), ...missions.map((mission) => mission.createdAt)], [jobs, missions]));
   return (
     <Columns>
-      <section className="card panel activity-map" aria-label={t('Work started')} style={{ '--i': 0 } as CSSProperties}>
+      <section className="card panel activity-map" aria-label={t('Work started')} data-flip="work-started" style={{ '--i': 0 } as CSSProperties}>
         <Heatmap title={t('Work started')} times={times} most={53} label={t('jobs and missions')} one={t('job or mission')} />
       </section>
       <Panel
@@ -515,7 +515,7 @@ export const Activity = memo(function Activity({ events, jobs, missions, openJob
       >
         {!days.size && <p className="secondary">{t('No activity yet.')}</p>}
         {[...days].reverse().map(([day, list]) => (
-          <div className="event-day" key={day}>
+          <div className="event-day" key={day} data-flip={`day:${day}`}>
             <h3 className="event-day-name">{day}</h3>
             <EventList events={list} openJob={openJob} />
           </div>
@@ -614,7 +614,7 @@ function IssueSuggestions({ project, live, startWork }: { project: string; live:
   };
   return (
     // Named for assistive tech only: a visible heading above the cards would sit off the top of the Agents card beside them.
-    <section className="issue-section" aria-label={t('Start from an issue')}>
+    <section className="issue-section" aria-label={t('Start from an issue')} data-flip="issues">
       <ul className="issue-cards">
         {shown.map((issue) => (
           // Set on the inset gray rather than a raised card, so a suggestion does not read as work under way.
@@ -771,7 +771,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
         </div>
         <aside className="dash-side" aria-label={t('Agents and activity')}>
           <AgentPanel state={state} project={project} />
-          <section className="card panel" aria-label={t('Rhythm')} style={{ '--i': 1 } as CSSProperties}>
+          <section className="card panel" aria-label={t('Rhythm')} data-flip="rhythm" style={{ '--i': 1 } as CSSProperties}>
             <Heatmap title={t('Rhythm')} times={times} most={26} label={t('jobs')} one={t('job')} />
           </section>
           <Panel label={t('Live feed')} action={<button className="link" onClick={() => openPage('activity')}>{t('All')} <Icon icon={ArrowRight16Filled} size={12} /></button>}>

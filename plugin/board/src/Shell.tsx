@@ -1,10 +1,11 @@
-import { memo, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { CSSProperties } from 'react';
 import { AlertBadgeRegular, FlagRegular, SpinnerIosRegular } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { Snapshot } from './types.ts';
 import { projectOf, relativeDuration } from './model.ts';
-import { Icon, useFade, useClock, WordReveal } from './ui.tsx';
+import { EASE_OUT, Icon, useFade, useClock, WordReveal } from './ui.tsx';
 import { t } from './i18n.ts';
 
 export interface NavItem {
@@ -147,6 +148,84 @@ export const PageTabs = memo(function PageTabs({ label, items, current, onSelect
     </nav>
   );
 });
+
+/** Room left beside the top bar's controls, for the Windows app's window to be dragged by. */
+const DRAG_ROOM = 48;
+const FOLD_MS = 360;
+export type Fold = '' | 'buttons' | 'icons';
+/** The window width at which the sidebar folds into a drawer (board.css), giving the bar its room. */
+const DRAWER = '(max-width: 760px)';
+/**
+ * How far the top bar folds: not at all while every name fits with room to drag the window by, then with Search and
+ * New Job as icons, and last with the tabs as icons too, since the pages are named nowhere else. Read from what the
+ * names need rather than set as a width, so it follows the language. The buttons stay folded once the sidebar has
+ * become a drawer, so the room it gives back does not bring their names back as the window narrows. Each fold resizes
+ * the controls in motion; the tabs' thumb follows them. `names` changes whenever their words do.
+ */
+export function useFold(names: unknown): [Fold, (element: HTMLElement | null) => void] {
+  // The bar as mounted: absent behind the sign-in screen, and a new element once the board comes back from it.
+  const [bar, setBar] = useState<HTMLElement | null>(null);
+  const [fold, setFold] = useState<Fold>('');
+  // Whether the names are on show to be measured, as when the bar first draws and whenever they change.
+  const [measuring, setMeasuring] = useState(true);
+  const needs = useRef({ full: 0, buttons: 0 });
+  const widths = useRef<Map<HTMLElement, number> | null>(null);
+  const hidden = useRef(new Set<Element>());
+  const shown = useRef(fold);
+  shown.current = fold;
+  const controls = (element: HTMLElement) => [...element.querySelectorAll<HTMLElement>('.tab, .search-pill, .new-job')];
+  const words = (element: HTMLElement) => [...element.querySelectorAll<HTMLElement>('.tab-label, .search-label, .new-job-label')];
+  const decide = (room: number): Fold =>
+    room >= needs.current.full && !matchMedia(DRAWER).matches ? '' : room >= needs.current.buttons ? 'buttons' : 'icons';
+  useLayoutEffect(() => setMeasuring(true), [names, bar]);
+  // The board's font arrives after the first paint, and its names are wider or narrower than the fallback's.
+  useEffect(() => {
+    let live = true;
+    document.fonts?.ready.then(() => { if (live) setMeasuring(true); });
+    return () => { live = false; };
+  }, []);
+  useLayoutEffect(() => {
+    if (!measuring || !bar) return;
+    const gap = parseFloat(getComputedStyle(bar).columnGap) || 0;
+    const full = [...bar.children].reduce((sum, child) => sum + (child as HTMLElement).offsetWidth + gap, -gap) + DRAG_ROOM;
+    // Folded, each button is a circle as tall as it is.
+    const buttons = [...bar.querySelectorAll<HTMLElement>('.search-pill, .new-job')].reduce((sum, button) => sum + button.offsetWidth - button.offsetHeight, 0);
+    needs.current = { full, buttons: full - buttons - DRAG_ROOM };
+    setMeasuring(false);
+    setFold(decide(bar.clientWidth));
+  }, [measuring, bar]);
+  useLayoutEffect(() => {
+    if (!bar) return;
+    const observer = new ResizeObserver(() => {
+      const next = decide(bar.clientWidth);
+      if (next === shown.current) return;
+      // Widths as they stand, mid-fold included, for the next fold to start from.
+      widths.current = new Map(controls(bar).map((control) => [control, control.offsetWidth]));
+      hidden.current = new Set(words(bar).filter((word) => word.offsetWidth <= 1));
+      // Before the next paint, so a narrowing bar never shows names it has no room for.
+      flushSync(() => setFold(next));
+    });
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, [bar]);
+  useLayoutEffect(() => {
+    const from = widths.current;
+    widths.current = null;
+    if (!from || !bar || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    for (const control of controls(bar)) {
+      for (const animation of control.getAnimations()) if (animation.id === 'fold') animation.cancel();
+      const [was, now] = [from.get(control), control.offsetWidth];
+      if (was === undefined || was === now) continue;
+      // Clipped while it resizes, so a name that comes back does not spill over its neighbours.
+      control.animate([{ width: `${was}px`, overflow: 'clip' }, { width: `${now}px`, overflow: 'clip' }], { id: 'fold', duration: FOLD_MS, easing: EASE_OUT });
+    }
+    // Words that come back fade in as their room opens.
+    for (const word of words(bar)) {
+      if (hidden.current.has(word) && word.offsetWidth > 1) word.animate([{ opacity: 0 }, { opacity: 0, offset: 0.3 }, { opacity: 1 }], { duration: FOLD_MS, easing: 'ease-out' });
+    }
+  }, [fold]);
+  return [measuring ? '' : fold, setBar];
+}
 
 /** An item's name, fading at its end instead of widening the sidebar when it is too long for it. */
 function NavLabel({ label, current }: { label: string; current: boolean }) {

@@ -12,7 +12,7 @@ import { formatDate, longDay, shortDateTime, shortDay, shortMonth, timeOfDay } f
 import { request } from './api.ts';
 import {
   dailyCounts, elapsed, endedPerHour, eventsIn, holdersOf, jobLabel, leadMission, limitWindowLabel, NAMES, projectOf, relativeDuration, rolesOf, runningPerHour,
-  sessionAgent, usageWindowName, unsettled,
+  sessionAgent, shownWindows, usageWindowName, unsettled,
 } from './model.ts';
 import { AgentMark, Chip, EmptyState, Icon, RollingNumber, StatusIcon, tNodes, useFade, useClock, useLanguage, useStableItems } from './ui.tsx';
 import { JobRow, jobKind, jobStatusState, MissionPanel, SessionRow } from './Missions.tsx';
@@ -204,7 +204,7 @@ function AgentUsage({ state, agent }: { state: Snapshot; agent: string }) {
   if (usage && usage.source !== 'none') {
     const provider = usage.providers.find((item) => item.agent === agent);
     if (!provider) return <p className="usage">{t('Usage unknown')}</p>;
-    const account = provider.windows.filter((window) => window.group == null);
+    const shown = shownWindows(provider);
     const scoped = provider.windows.filter((window) => window.group != null);
     return (
       <div
@@ -212,8 +212,8 @@ function AgentUsage({ state, agent }: { state: Snapshot; agent: string }) {
         aria-label={t('{agent} usage', { agent: NAMES[agent as WorkerAgent] ?? agent })}
         title={[provider.reason, ...scoped.map((window) => `${window.group}: ${usageWindowName(window.kind)}, ${Math.round(window.usedRatio * 100)}%, ${statusWord(window.status)}`)].join('\n')}
       >
-        {!account.length && <p>{capitalized(statusWord(provider.status))}</p>}
-        {account.map((window) => {
+        {!shown.length && <p>{capitalized(statusWord(provider.status))}</p>}
+        {shown.map((window) => {
           // The provider's status overrides a window's when the reading is old or a job just hit the limit.
           const status = shownStatus(provider, window.status);
           const ratio = Math.max(0, Math.min(1, window.usedRatio));
@@ -487,7 +487,7 @@ function Pills<T extends string>({ label, value, options, onChange }: { label: s
 }
 
 export const Activity = memo(function Activity({ events, jobs, missions, openJob }: Pick<Snapshot, 'events' | 'jobs' | 'missions'> & Pick<Scope, 'openJob'>) {
-  useLanguage();
+  const language = useLanguage();
   const [agent, setAgent] = useState('');
   // Days, newest first, each under its own sticky heading.
   const { days, counts } = useMemo(() => {
@@ -502,7 +502,7 @@ export const Activity = memo(function Activity({ events, jobs, missions, openJob
       else days.set(day, [event]);
     }
     return { days, counts };
-  }, [events, agent]);
+  }, [events, agent, language]);
   const times = useStableItems(useMemo(() => [...jobs.map((job) => job.createdAt), ...missions.map((mission) => mission.createdAt)], [jobs, missions]));
   return (
     <Columns>

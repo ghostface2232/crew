@@ -7,7 +7,7 @@ import {
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { Snapshot } from './types.ts';
 import type { Page } from './App.tsx';
-import { jobLabel, missionStep, missionStops, NAMES, projectOf, roleLabel, jobRole, sessionAgent } from './model.ts';
+import { isComposing, jobLabel, missionStep, missionStops, NAMES, projectOf, roleLabel, jobRole, sessionAgent } from './model.ts';
 import { AgentMark, Chip, EASE_IN_OUT, EASE_OUT, Icon, reducedMotion, Elapsed, tNodes, useClock, useLanguage, WordReveal } from './ui.tsx';
 import { jobStatusState, missionStateLabel, sessionStateLabel } from './Missions.tsx';
 import { t, translated } from './i18n.ts';
@@ -87,13 +87,16 @@ export function Palette({ state, names, projects, origin, close, actions }: {
   const notifyState = useClock(notificationPermission);
   const notifyOn = useClock(() => notifyState === 'granted' && notificationsWanted(), notifyState === 'granted');
   const locale = useLanguage();
+  // Offered when the top bar's New Job and the sidebar's Settings are.
+  const live = state.connection === 'live';
+  const configured = Object.keys(state.roles).length > 0;
   const entries = useMemo(() => {
     const list: Entry[] = [];
-    list.push({
+    if (live) list.push({
       id: 'new-job', group: 'Actions', title: t('New Job'), subtitle: t('Hand a task to an agent'), icon: AddRegular,
       run: actions.newJob, preview: () => ({ eyebrow: t('Action'), lines: [t('Shortcut: N')], text: t('Give a command, ask a question, or add information for the crew.') }),
     });
-    list.push({
+    if (configured) list.push({
       id: 'settings', group: 'Actions', title: t('Settings'), subtitle: t('Roles, model presets, and instructions'), icon: SettingsRegular,
       run: actions.settings, preview: () => ({ eyebrow: t('Action'), lines: [], text: t('Configure roles, model presets, and shared instructions.') }),
     });
@@ -184,7 +187,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
       });
     }
     return list;
-  }, [jobs, claude, missions, roleInfo, projectSettings, names, projects, actions, notifyState, notifyOn, locale]);
+  }, [jobs, claude, missions, roleInfo, projectSettings, names, projects, actions, notifyState, notifyOn, locale, live, configured]);
   const shown = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (words.length) return entries.filter((entry) =>
@@ -302,6 +305,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
                 setPointer(false);
               }}
               onKeyDown={(event) => {
+                if (isComposing(event.nativeEvent)) return;
                 if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
                   event.preventDefault();
                   setPointer(false);

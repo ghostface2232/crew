@@ -60,7 +60,7 @@ function RoundRow({ job, round }: { job: BoardJob; round: NonNullable<BoardJob['
           onClick={() => {
             void actions.run(key, async () => {
               const updated = await request<BoardJob>(`/api/jobs/${job.id}/rounds/${round.turn}`, undone ? { keep: true } : { undo: true });
-              board.receive('job', updated);
+              board.receiveReply(updated);
             }, { once: false, done: '' });
           }}
         >
@@ -72,6 +72,9 @@ function RoundRow({ job, round }: { job: BoardJob; round: NonNullable<BoardJob['
     </div>
   );
 }
+
+/** An outcome or preset as its word in the reader's language. */
+const word = (value: string) => t(value.charAt(0).toUpperCase() + value.slice(1));
 
 type EvidenceItem = NonNullable<BoardJob['evidence']>[number];
 const isVideo = (file: string) => /\.(webm|mp4)$/i.test(file);
@@ -637,11 +640,11 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
   const facts: [string, ReactNode][] = job
     ? [
         // The model the session reported, else the configured one.
-        [t('Agent'), [NAMES[job.agent], job.resolvedModel ?? job.model, job.tier && t('{tier} tier', { tier: job.tier }), (job.resolvedEffort ?? job.effort) && t('{effort} effort', { effort: (job.resolvedEffort ?? job.effort)! })].filter(Boolean).join(' · ')],
+        [t('Agent'), [NAMES[job.agent], job.resolvedModel ?? job.model, job.tier && t('{tier} tier', { tier: t(job.tier) }), (job.resolvedEffort ?? job.effort) && t('{effort} effort', { effort: t((job.resolvedEffort ?? job.effort)!) })].filter(Boolean).join(' · ')],
         [t('Role'), job.ask && !job.debate ? t('Question') : roleLabel({ roleInfo }, jobRole(job))],
         // What the worker declared, set against what the bridge observed.
-        ...(job.state === 'done' && job.outcome ? [[t('Outcome'), job.outcomeContradiction ? t('Done as declared, but {contradiction}', { contradiction: job.outcomeContradiction }) : job.outcome[0].toUpperCase() + job.outcome.slice(1)] as [string, string]] : []),
-        ...(job.preset ? [[t('Preset'), job.preset[0].toUpperCase() + job.preset.slice(1)] as [string, string]] : []),
+        ...(job.state === 'done' && job.outcome ? [[t('Outcome'), job.outcomeContradiction ? t('Done as declared, but {contradiction}', { contradiction: job.outcomeContradiction }) : word(job.outcome)] as [string, string]] : []),
+        ...(job.preset ? [[t('Preset'), word(job.preset)] as [string, string]] : []),
         [t('Project'), projectOf(job)],
         [t('Duration'), <Elapsed start={job.createdAt} end={job.endedAt} />],
         ...(job.worktree ? [[t('Branch'), job.worktree.branch] as [string, string]] : []),

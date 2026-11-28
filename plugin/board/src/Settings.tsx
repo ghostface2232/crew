@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import {
-  ChevronLeftRegular, ChevronRightRegular, DocumentText16Regular, ErrorCircle16Regular, Folder16Regular, Gauge16Regular, Info16Regular,
+  ChevronLeftRegular, ChevronRightRegular, DocumentText16Regular, ErrorCircle16Regular, Gauge16Regular, Info16Regular,
   Options16Regular, ShieldCheckmark16Regular, TextFont16Regular, Wrench16Regular,
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
@@ -9,10 +9,11 @@ import type { AgentSettings, Holder, JobKind, Role, RoleAssignment, RoleInfo, Ro
 import { formatDate, timeOfDay } from './dates.ts';
 import { request } from './api.ts';
 import { board } from './store.ts';
-import { agentSettings, CLAUDE_MODELS, HOLDERS, knownProjects, NAMES, projectNames, resolveDraft, rolesOf, sortHolders } from './model.ts';
+import { agentSettings, CLAUDE_MODELS, HOLDERS, isComposing, knownProjects, NAMES, projectNames, resolveDraft, rolesOf, sortHolders } from './model.ts';
 import { AgentMark, ask, CloseButton, Dialog, Icon, Select, useFade } from './ui.tsx';
 import { Scores } from './Scores.tsx';
 import { desktop } from './desktop.ts';
+import { projectIcon } from './projectIcons.ts';
 import { language as interfaceLanguage, t, translated } from './i18n.ts';
 import type { Language } from './i18n.ts';
 import appIcon from './icons/CrewAppIcon.png';
@@ -209,7 +210,7 @@ function TypedSetting({ label, value, placeholder, onCommit }: { label: string; 
       placeholder={placeholder}
       onChange={(event) => setDraft(event.target.value)}
       onBlur={() => { if (draft !== value) onCommit(draft); }}
-      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+      onKeyDown={(event) => { if (event.key === 'Enter' && !isComposing(event.nativeEvent)) event.currentTarget.blur(); }}
     />
   );
 }
@@ -320,14 +321,14 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     };
   }, [scope, retry]);
   useEffect(() => {
-    if (!dirty && !saving && !storedRoles.busy && !storedPreset.busy) return;
+    if (!dirty && !saving && !storedRoles.busy && !storedPreset.busy && !storedBudget.busy) return;
     const guard = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [dirty, saving, storedRoles.busy, storedPreset.busy]);
+  }, [dirty, saving, storedRoles.busy, storedPreset.busy, storedBudget.busy]);
   // On a phone, opening a page moves focus to its way back, as a pushed screen does, and going back returns it to the page's row.
   const nav = useRef<HTMLElement>(null);
   const pushed = useRef(false);
@@ -367,13 +368,11 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       const next = shown.includes(holder) ? shown.filter((other) => other !== holder) : sortHolders([...shown, holder]);
       if (!next.length) return own;
       // Off, an agent's settings go; back on while Settings stays open, they come back as they were.
-      if (holder !== 'claude') {
-        const key = `${role.role}:${holder}`;
-        if (next.includes(holder)) own[holder] ??= dropped.current[key];
-        else {
-          dropped.current[key] = own[holder];
-          delete own[holder];
-        }
+      const key = `${role.role}:${holder}`;
+      if (next.includes(holder)) own[holder] ??= dropped.current[key];
+      else {
+        dropped.current[key] = own[holder];
+        delete own[holder];
       }
       const unwritten = !role.parent && !opened.settings[role.role]?.agents ? opened.roles[role.role]?.agents : undefined;
       if (unwritten && unwritten.join() === next.join()) delete own.agents;
@@ -550,7 +549,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
         onClick={() => open(id)}
         title={dir ?? undefined}
       >
-        <Icon icon={page?.icon ?? Folder16Regular} className={styles.glyph} />
+        <Icon icon={page?.icon ?? projectIcon(state.projects?.[dir!]?.icon)} className={styles.glyph} />
         <ItemTitle text={page?.title ?? names.get(dir!) ?? dir!} current={current === id} />
         <Icon icon={ChevronRightRegular} className={styles.chevron} />
       </button>
@@ -572,7 +571,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     const blank = (agent: Holder, key: keyof AgentSettings) => {
       const value = inherited(agent, key);
       return value
-        ? t('{model} (same as {role})', { model: models(agent).find((model) => model.id === value)?.name ?? value, role: parentLabel })
+        ? t('{model} (same as {role})', { model: key === 'model' ? models(agent).find((model) => model.id === value)?.name ?? value : t(value), role: parentLabel })
         : t('Agent default');
     };
     /**
@@ -591,7 +590,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       // A model that lists no efforts says nothing about them, so every offered effort stays a choice.
       const listed = offered.find((choice) => choice.id === model)?.efforts;
       const efforts = listed?.length ? listed : [...new Set(offered.flatMap((choice) => choice.efforts ?? []))];
-      const options = key === 'model' ? offered.map((choice) => [choice.id, choice.name]) : efforts.map((effort) => [effort, effort]);
+      const options = key === 'model' ? offered.map((choice) => [choice.id, choice.name]) : efforts.map((effort) => [effort, t(effort)]);
       if (value && !options.some(([id]) => id === value)) options.push([value, value]);
       return (
         <Select label={label} value={value} options={[['', blank(agent, key)], ...(options as [string, string][])]} onChange={change} />

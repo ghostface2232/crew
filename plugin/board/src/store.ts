@@ -99,11 +99,11 @@ export class BoardStore {
   private projectsRevision = 0;
   getProjectsRevision = () => this.projectsRevision;
 
-  private update(patch: Partial<Snapshot>) {
+  private update(patch: Partial<Snapshot>, base: Partial<Snapshot> = this.snapshot) {
     if ('preset' in patch) this.presetRevision++;
     if ('turnTokenBudget' in patch) this.budgetRevision++;
     if ('projects' in patch) this.projectsRevision++;
-    this.snapshot = { ...this.snapshot, ...patch };
+    this.snapshot = { ...base, ...patch } as Snapshot;
     if (patch.connection !== undefined) this.notify();
     else if (this.listeners.size && !this.cancelNotification) this.scheduleNotification();
   }
@@ -112,21 +112,24 @@ export class BoardStore {
     switch (type) {
       case 'state': {
         const state = value as BoardState;
+        // A whole state replaces every daemon field, so one this daemon leaves out does not keep the last connection's value.
+        // The optional fields named here count as changed for a save that started before it.
         this.update({
           ...state,
-          usage: state.usage,
-          preset: state.preset,
-          presets: state.presets,
+          jobs: state.jobs ?? [],
           missions: state.missions ?? [],
-          pulls: state.pulls,
+          claude: state.claude ?? [],
           agents: state.agents ?? {},
           roles: state.roles ?? {},
-          roleSettings: state.roleSettings,
-          roleInfo: state.roleInfo,
+          limits: state.limits ?? {},
+          events: state.events ?? [],
+          preset: state.preset,
+          turnTokenBudget: state.turnTokenBudget,
+          projects: state.projects,
           connection: 'live',
           revision: current.revision + 1,
           clockSkew: state.now - Date.now(),
-        });
+        }, {});
         break;
       }
       case 'job':
@@ -188,6 +191,11 @@ export class BoardStore {
         break;
     }
   }
+  /** A job from an HTTP reply, which the stream may have overtaken while the request was out. */
+  receiveReply(job: BoardJob) {
+    const held = this.snapshot.jobs.find((item) => item.id === job.id);
+    if (!held || job.seq > held.seq) this.receive('job', job);
+  }
   private reconnect?: () => void;
   retry = () => this.reconnect?.();
   signOut = () => this.update({ connection: 'unauthorized' });
@@ -206,11 +214,11 @@ export class BoardStore {
     });
     const open = async () => {
       const current = ++generation;
-      controller = new AbortController();
+      const connection = (controller = new AbortController());
       try {
         // The stream opens with the whole state, so each connection replaces what the one before it left.
         await read('/api/stream', (type, data) => {
-          if (current !== generation) return;
+          if (current !== generation || connection.signal.aborted) return;
           try {
             const previous = this.snapshot;
             const value: unknown = JSON.parse(data);
@@ -219,9 +227,11 @@ export class BoardStore {
               notifier.update(this.snapshot, document.hasFocus());
             }
           } catch {
-            this.update({ connection: 'lost' });
+            // A frame that cannot be applied leaves the snapshot unknown: drop this connection, so the next one's
+            // whole state replaces it.
+            connection.abort();
           }
-        }, controller.signal);
+        }, connection.signal);
       } catch {
         // An outage. A refused credential has already signed the board out and stopped this connection.
       }

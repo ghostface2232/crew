@@ -41,13 +41,14 @@ export function Dispatch({
   // A debate needs the lead to answer each round, so it is not started from here.
   const choices = rolesOf(state).filter((info) => info.role !== 'debate');
   const kind = choices.find((info) => info.role === role)?.kind ?? 'delegate';
-  // The role's holders that are workers; Claude holding it means a lead session takes it.
+  // The role's holders that are workers and that the role lets do its work, as the daemon refuses the others;
+  // Claude holding it means a lead session takes it.
   const assignment = state.roles[intent === 'question' ? 'delegate' : role];
   const info = rolesOf(state).find((other) => other.role === (intent === 'question' ? 'delegate' : role));
-  const workers = preferredWorkers(info, holdersOf(assignment)).filter((holder) => holder in state.agents);
+  const workers = preferredWorkers(info, holdersOf(assignment)).filter((holder) => holder in state.agents && !info?.unable?.includes(holder));
   const [picked, setPicked] = useState<WorkerAgent | ''>('');
   // Unless another is chosen, the first that can take the work, as the daemon would pick.
-  const able = workers.filter((holder) => state.agents[holder].enabled && !info?.unable?.includes(holder));
+  const able = workers.filter((holder) => state.agents[holder].enabled);
   // With no worker able, a role Claude holds is the lead's, as the daemon would decide.
   const claudeHolds = holdersOf(assignment).includes('claude');
   const agent = picked && workers.includes(picked) ? picked : able[0] ?? (claudeHolds ? undefined : workers[0]);

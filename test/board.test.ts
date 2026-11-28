@@ -4,8 +4,10 @@ import { Actions, answerKey, onUnauthorized, stream, ticketFromFragment, Unautho
 import { BoardStore, mergeEvents } from '../plugin/board/src/store.ts';
 import { formatDate, longDay, shortDateTime, shortDay, shortMonth, timeOfDay } from '../plugin/board/src/dates.ts';
 import { Notifier } from '../plugin/board/src/notify.ts';
-import { detailFromFragment, elapsed, eventsIn, evidenceSide, evidenceTurn, orderEvidence, jobLabel, leadMission, limitWindowLabel, projectNames, unsettled, isNewJobKey, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, pullIsStale, pullStatuses, relativeDuration, searchShortcut, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
+import { setLanguage } from '../plugin/board/src/i18n.ts';
+import { detailFromFragment, elapsed, isComposing, shownWindows, eventsIn, evidenceSide, evidenceTurn, orderEvidence, jobLabel, leadMission, limitWindowLabel, projectNames, unsettled, isNewJobKey, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, pullIsStale, pullStatuses, relativeDuration, searchShortcut, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
 import type { BoardJob, BoardPull, BoardState, ClaudeSession, CrewEvent, Mission } from '../plugin/board/src/types.ts';
+import type { ProviderUsage } from '../plugin/bridge/usage.ts';
 
 function deferred() {
   let resolve!: (value?: unknown) => void;
@@ -565,4 +567,85 @@ test('a job the budget stopped says so, and project switches arrive by their own
   assert.equal(store.getSnapshot().projects, undefined, 'an older daemon sends none');
   store.receive('projects', { '/repo': { autonomy: true } });
   assert.deepEqual(store.getSnapshot().projects, { '/repo': { autonomy: true } });
+});
+
+test('a frame that cannot be applied drops its connection, and the next one\'s state replaces the snapshot', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const store = new BoardStore();
+  const connections: { receive: (type: string, data: string) => void; signal: AbortSignal }[] = [];
+  const cleanup = store.connect((_route, receive, signal) => {
+    connections.push({ receive, signal });
+    return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))));
+  });
+  t.after(cleanup);
+  const state = { now: Date.now(), jobs: [{ id: 'a', state: 'running' }], claude: [], events: [] };
+  connections[0].receive('state', JSON.stringify(state));
+  connections[0].receive('job', '{not json');
+  assert.equal(connections[0].signal.aborted, true);
+  // The rest of the dropped connection's frames are not applied.
+  connections[0].receive('job', JSON.stringify({ id: 'a', state: 'failed' }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(store.getSnapshot().connection, 'lost');
+  assert.equal(store.getSnapshot().jobs[0].state, 'running');
+  t.mock.timers.tick(3000);
+  assert.equal(connections.length, 2);
+  connections[1].receive('state', JSON.stringify({ ...state, jobs: [{ id: 'a', state: 'done' }] }));
+  assert.equal(store.getSnapshot().connection, 'live');
+  assert.equal(store.getSnapshot().jobs[0].state, 'done');
+});
+
+test('a whole state replaces every daemon field and counts as a change to the stored settings', () => {
+  const store = new BoardStore();
+  const state = { now: Date.now(), jobs: [], claude: [], events: [] } as unknown as BoardState;
+  store.receive('state', {
+    ...state, peerRatings: true, progressCards: true, language: 'ko', modelScores: [], projects: { '/repo': {} }, turnTokenBudget: 'unlimited',
+    roleSettings: {}, roleInfo: [], pulls: [], usage: { source: 'none', generatedAt: 1, providers: [] }, preset: 'best',
+  } as BoardState);
+  store.receive('limits', { codex: { windows: [] } });
+  const revisions = [store.getPresetRevision(), store.getBudgetRevision(), store.getProjectsRevision()];
+  store.receive('state', state);
+  const snapshot = store.getSnapshot();
+  for (const key of ['peerRatings', 'progressCards', 'language', 'modelScores', 'projects', 'turnTokenBudget', 'roleSettings', 'roleInfo', 'pulls', 'usage', 'preset'] as const) {
+    assert.equal(snapshot[key], undefined, key);
+  }
+  assert.deepEqual([snapshot.missions, snapshot.agents, snapshot.roles, snapshot.limits], [[], {}, {}, {}]);
+  assert.deepEqual([snapshot.connection, snapshot.revision], ['live', 2]);
+  assert.deepEqual([store.getPresetRevision(), store.getBudgetRevision(), store.getProjectsRevision()], revisions.map((revision) => revision + 1));
+});
+
+test('a job from an HTTP reply does not replace a newer one the stream delivered', () => {
+  const store = new BoardStore();
+  store.receive('state', { now: Date.now(), jobs: [{ id: 'a', seq: 5, phase: 'stream' }], claude: [], events: [] } as unknown as BoardState);
+  store.receiveReply({ id: 'a', seq: 4, phase: 'reply' } as BoardJob);
+  store.receiveReply({ id: 'a', seq: 5, phase: 'reply' } as BoardJob);
+  assert.equal(store.getSnapshot().jobs[0].phase, 'stream');
+  store.receiveReply({ id: 'a', seq: 6, phase: 'reply' } as BoardJob);
+  assert.equal(store.getSnapshot().jobs[0].phase, 'reply');
+  store.receiveReply({ id: 'b', seq: 1 } as BoardJob);
+  assert.equal(store.getSnapshot().jobs.length, 2);
+});
+
+test('key presses inside an input method composition are told apart, including Safari\'s closing one', () => {
+  assert.equal(isComposing({ isComposing: true, keyCode: 13 }), true);
+  assert.equal(isComposing({ isComposing: false, keyCode: 229 }), true);
+  assert.equal(isComposing({ isComposing: false, keyCode: 13 }), false);
+});
+
+test('Antigravity shows its Gemini family\'s windows when it reports no account-wide ones, as the app does', () => {
+  const window = (key: string, kind: string, group?: string) => ({ key, kind, group, usedRatio: 0.5, status: 'ok' }) as ProviderUsage['windows'][number];
+  const family = [window('c5', 'fiveHour', 'Claude'), window('gw', 'weekly', 'Gemini'), window('gm', 'monthly', 'Gemini'), window('g5', 'fiveHour', 'Gemini')];
+  assert.deepEqual(shownWindows({ agent: 'antigravity', windows: family }).map((shown) => shown.key), ['g5', 'gw']);
+  assert.deepEqual(shownWindows({ agent: 'antigravity', windows: [...family, window('a', 'weekly')] }).map((shown) => shown.key), ['a']);
+  assert.deepEqual(shownWindows({ agent: 'codex', windows: family }), []);
+});
+
+test('board dates follow Crew\'s language rather than the browser\'s', (t) => {
+  t.after(() => setLanguage('en'));
+  const date = new Date('2025-01-01T01:30:00Z');
+  const english = formatDate(longDay, date);
+  setLanguage('ko');
+  assert.equal(formatDate(longDay, date), new Intl.DateTimeFormat('ko', longDay).format(date));
+  assert.notEqual(formatDate(longDay, date), english);
+  setLanguage('en');
+  assert.equal(formatDate(longDay, date), english);
 });

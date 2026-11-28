@@ -124,6 +124,38 @@ test('the palette matches pages by name, not by their description', async ({ pag
   await expect(page.getByRole('option', { name: /^Activity/ })).toBeVisible();
 });
 
+test('the palette offers New Job only while live and Settings only once the roles have arrived', async ({ page, request }) => {
+  const search = page.getByRole('combobox', { name: 'Search work, projects and actions' });
+  await page.route('**/api/stream', (route) => route.abort());
+  await request.post('/__push', { data: { type: 'disconnect' } });
+  await expect(page.getByText('Lost the connection to Crew. Reconnecting…')).toBeVisible();
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await search.fill('new job');
+  await expect(page.getByRole('option', { name: /^New Job/ })).toHaveCount(0);
+  await page.unroute('**/api/stream');
+  await expect(page.getByRole('option', { name: /^New Job/ })).toBeVisible();
+  await request.post('/__push', { data: { type: 'state', data: { ...fixture(), roles: {} } } });
+  await search.fill('settings');
+  await expect(page.getByRole('option', { name: /^Settings/ })).toHaveCount(0);
+});
+
+test('Enter that ends an input method composition neither runs a palette item nor stores a typed setting', async ({ page, request }) => {
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  const search = page.getByRole('combobox', { name: 'Search work, projects and actions' });
+  await search.fill('activity');
+  await search.dispatchEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true });
+  await search.dispatchEvent('keydown', { key: 'Enter', keyCode: 229, bubbles: true });
+  await expect(search).toBeVisible();
+  await page.keyboard.press('Escape');
+  await openSettings(page);
+  const effort = page.getByLabel('Implementation Codex reasoning effort');
+  await effort.fill('high');
+  await effort.dispatchEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true });
+  await expect(effort).toBeFocused();
+  await effort.press('Enter');
+  await lastBody(request, '/api/roles').toEqual({ roles: { delegate: { codex: { effort: 'high' } } } });
+});
+
 test('sidebar and Settings labels update their fade when selection changes', async ({ page }) => {
   const check = async (item: Locator, other: Locator) => {
     const label = item.locator('.fade-line');
@@ -827,6 +859,12 @@ test('a role Claude holds offers Claude\'s models and efforts, and presets show 
   await pick(model, 'Opus');
   await pick(page.getByRole('combobox', { name: 'Implementation Claude reasoning effort' }), 'xhigh');
   await lastBody(request, '/api/roles').toEqual({ roles: { delegate: { claude: { model: 'opus', effort: 'xhigh' } } } });
+  // Turned off, Claude's settings go as another agent's do, and come back when it is turned on again.
+  const claude = page.getByRole('checkbox', { name: 'Implementation: Claude' });
+  await claude.uncheck();
+  await lastBody(request, '/api/roles').toEqual({ roles: { delegate: { agents: ['codex'] } } });
+  await claude.check();
+  await lastBody(request, '/api/roles').toEqual({ roles: { delegate: { claude: { model: 'opus', effort: 'xhigh' } } } });
   await settingsPage(page, 'Model Presets');
   await expect(page.getByText('Claude', { exact: true }).first()).toBeVisible();
 });
@@ -1081,6 +1119,16 @@ test('New Job picks among a role\'s worker holders, and a role only Claude holds
   await expect(page.getByRole('button', { name: 'Close details' })).toBeVisible();
   const calls = await (await request.get('/__requests')).json();
   expect(calls.find((call: { route: string }) => call.route === '/api/jobs').body).toMatchObject({ role: 'delegate', agent: 'antigravity' });
+});
+
+test('New Job leaves out a holder its role cannot use, which the daemon would refuse', async ({ page, request }) => {
+  const data = fixture();
+  data.roles = resolveConfig({ roles: { verify: { agents: ['codex', 'antigravity'] } } }).roles;
+  await request.post('/__push', { data: { type: 'state', data } });
+  await newJob(page);
+  await pick(page.getByRole('combobox', { name: 'Role', exact: true }), 'Review that runs the app');
+  await expect(page.getByRole('combobox', { name: 'Assigned to' })).toHaveCount(0);
+  await expect(page.getByRole('dialog').locator('.field', { hasText: 'Assigned to' })).toContainText('Codex');
 });
 
 test('each project has its own instructions page', async ({ page, request }) => {

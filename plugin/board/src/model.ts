@@ -1,5 +1,6 @@
 import type { AgentSettings, Holder, Role, RoleAssignment, RoleInfo, RoleSettings, WorkerAgent } from '../../bridge/config.ts';
 import type { BoardJob, BoardPull, BoardState, ClaudeSession, Mission } from './types.ts';
+import type { ProviderUsage } from '../../bridge/usage.ts';
 import { t, translated } from './i18n.ts';
 
 export const NAMES = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity' };
@@ -167,6 +168,16 @@ export function usageWindowName(kind: string) {
     kind.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ')
   );
 }
+/**
+ * The usage windows the board draws as bars: the account-wide ones, or for Antigravity, which reports only per model
+ * family, its own Gemini family's 5-hour and weekly windows, whichever of the two it has (`shownWindows` in the app).
+ */
+export function shownWindows(provider: Pick<ProviderUsage, 'agent' | 'windows'>) {
+  const account = provider.windows.filter((window) => window.group == null);
+  if (provider.agent !== 'antigravity' || account.length) return account;
+  const gemini = provider.windows.filter((window) => window.group === 'Gemini');
+  return ['fiveHour', 'weekly'].flatMap((kind) => gemini.find((window) => window.kind === kind) ?? []);
+}
 /** A Codex limit window in words, as the app's gauge has it: without its length when Codex does not say it. */
 export function limitWindowLabel(window: NonNullable<NonNullable<BoardState['limits']['codex']>['windows']>[number]) {
   const percent = Math.round(window.usedPercent);
@@ -318,6 +329,8 @@ export const isNewJobKey = (event: Pick<KeyboardEvent, 'key' | 'code' | 'isCompo
   !event.isComposing && (/^[a-z]$/i.test(event.key) ? event.key.toLowerCase() === 'n'
     // Not punctuation a Latin layout has there (BÉPO's apostrophe): only a character of another script, or a named key.
     : (event.key.length > 1 || event.key.charCodeAt(0) > 127) && event.code === 'KeyN');
+/** Whether a key press belongs to an input method's composition; Safari sends the press that ends one with keyCode 229 only. */
+export const isComposing = (event: Pick<KeyboardEvent, 'isComposing' | 'keyCode'>) => event.isComposing || event.keyCode === 229;
 /** The search shortcut as the platform's keyboard has it; the key handler takes either modifier. */
 export const searchShortcut = (platform: string) => /Mac|iPhone|iPad/.test(platform)
   ? { keys: '⌘K', title: t('Search (⌘K)'), aria: 'Meta+K /' }

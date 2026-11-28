@@ -342,7 +342,7 @@ struct MessageEditor: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             TextEditor(text: $text)
-                .font(Typeface.body).lineSpacing(2)
+                .font(Typeface.body).lineSpacing(Space.xxs)
                 .scrollContentBackground(.hidden)
                 .accessibilityLabel(title)
             if let prompt, text.isEmpty { FieldPrompt(text: prompt) }
@@ -403,7 +403,7 @@ struct AnswerView: View {
     private var composer: some View {
         ZStack(alignment: .topLeading) {
             TextEditor(text: draft)
-                .font(Typeface.body).lineSpacing(2)
+                .font(Typeface.body).lineSpacing(Space.xxs)
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: WorkspaceStyle.answerHeight.lowerBound, maxHeight: WorkspaceStyle.answerHeight.upperBound)
                 .accessibilityLabel("Your answer")

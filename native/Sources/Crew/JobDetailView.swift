@@ -302,7 +302,7 @@ private struct DetailHeader<Status: View>: View {
             // Two lines at most, so a long title cannot take over the panel. Selectable text drops its
             // truncation once selected, so the full title is copied from a menu instead.
             if let title {
-                Text(title).font(Typeface.title).lineSpacing(2).lineLimit(2).help(title)
+                Text(title).font(Typeface.title).lineSpacing(Space.xxs).lineLimit(2).help(title)
                     .accessibilityAddTraits(.isHeader).accessibilityFocused($titleFocused)
                     .contextMenu {
                         Button("Copy Title", systemImage: "doc.on.doc") {

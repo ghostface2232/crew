@@ -302,7 +302,7 @@ private struct DetailHeader<Status: View>: View {
             // Two lines at most, so a long title cannot take over the panel. Selectable text drops its
             // truncation once selected, so the full title is copied from a menu instead.
             if let title {
-                Text(title).font(Typeface.title).lineSpacing(2).lineLimit(2).help(title)
+                Text(title).font(Typeface.title).lineSpacing(Space.xxs).lineLimit(2).help(title)
                     .accessibilityAddTraits(.isHeader).accessibilityFocused($titleFocused)
                     .contextMenu {
                         Button("Copy Title", systemImage: "doc.on.doc") {
@@ -368,10 +368,13 @@ struct SessionDetailView: View {
     @ViewBuilder private func contents(_ session: ClaudeSession) -> some View {
         if session.state == "waiting" {
             VStack(alignment: .leading, spacing: Space.m) {
-                Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.callout).textSelection(.enabled)
+                Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.headline).lineSpacing(Space.xs).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
                 ClaudeAskView(session: session)
                 if OpenInAgentButton.availableURL(for: session) == nil { Text("Answer in \(agentName(session.agent)).").font(Typeface.callout).foregroundStyle(.secondary) }
-            }.card(fill: Palette.attention(Palette.warning))
+            }
+            // Untinted, unlike a job's waiting card: the session is answered in its own app, not from this panel.
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         Grid(alignment: .leading, horizontalSpacing: WorkspaceStyle.factColumnGap, verticalSpacing: WorkspaceStyle.factRowGap) {
             fact(String(localized: "Agent"), String(localized: "\(agentName(session.agent)) · Lead"))

@@ -48,7 +48,7 @@ export function ClaudeAsk({ session }: { session: ClaudeSession }) {
         {ask.questions.map((question, index) => (
           <div className="ask" key={index}>
             {/* The first question is the card's headline. */}
-            {index > 0 && <p className="selectable">{question.question}</p>}
+            {index > 0 && <p className="headline selectable">{question.question}</p>}
             {question.options.length > 0 && (
               <ol className="ask-options" aria-label={question.multiSelect ? t('Choices, any number') : t('Choices')}>
                 {question.options.map((option, n) => <li className="selectable" key={n}>{option}</li>)}

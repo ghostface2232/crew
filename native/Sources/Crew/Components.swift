@@ -342,7 +342,7 @@ struct MessageEditor: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             TextEditor(text: $text)
-                .font(Typeface.body).lineSpacing(2)
+                .font(Typeface.body).lineSpacing(Space.xxs)
                 .scrollContentBackground(.hidden)
                 .accessibilityLabel(title)
             if let prompt, text.isEmpty { FieldPrompt(text: prompt) }
@@ -376,7 +376,7 @@ struct AnswerView: View {
         if job.state == "waiting", let waiting = job.waiting {
             VStack(alignment: .leading, spacing: Space.xl) {
                 // The request itself is what the person acts on, so it leads the hierarchy.
-                Text(waiting.reason).font(Typeface.headline).lineSpacing(4).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                Text(waiting.reason).font(Typeface.headline).lineSpacing(Space.xs).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if waiting.type == "question" {
                     composer
@@ -403,7 +403,7 @@ struct AnswerView: View {
     private var composer: some View {
         ZStack(alignment: .topLeading) {
             TextEditor(text: draft)
-                .font(Typeface.body).lineSpacing(2)
+                .font(Typeface.body).lineSpacing(Space.xxs)
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: WorkspaceStyle.answerHeight.lowerBound, maxHeight: WorkspaceStyle.answerHeight.upperBound)
                 .accessibilityLabel("Your answer")
@@ -708,24 +708,26 @@ struct ClaudeAskView: View {
     var body: some View {
         if session.state == "waiting", let ask = session.ask {
             if let questions = ask.questions {
-                VStack(alignment: .leading, spacing: Space.m) {
+                // Each further question starts apart from the choices above it, so it reads as a question of its own.
+                VStack(alignment: .leading, spacing: Space.xxl) {
                     ForEach(Array(questions.enumerated()), id: \.offset) { index, question in
-                        // The first question is the headline above.
-                        if index > 0 { Text(question.question).font(Typeface.callout).textSelection(.enabled) }
-                        // Two choices sit side by side and more fill rows of two, as on the board; a lone one keeps the full width.
-                        let columns = question.options.count > 1 ? 2 : 1
-                        Grid(horizontalSpacing: Space.m, verticalSpacing: Space.m) {
-                            ForEach(Array(stride(from: 0, to: question.options.count, by: columns)), id: \.self) { start in
-                                GridRow {
-                                    ForEach(start..<min(start + columns, question.options.count), id: \.self) { n in
-                                        Text(question.options[n]).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled)
-                                            // About a pill's height, as on the board, rather than a thin row.
-                                            .padding(.horizontal, Space.l).padding(.vertical, Space.ml)
-                                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                                            .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius).strokeBorder(WorkspaceStyle.hairline))
-                                    }
+                        VStack(alignment: .leading, spacing: Space.m) {
+                            // The first question is the headline above, so the others take its style.
+                            if index > 0 {
+                                Text(question.question).font(Typeface.headline).lineSpacing(Space.xs).textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            // A question's choices as one gray group, rows parted by hairlines: they are read here and
+                            // answered in the agent's app, so they are not drawn as buttons.
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(Array(question.options.enumerated()), id: \.offset) { n, option in
+                                    if n > 0 { WorkspaceStyle.hairline.frame(height: 1).padding(.leading, Space.l) }
+                                    Text(option).font(Typeface.callout).textSelection(.enabled)
+                                        .padding(.horizontal, Space.l).padding(.vertical, Space.ml)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                             }
+                            .background(WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
                         }
                     }
                 }

@@ -834,65 +834,58 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                   {ratingsStatus && <p className={styles.footnote} role="alert">{ratingsStatus}</p>}
                 </section>
               )}
-              {current === 'about' && state.language !== undefined && (
+              {/* Language, the progress cards and Open at Login as one group, each note under its own name, as in the app. */}
+              {current === 'about' && (state.language !== undefined || state.progressCards !== undefined || openAtLogin !== null) && (
                 <section className={styles.group}>
                   <div className={styles.rows}>
-                    <label className={styles.row}>
-                      <span>{t('Language')}</span>
-                      {/* Each language is named in itself, so it can be found whatever the page reads in. */}
-                      <Select<Language | ''>
-                        label={t('Language')}
-                        value={state.language ?? ''}
-                        options={[['', t('Match System')], ['en', 'English'], ['ko', '한국어']]}
-                        onChange={(next) => void chooseLanguage(next || null)}
-                      />
-                    </label>
+                    {state.language !== undefined && (
+                      <label className={styles.row}>
+                        <span>{t('Language')}</span>
+                        {/* Each language is named in itself, so it can be found whatever the page reads in. */}
+                        <Select<Language | ''>
+                          label={t('Language')}
+                          value={state.language ?? ''}
+                          options={[['', t('Match System')], ['en', 'English'], ['ko', '한국어']]}
+                          onChange={(next) => void chooseLanguage(next || null)}
+                        />
+                      </label>
+                    )}
+                    {state.progressCards !== undefined && (
+                      <label className={`${styles.row} ${styles.described}`}>
+                        <span>
+                          <span id="progress-cards">{t('Progress cards in chat')}</span>
+                          <small id="progress-cards-note">{t('Shows each mission step as a card in the Claude and Codex desktop apps.')}</small>
+                        </span>
+                        <input
+                          type="checkbox"
+                          className="switch"
+                          aria-labelledby="progress-cards"
+                          aria-describedby="progress-cards-note"
+                          checked={state.progressCards}
+                          onChange={(event) => void setProgressCards(event.target.checked)}
+                        />
+                      </label>
+                    )}
+                    {openAtLogin !== null && (
+                      <label className={`${styles.row} ${styles.described}`}>
+                        <span>
+                          <span id="open-at-login">{t('Open at Login')}</span>
+                          <small id="open-at-login-note">{t('Crew starts in the tray when you sign in, so jobs stopped by a usage limit can resume with no session open.')}</small>
+                        </span>
+                        <input
+                          type="checkbox"
+                          className="switch"
+                          aria-labelledby="open-at-login"
+                          aria-describedby="open-at-login-note"
+                          checked={openAtLogin}
+                          disabled={loginSaving}
+                          onChange={(event) => void changeOpenAtLogin(event.target.checked)}
+                        />
+                      </label>
+                    )}
                   </div>
-                  {/* The board switches at once; only the macOS app needs reopening, and it says so itself. */}
-                  {languageStatus && <p className={styles.footnote} role="alert">{languageStatus}</p>}
-                </section>
-              )}
-              {current === 'about' && state.progressCards !== undefined && (
-                <section className={styles.group}>
-                  <div className={styles.rows}>
-                    <label className={`${styles.row} ${styles.described}`}>
-                      <span>
-                        <span id="progress-cards">{t('Progress cards in chat')}</span>
-                        <small id="progress-cards-note">{t('Shows each mission step as a card in the Claude and Codex desktop apps.')}</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        className="switch"
-                        aria-labelledby="progress-cards"
-                        aria-describedby="progress-cards-note"
-                        checked={state.progressCards}
-                        onChange={(event) => void setProgressCards(event.target.checked)}
-                      />
-                    </label>
-                  </div>
-                  {cardsStatus && <p className={styles.footnote} role="alert">{cardsStatus}</p>}
-                </section>
-              )}
-              {current === 'about' && openAtLogin !== null && (
-                <section className={styles.group}>
-                  <div className={styles.rows}>
-                    <label className={`${styles.row} ${styles.described}`}>
-                      <span>
-                        <span id="open-at-login">{t('Open at Login')}</span>
-                        <small id="open-at-login-note">{t('Crew starts in the tray when you sign in, so jobs stopped by a usage limit can resume with no session open.')}</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        className="switch"
-                        aria-labelledby="open-at-login"
-                        aria-describedby="open-at-login-note"
-                        checked={openAtLogin}
-                        disabled={loginSaving}
-                        onChange={(event) => void changeOpenAtLogin(event.target.checked)}
-                      />
-                    </label>
-                  </div>
-                  {loginStatus && <p className={styles.footnote} role="alert">{loginStatus}</p>}
+                  {/* The board switches language at once; only the macOS app needs reopening, and it says so itself. */}
+                  {[languageStatus, cardsStatus, loginStatus].filter(Boolean).map((status) => <p key={status} className={styles.footnote} role="alert">{status}</p>)}
                 </section>
               )}
               {project !== null && pageScope !== null && state.projects !== undefined && (

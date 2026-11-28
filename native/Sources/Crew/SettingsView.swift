@@ -129,9 +129,7 @@ struct CrewSettingsView: View {
         } else if pane == .about {
             // The app's own page: its updates, then the settings that are the app's rather than the agents'.
             about
-            if store.state.hasLanguageSetting == true { language }
-            progressCards
-            openAtLogin
+            general
         } else if pane == .presets {
             presets
         } else if pane == .models {
@@ -258,60 +256,77 @@ struct CrewSettingsView: View {
                 LabeledContent("Release notes") { Link(String(localized: "What’s new in \(latest)"), destination: page) }
             }
         } footer: {
-            VStack(alignment: .leading, spacing: Space.ml) {
-                if let error = updater.error ?? updater.installError { ErrorLabel(message: error).settingsFootnote() }
-                // The note and the action share one line, so the action is not left between the list and a note.
-                // Said only where it explains what the user sees: no updates at all, or one waiting on jobs. With neither a
-                // note nor an action, the line is left out rather than leaving its spacing under the list.
-                let note = updater.phase == .unsupported ? String(localized: "This copy of Crew is not running from an app bundle, so it cannot update itself.")
-                    : updater.phase == .ready ? String(localized: "Updates install after running jobs finish.") : nil
-                if note != nil || [.ready, .installing, .available].contains(updater.phase) {
-                    HStack(spacing: Space.l) {
-                        if let note { Text(note).settingsFootnote().frame(maxWidth: .infinity, alignment: .leading) } else { Spacer(minLength: 0) }
-                        updateAction
-                    }
-                }
-            }
-        }
-    }
-    /// The progress card in a lead's chat, on hosts that draw one. A daemon that predates the setting sends none.
-    @ViewBuilder private var progressCards: some View {
-        if let on = store.state.progressCards {
-            Section {
-                Toggle(isOn: Binding(get: { on }, set: { enabled in Task { await store.setProgressCards(enabled) } })) {
-                    Text("Progress cards in chat")
-                    Text("Shows each mission step as a card in the Claude and Codex desktop apps.")
-                }
-            } footer: {
-                if let error = store.actions[CrewStore.progressCardsKey]?.error { ErrorLabel(message: error).settingsFootnote() }
-            }
-        }
-    }
-    /// Open at Login. macOS holds the state, so the switch shows what it reads back after each change.
-    @ViewBuilder private var openAtLogin: some View {
-        if LoginItem.supported() {
-            Section {
-                Toggle("Open at Login", isOn: Binding(get: { login == .on }, set: { open in
-                    do { try LoginItem.set(open); loginError = nil } catch { loginError = error.localizedDescription }
-                    login = LoginItem.state
-                }))
-            } footer: {
+            // The note and the action share one line, so the action is not left between the list and a note.
+            // Said only where it explains what the user sees: no updates at all, or one waiting on jobs. With nothing to
+            // say, the footer is left out, as its empty space would part the card from the settings under it.
+            let error = updater.error ?? updater.installError
+            let note = updater.phase == .unsupported ? String(localized: "This copy of Crew is not running from an app bundle, so it cannot update itself.")
+                : updater.phase == .ready ? String(localized: "Updates install after running jobs finish.") : nil
+            let action = note != nil || [.ready, .installing, .available].contains(updater.phase)
+            if error != nil || action {
                 VStack(alignment: .leading, spacing: Space.ml) {
-                    if let loginError { ErrorLabel(message: loginError).settingsFootnote() }
-                    if login == .needsApproval {
+                    if let error { ErrorLabel(message: error).settingsFootnote() }
+                    if action {
                         HStack(spacing: Space.l) {
-                            Text("Crew is turned off in Login Items. Turn it on there to open at login.").settingsFootnote()
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Button("Open Login Items") { LoginItem.openSystemSettings() }.pillButton()
+                            if let note { Text(note).settingsFootnote().frame(maxWidth: .infinity, alignment: .leading) } else { Spacer(minLength: 0) }
+                            updateAction
                         }
-                    } else {
-                        Text("Crew starts in the menu bar when you log in, so jobs stopped by a usage limit can resume with no session open.")
-                            .settingsFootnote()
                     }
                 }
             }
-            .onAppear(perform: readLogin)
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in readLogin() }
+        }
+    }
+    /// Language, the progress cards and Open at Login as one group, each note under its own name; only a failure, or
+    /// Open at Login waiting on approval, says more under the group. A daemon that predates a setting sends none.
+    @ViewBuilder private var general: some View {
+        let language = store.state.hasLanguageSetting == true, cards = store.state.progressCards, login = LoginItem.supported()
+        if language || cards != nil || login {
+            Section {
+                // Stored as it is picked, as in the board. Each language is named in itself, so it can be found whatever the app reads in.
+                if language {
+                    Picker(selection: Binding(get: { store.state.language ?? "" }, set: { next in Task { await store.setLanguage(next.isEmpty ? nil : next) } })) {
+                        Text("Match System").tag("")
+                        Text(verbatim: "English").tag("en")
+                        Text(verbatim: "한국어").tag("ko")
+                    } label: {
+                        Text("Language")
+                        Text("Applies the next time the app opens.")
+                    }
+                }
+                // The progress card in a lead's chat, on hosts that draw one.
+                if let cards {
+                    Toggle(isOn: Binding(get: { cards }, set: { enabled in Task { await store.setProgressCards(enabled) } })) {
+                        Text("Progress cards in chat")
+                        Text("Shows each mission step as a card in the Claude and Codex desktop apps.")
+                    }
+                }
+                // macOS holds Open at Login's state, so the switch shows what it reads back after each change.
+                if login {
+                    Toggle(isOn: Binding(get: { self.login == .on }, set: { open in
+                        do { try LoginItem.set(open); loginError = nil } catch { loginError = error.localizedDescription }
+                        self.login = LoginItem.state
+                    })) {
+                        Text("Open at Login")
+                        Text("Crew starts in the menu bar when you log in, so jobs stopped by a usage limit can resume with no session open.")
+                    }
+                    .onAppear(perform: readLogin)
+                    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in readLogin() }
+                }
+            } footer: {
+                let errors = [store.actions[CrewStore.languageKey]?.error, store.actions[CrewStore.progressCardsKey]?.error, loginError].compactMap { $0 }
+                if !errors.isEmpty || (login && self.login == .needsApproval) {
+                    VStack(alignment: .leading, spacing: Space.ml) {
+                        ForEach(errors, id: \.self) { ErrorLabel(message: $0).settingsFootnote() }
+                        if login && self.login == .needsApproval {
+                            HStack(spacing: Space.l) {
+                                Text("Crew is turned off in Login Items. Turn it on there to open at login.").settingsFootnote()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Button("Open Login Items") { LoginItem.openSystemSettings() }.pillButton()
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     /// A fresh reading replaces an earlier failure, which may have been settled in System Settings since.
@@ -364,21 +379,6 @@ struct CrewSettingsView: View {
             } footer: {
                 if let error = store.actions[CrewStore.peerRatingsKey]?.error { ErrorLabel(message: error).settingsFootnote() }
             }
-        }
-    }
-    /// Stored as it is picked, as in the board. Each language is named in itself, so it can be found whatever the app reads in.
-    @ViewBuilder private var language: some View {
-        Section {
-            Picker("Language", selection: Binding(get: { store.state.language ?? "" }, set: { next in Task { await store.setLanguage(next.isEmpty ? nil : next) } })) {
-                Text("Match System").tag("")
-                Text(verbatim: "English").tag("en")
-                Text(verbatim: "한국어").tag("ko")
-            }
-        } footer: {
-            VStack(alignment: .leading, spacing: Space.s) {
-                if let error = store.actions[CrewStore.languageKey]?.error { ErrorLabel(message: error) }
-                Text("Applies the next time the app opens.")
-            }.settingsFootnote()
         }
     }
     /// What each of a project's switches lets Crew do there without asking, as in the board.

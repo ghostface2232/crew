@@ -182,11 +182,13 @@ test('board dates preserve invalid dates and follow changes to the local time zo
     [timeOfDay, { hour: 'numeric', minute: '2-digit' }],
     [shortDateTime, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }],
   ] as const;
+  // Dates follow Crew's language (English here) in the system's region, not the system's own language.
+  const locales = [...navigator.languages.filter((tag) => tag.toLowerCase().split('-')[0] === 'en'), 'en'];
   for (const zone of ['UTC', 'America/Los_Angeles']) {
     process.env.TZ = zone;
     for (const [formatter, options] of formatters) {
       assert.equal(formatDate(formatter, invalid), invalid.toLocaleString());
-      assert.equal(formatDate(formatter, date), date.toLocaleString([], options), zone);
+      assert.equal(formatDate(formatter, date), date.toLocaleString(locales, options), zone);
     }
   }
 });

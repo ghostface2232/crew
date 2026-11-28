@@ -38,7 +38,7 @@ export interface PaletteActions {
 const PAGE_ENTRIES = translated((): [Page, string, FluentIcon, string][] => [
   ['overview', t('Overview'), GridRegular, t('Where your work stands')],
   ['needs', t('Needs You'), AlertRegular, t('Approvals and questions waiting on you')],
-  ['activity', t('Activity'), FlashRegular, t('What the crew did, as it happened')],
+  ['activity', t('Activity'), FlashRegular, t('What the crew did')],
   ['history', t('History'), ClockRegular, t('Finished missions and jobs')],
 ]);
 /** Groups are named in English for the code that checks them, and shown in the reader's language. */

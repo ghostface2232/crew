@@ -118,7 +118,7 @@ test('the palette offers to turn notifications on when browser permission is mis
 test('the palette matches pages by name, not by their description', async ({ page }) => {
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   const search = page.getByRole('combobox', { name: 'Search work, projects and actions' });
-  await search.fill('as it happened');
+  await search.fill('crew did');
   await expect(page.getByRole('option')).toHaveCount(0);
   await search.fill('activity');
   await expect(page.getByRole('option', { name: /^Activity/ })).toBeVisible();

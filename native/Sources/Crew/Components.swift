@@ -714,7 +714,7 @@ struct ClaudeAskView: View {
                         VStack(alignment: .leading, spacing: Space.m) {
                             // The first question is the headline above, so the others take its style.
                             if index > 0 {
-                                Text(question.question).font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
+                                Text(question.question).font(Typeface.headline).lineSpacing(Space.xs).textSelection(.enabled)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             // A question's choices as one gray group, rows parted by hairlines: they are read here and

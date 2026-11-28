@@ -368,7 +368,7 @@ struct SessionDetailView: View {
     @ViewBuilder private func contents(_ session: ClaudeSession) -> some View {
         if session.state == "waiting" {
             VStack(alignment: .leading, spacing: Space.m) {
-                Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
+                Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.headline).lineSpacing(Space.xs).textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                 ClaudeAskView(session: session)
                 if OpenInAgentButton.availableURL(for: session) == nil { Text("Answer in \(agentName(session.agent)).").font(Typeface.callout).foregroundStyle(.secondary) }

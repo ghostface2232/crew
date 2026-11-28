@@ -84,7 +84,15 @@ final class CrewStore {
     var selectedDecisions: String?
     var detailOpen: Bool { selectedJob != nil || selectedSession != nil || selectedDecisions != nil }
     func closeDetail() { selectedJob = nil; selectedSession = nil; selectedDecisions = nil }
-    func openSession(_ id: String) { closeDetail(); selectedSession = id }
+    func openSession(_ id: String, navigate: Bool = false) {
+        if navigate {
+            search = ""
+            project = state.claude.first(where: { $0.id == id })?.projectPath ?? ""
+            selection = "overview"
+        }
+        closeDetail()
+        selectedSession = id
+    }
     /// A row clicked again closes the panel it opened.
     func toggleJob(_ id: String) { if selectedJob == id { closeDetail() } else { openJob(id) } }
     func toggleSession(_ id: String) { if selectedSession == id { closeDetail() } else { openSession(id) } }
@@ -335,7 +343,8 @@ final class CrewStore {
         guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         await run(key) {
             let version = jobVersion(job.id)
-            let updated: Job = try await api.post("/api/jobs/\(job.id)/reply", Reply(message: draft))
+            // The daemon titles a turn by its first line.
+            let updated: Job = try await api.post("/api/jobs/\(job.id)/reply", Reply(message: draft.trimmingCharacters(in: .whitespacesAndNewlines)))
             applyJob(updated, since: version)
             if drafts[key] == draft { drafts[key] = "" }
         }
@@ -800,6 +809,13 @@ final class SettingsModel {
         let table = Self.normalized(table)
         guard !savingRoles, !rolesDirty, table != Self.normalized(savedRoleSettings) else { return }
         roleSettings = table; savedRoleSettings = table
+    }
+    /// Takes a preset stored elsewhere as the stored one, as `adopt(roleSettings:)` does for the role table. A daemon
+    /// without presets sends none, which leaves the page as it is.
+    func adopt(preset stored: PresetName?, presets table: [String: Preset]?) {
+        guard let table, !savingPreset, preset == savedPreset else { return }
+        presets = table
+        preset = stored; savedPreset = stored
     }
     /// True when the table was stored.
     @discardableResult func saveRoles() async -> Bool {

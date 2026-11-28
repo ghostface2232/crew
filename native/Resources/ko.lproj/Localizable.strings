@@ -109,6 +109,7 @@
 "Show Job" = "작업 보기";
 "limit reached" = "한도 도달";
 "Resets %@" = "%@ 후 초기화";
+"Reset due" = "곧 초기화";
 "%@: %@, %@, %@" = "%1$@: %2$@, %3$@, %4$@";
 "Usage unknown" = "사용량 알 수 없음";
 "%@ of limit" = "한도의 %@";
@@ -438,12 +439,12 @@
 "Partial" = "일부 완료";
 "Blocked" = "진행 불가";
 "Frontier" = "최상위";
-"frontier" = "프런티어";
-"light" = "라이트";
+"frontier" = "최상위";
+"light" = "경량";
 "standard" = "표준";
 "fast" = "빠름";
 "low" = "낮음";
-"medium" = "보통";
+"medium" = "중간";
 "high" = "높음";
 "xhigh" = "매우 높음";
 "minimal" = "최소";

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Synchronization
 import Testing
@@ -33,8 +34,26 @@ private final class AuthenticationProtocol: URLProtocol, @unchecked Sendable {
     private func write(_ token: String, home: URL) throws {
         try (token + "\n").write(to: home.appendingPathComponent("token"), atomically: true, encoding: .utf8)
     }
-    private func api(home: URL, port: Int? = 0, handler: @escaping AuthenticationProtocol.Handler) -> CrewAPI {
-        AuthenticationProtocol.handler.withLock { $0 = handler }
+    /// Health as a current daemon answers it: the challenge signed with the token in `home`.
+    private static func signedHealth(home: URL, pid: Int = 4242) -> AuthenticationProtocol.Handler {
+        { request in
+            let challenge = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "challenge" }?.value ?? ""
+            let token = try String(contentsOf: home.appendingPathComponent("token"), encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+            let code = HMAC<SHA256>.authenticationCode(for: Data("crew-health:\(challenge)".utf8), using: SymmetricKey(data: Data(token.utf8)))
+            let proof = code.map { String(format: "%02x", $0) }.joined()
+            return (200, Data(#"{"name":"crew","pid":\#(pid),"proof":"\#(proof)"}"#.utf8))
+        }
+    }
+    private func api(home: URL, port: Int? = 0, health: AuthenticationProtocol.Handler? = nil, handler: @escaping AuthenticationProtocol.Handler) -> CrewAPI {
+        let health = health ?? Self.signedHealth(home: home)
+        AuthenticationProtocol.handler.withLock {
+            $0 = { request in
+                guard request.url?.path == "/api/health" else { return try handler(request) }
+                // Health proves the daemon before the token goes out, so it never carries it.
+                #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+                return try health(request)
+            }
+        }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [AuthenticationProtocol.self]
         return CrewAPI(port: port, configuration: config, environment: ["CREW_HOME": home.path])
@@ -298,6 +317,77 @@ private final class AuthenticationProtocol: URLProtocol, @unchecked Sendable {
             try invalid.write(to: record, atomically: true, encoding: .utf8)
             #expect(fallback.baseURL.port == 47615)
         }
+    }
+
+    @Test func theTokenGoesOnlyToADaemonThatSignsTheChallenge() async throws {
+        let home = try home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try write(firstToken, home: home)
+        let challenges = Mutex<[String]>([])
+        let forged: AuthenticationProtocol.Handler = { request in
+            let challenge = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "challenge" }?.value ?? ""
+            challenges.withLock { $0.append(challenge) }
+            return (200, Data(#"{"name":"crew","pid":4242,"proof":"\#(String(repeating: "0", count: 64))"}"#.utf8))
+        }
+        let calls = Mutex(0)
+        let api = api(home: home, health: forged) { _ in calls.withLock { $0 += 1 }; return (200, Data("{}".utf8)) }
+        do {
+            let _: EmptyReply = try await api.request("/api/state")
+            Issue.record("A listener that could not sign the challenge was sent the token")
+        } catch { #expect((error as? URLError)?.code == .cannotConnectToHost) }
+        #expect(calls.withLock { $0 } == 0)
+        let sent = challenges.withLock { $0 }
+        #expect(!sent.isEmpty && Set(sent).count == sent.count)
+        #expect(sent.allSatisfy { $0.count == 64 && $0.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) } })
+    }
+    @Test func aProvenDaemonIsCheckedOnceUntilAConnectionFails() async throws {
+        let home = try home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try write(firstToken, home: home)
+        let checks = Mutex(0), fail = Mutex(false)
+        let signed = Self.signedHealth(home: home)
+        let api = api(home: home, health: { request in checks.withLock { $0 += 1 }; return try signed(request) }) { _ in
+            if fail.withLock({ $0 }) { throw URLError(.networkConnectionLost) }
+            return (200, Data("{}".utf8))
+        }
+        let _: EmptyReply = try await api.request("/api/state")
+        let _: EmptyReply = try await api.request("/api/state")
+        #expect(checks.withLock { $0 } == 1)
+        fail.withLock { $0 = true }
+        let _: EmptyReply? = try? await api.request("/api/state")
+        fail.withLock { $0 = false }
+        let _: EmptyReply = try await api.request("/api/state")
+        #expect(checks.withLock { $0 } == 2)
+    }
+    @Test func aDaemonWithoutProofsIsTrustedOnlyAsTheRecordedLiveProcess() async throws {
+        let home = try home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try write(firstToken, home: home)
+        let record = home.appendingPathComponent("daemon.json")
+        let own = Int(ProcessInfo.processInfo.processIdentifier)
+        let reported = Mutex(own)
+        let legacy: AuthenticationProtocol.Handler = { _ in (200, Data(#"{"name":"crew","pid":\#(reported.withLock { $0 })}"#.utf8)) }
+        let calls = Mutex(0)
+        let api = api(home: home, health: legacy) { request in
+            #expect(request.value(forHTTPHeaderField: "Authorization") != nil)
+            calls.withLock { $0 += 1 }
+            return (200, Data("{}".utf8))
+        }
+        // No record, a record for another port, and a record naming another process are all refused.
+        for contents in [nil, #"{"port":42615,"pid":\#(own)}"#, #"{"port":0,"pid":\#(own + 1)}"#] {
+            if let contents { try contents.write(to: record, atomically: true, encoding: .utf8) }
+            let _: EmptyReply? = try? await api.request("/api/state")
+        }
+        #expect(calls.withLock { $0 } == 0)
+        try #"{"port":0,"pid":\#(own)}"#.write(to: record, atomically: true, encoding: .utf8)
+        let _: EmptyReply = try await api.request("/api/state")
+        #expect(calls.withLock { $0 } == 1)
+        // A recorded process that has exited is not taken on its word either.
+        let gone = Int32.max
+        reported.withLock { $0 = Int(gone) }
+        try #"{"port":0,"pid":\#(gone)}"#.write(to: record, atomically: true, encoding: .utf8)
+        let _: EmptyReply? = try? await api.request("/api/state")
+        #expect(calls.withLock { $0 } == 1)
     }
 
     @Test func crewHomeControlsTokenLocationAndDefaultsToUserHome() throws {

@@ -65,7 +65,7 @@ struct CrewApp: App {
         }
         // The menu bar reads live state in its own views so the App body is not re-evaluated on every update.
         MenuBarExtra {
-            MenuBarMenu(store: delegate.store, show: { delegate.show(job: $0) }, openSettings: delegate.openSettings)
+            MenuBarMenu(store: delegate.store, show: { delegate.show(job: $0) }, showSession: { delegate.show(session: $0) }, openSettings: delegate.openSettings)
                 .environment(delegate.updater)
         } label: {
             MenuBarLabel(store: delegate.store) { delegate.openMainWindow = $0 }
@@ -76,10 +76,12 @@ struct CrewApp: App {
 private struct MenuBarMenu: View {
     let store: CrewStore
     let show: (String?) -> Void
+    let showSession: (String) -> Void
     let openSettings: () -> Void
     @Environment(AppUpdater.self) private var updater
     var body: some View {
-        let waiting = store.state.waitingJobs
+        let waiting = Array(store.state.waitingJobs.prefix(5))
+        let sessions = Array(store.state.waitingSessions.prefix(5 - waiting.count))
         let pending = store.state.pendingCount
         Text(store.connected ? String(localized: "Crew is connected") : String(localized: "Crew is reconnecting"))
         Button("Open Crew") { show(nil) }
@@ -90,9 +92,14 @@ private struct MenuBarMenu: View {
                 store.selection = "needs"
             }
         }
-        Divider()
-        ForEach(Array(waiting.prefix(5))) { job in
-            Button("\(agentName(job.agent)): \(job.title)") { show(job.id) }
+        if !waiting.isEmpty || !sessions.isEmpty {
+            Divider()
+            ForEach(waiting) { job in
+                Button("\(agentName(job.agent)): \(job.title)") { show(job.id) }
+            }
+            ForEach(sessions) { session in
+                Button("\(agentName(session.agent)): \(session.title)") { showSession(session.id) }
+            }
         }
         Divider()
         SettingsCommand(store: store, open: openSettings)
@@ -298,6 +305,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         mainWindow?.deminiaturize(nil)
         mainWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+    func show(session: String) {
+        show(job: nil)
+        store.openSession(session, navigate: true)
     }
     func openSettings() {
         if let window = settingsWindow { window.deminiaturize(nil); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
@@ -525,6 +536,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             try? await Task.sleep(for: .seconds(5))
         }
         guard current(), let archive = updater.archive, let version = updater.latest, let bundleUse = CrewEntry.bundleUse else { return abandon() }
+        // With no daemon of this bundle running, the loop above never settled Settings; unsaved edits would hold up the
+        // quit below and so call the update off.
+        guard leaveSettings(then: { [weak self] in self?.dismissSettings() }) else {
+            updater.failed()
+            return abandon()
+        }
+        dismissSettings()
         // The hand-over below awaits and then quits without checking again, so it can no longer be called off. With no
         // daemon of this bundle to stop, the loop above never said so.
         updater.stoppingDaemon()
@@ -623,7 +641,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         }
         for session in store.state.waitingSessions {
             live.insert(session.notificationKey)
-            notify(key: session.notificationKey, title: String(localized: "\(agentName(session.agent)) needs your input"), body: session.waitingFor ?? session.title)
+            notify(key: session.notificationKey, title: String(localized: "\(agentName(session.agent)) needs your input"), body: session.waitingFor ?? session.title, session: session.id)
         }
         let expired = delivered.subtracting(live)
         // These are calls into the notification service; most updates expire nothing.
@@ -634,7 +652,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         }
         noticed.formIntersection(live)
     }
-    private func notify(key: String, title: String, body: String, job: String? = nil, request: String? = nil, persistent: Bool = false) {
+    private func notify(key: String, title: String, body: String, job: String? = nil, session: String? = nil, request: String? = nil, persistent: Bool = false) {
         guard store.notificationsAllowed else { return }
         guard !noticed.contains(key) else { return }
         noticed.insert(key)
@@ -642,21 +660,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         let content = UNMutableNotificationContent()
         content.title = title; content.body = body
         if let job { content.userInfo["job"] = job }
+        if let session { content.userInfo["session"] = session }
         if let request { content.userInfo["request"] = request; content.categoryIdentifier = "approval" }
         if !persistent { delivered.insert(key) }
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: key, content: content, trigger: nil))
     }
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let jobID = response.notification.request.content.userInfo["job"] as? String
+        let sessionID = response.notification.request.content.userInfo["session"] as? String
         let requestID = response.notification.request.content.userInfo["request"] as? String
         let action = response.actionIdentifier
-        await handleNotification(jobID: jobID, requestID: requestID, action: action)
+        await handleNotification(jobID: jobID, sessionID: sessionID, requestID: requestID, action: action)
     }
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         // The main board suppresses notifications at creation; Settings can remain frontmost.
         [.banner, .list]
     }
-    private func handleNotification(jobID: String?, requestID: String?, action: String) async {
+    private func handleNotification(jobID: String?, sessionID: String?, requestID: String?, action: String) async {
+            if let sessionID { show(session: sessionID); return }
             guard let jobID, let requestID, action == "approve" || action == "deny" else { show(job: jobID); return }
             do {
                 let current: Job = try await store.api.request("/api/jobs/\(jobID)")

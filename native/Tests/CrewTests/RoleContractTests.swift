@@ -242,7 +242,7 @@ import Testing
         let assignment = RoleAssignment(agents: RoleAssignment.holderOrder)
         for info in state.availableRoles {
             let dispatch = JobDispatch(assignment: assignment, workers: state.agents, info: info)
-            let expected = info.kind == "polish" ? ["antigravity", "codex"] : ["codex", "antigravity"]
+            let expected = (info.kind == "polish" ? ["antigravity", "codex"] : ["codex", "antigravity"]).filter { info.unable?.contains($0) != true }
             #expect(dispatch.holders == expected)
             #expect(dispatch.agent == expected.first && dispatch.submissionAgent == expected.first)
         }
@@ -265,9 +265,12 @@ import Testing
         #expect(dispatch.agent == nil && dispatch.requiresClaude)
         dispatch.workers["codex"]?.enabled = true
         dispatch.info?.unable = ["codex"]
-        #expect(dispatch.agent == "antigravity")
+        // An unable worker cannot be picked either: the daemon refuses it.
+        dispatch.picked = "codex"
+        #expect(dispatch.holders == ["antigravity"] && dispatch.agent == "antigravity" && dispatch.canSend)
+        dispatch.picked = nil
         dispatch.workers["antigravity"] = nil
-        #expect(dispatch.holders == ["codex"] && dispatch.agent == nil && dispatch.requiresClaude)
+        #expect(dispatch.holders.isEmpty && dispatch.agent == nil && dispatch.requiresClaude && !dispatch.canSend)
     }
     @Test @MainActor func unableHoldersCanOnlyBeUncheckedAndKeepTheLastHolder() throws {
         let state = try fixture("state-extended")

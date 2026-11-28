@@ -583,7 +583,8 @@ struct AgentUsageView: View {
                                 if status == .stale || status == .unknown || (status == .exhausted && window.status != .exhausted) { Text(status == .exhausted ? String(localized: "limit reached") : localizedCrewLabel(status.rawValue)) }
                                 Spacer(minLength: 0)
                                 if let reset = window.resetTime {
-                                    Text("Resets \(Date(timeIntervalSince1970: reset / 1000), style: .relative)")
+                                    // A relative date past its moment counts up again, which would read as a future reset.
+                                    if reset > store.now { Text("Resets \(Date(timeIntervalSince1970: reset / 1000), style: .relative)") } else { Text("Reset due") }
                                 }
                             }
                             GeometryReader { geometry in

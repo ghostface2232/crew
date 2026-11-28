@@ -149,6 +149,14 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(String(data: events[0].data, encoding: .utf8) == "{\"message\":\n\"한글🙂\"}")
         #expect(events[1].name == "roles")
     }
+    @Test func acceptsAStateSnapshotLargerThanSixteenMegabytes() throws {
+        var parser = SSEParser()
+        let payload = Data(repeating: 65, count: 20 * 1024 * 1024)
+        var events = try parser.feed(Data("event: state\ndata: ".utf8))
+        for start in stride(from: 0, to: payload.count, by: 1 << 20) { events += try parser.feed(payload.subdata(in: start..<min(payload.count, start + (1 << 20)))) }
+        events += try parser.feed(Data("\n\n".utf8))
+        #expect(events.count == 1 && events[0].data.count == payload.count)
+    }
     @Test func processesLargeSnapshotInChunks() throws {
         var parser = SSEParser()
         let payload = String(repeating: "한글 state ", count: 100_000)
@@ -162,7 +170,7 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
     }
     @Test func rejectsOversizedOrInvalidEvents() throws {
         var parser = SSEParser()
-        #expect(throws: CrewFailure.self) { try parser.feed(Data(repeating: 65, count: 16 * 1024 * 1024)) }
+        #expect(throws: CrewFailure.self) { try parser.feed(Data(repeating: 65, count: SSEParser.limit)) }
         var invalid = SSEParser()
         #expect(throws: CrewFailure.self) { try invalid.feed(Data([0xff, 10])) }
     }
@@ -713,6 +721,20 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         settings.adopt(roleSettings: later)
         #expect(settings.roleSettings["verify"] == RoleSetting(antigravity: .init(model: "local-verify")))
         #expect(settings.roleSettings["review"] == RoleSetting(codex: .init(model: "remote-review")))
+    }
+    @Test func aPresetStoredElsewhereIsTakenUnlessAChangeHereIsPending() async throws {
+        let api = api { _ in (200, Data("{}".utf8), 0) }
+        let table = ["economy": Preset(), "best": Preset()]
+        let settings = SettingsModel(api: api, roles: [:], preset: nil, presets: table)
+        settings.adopt(preset: .best, presets: table)
+        #expect(settings.preset == .best && settings.savedPreset == .best && !settings.dirty)
+        // A daemon without presets leaves the page as it is.
+        settings.adopt(preset: nil, presets: nil)
+        #expect(settings.preset == .best && settings.presets == table)
+        // A pick made here and not yet stored is not replaced; it goes out as it was made.
+        settings.preset = .economy
+        settings.adopt(preset: nil, presets: table)
+        #expect(settings.preset == .economy && settings.savedPreset == .best)
     }
     @Test func appliedRolesStoreAChangeMadeWhileSavingAndUndoOneThatFails() async throws {
         let state = try fixture("state-extended")

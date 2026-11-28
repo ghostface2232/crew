@@ -7,13 +7,14 @@ struct JobDispatch {
     var picked: String?
     var holders: [String] {
         let order = info?.kind == "polish" ? ["antigravity", "codex"] : ["codex", "antigravity"]
-        return order.filter { assignment?.agents.contains($0) == true && workers[$0] != nil }
+        // The daemon refuses a worker the role marks unable.
+        return order.filter { assignment?.agents.contains($0) == true && workers[$0] != nil && info?.unable?.contains($0) != true }
     }
     /// With no worker able, a role Claude holds is the lead's, as the daemon would decide.
     private var claudeHolds: Bool { assignment?.agents.contains("claude") == true }
     var agent: String? {
         picked.flatMap { holders.contains($0) ? $0 : nil }
-            ?? holders.first { workers[$0]?.enabled == true && info?.unable?.contains($0) != true }
+            ?? holders.first { workers[$0]?.enabled == true }
             ?? (claudeHolds ? nil : holders.first)
     }
     var submissionAgent: String? { agent }
@@ -167,6 +168,8 @@ struct DispatchView: View {
         if intent == "command" && role == "polish" && allowed.isEmpty { error = String(localized: "List the files or directories the editor may change."); return }
         sending = true; error = ""
         let cwd = directory.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The daemon titles a job by its first line.
+        let task = task.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             if intent == "information" {
                 try await store.addInformation(task, mission: destination.hasPrefix("mission:") ? String(destination.dropFirst(8)) : nil, project: destination == "shared" ? nil : cwd)

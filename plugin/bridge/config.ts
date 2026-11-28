@@ -284,8 +284,16 @@ export interface ProjectSettings {
   watchAway?: boolean;
   /** Work stopped by a usage limit picks up again by itself once the usage resets. */
   autoResume?: boolean;
+  /**
+   * The sidebar icon, as an SF Symbol name such as "star"; the board maps the same key to a Fluent icon. Each app
+   * shows a folder for a key it does not know, so the daemon checks only its shape, not the apps' lists.
+   */
+  icon?: string;
 }
 export const PROJECT_SWITCHES = ['autonomy', 'watchAway', 'autoResume'] as const satisfies readonly (keyof ProjectSettings)[];
+/** The shape of an icon key: lowercase SF Symbol-style words joined by dots. */
+export const isProjectIcon = (value: unknown): value is string =>
+  typeof value === 'string' && value.length <= 64 && /^[a-z0-9]+(\.[a-z0-9]+)*$/.test(value);
 
 /** One project's switches; a project the user never set has all of them off. */
 export const projectSettings = (config: Pick<Config, 'projects'>, project: string | null | undefined): ProjectSettings =>
@@ -475,9 +483,14 @@ function resolveProjects(given: unknown): Record<string, ProjectSettings> {
     if (!isObject(entry)) throw new Error(`projects.${project} must be an object such as {"autonomy": true}.`);
     const settings: ProjectSettings = {};
     for (const [key, value] of Object.entries(entry)) {
-      if (!(PROJECT_SWITCHES as readonly string[]).includes(key)) throw new Error(`projects.${project}.${key} is not a setting; use ${PROJECT_SWITCHES.join(', ')}.`);
+      if (key === 'icon') {
+        if (!isProjectIcon(value)) throw new Error(`projects.${project}.icon must be an icon name such as "star".`);
+        settings.icon = value;
+        continue;
+      }
+      if (!(PROJECT_SWITCHES as readonly string[]).includes(key)) throw new Error(`projects.${project}.${key} is not a setting; use icon, ${PROJECT_SWITCHES.join(', ')}.`);
       if (typeof value !== 'boolean') throw new Error(`projects.${project}.${key} must be true or false.`);
-      if (value) settings[key as keyof ProjectSettings] = true;
+      if (value) settings[key as typeof PROJECT_SWITCHES[number]] = true;
     }
     // Two spellings of one folder (C:\x and C:/x) are one project; a switch either turned on stays on.
     const key = canonicalPath(project);

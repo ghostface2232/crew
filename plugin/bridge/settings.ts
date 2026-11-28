@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { canonicalPath, PROJECT_SWITCHES, resolveConfig, TURN_TOKEN_CHOICES, validTurnTokenBudget } from './config.ts';
+import { canonicalPath, isProjectIcon, PROJECT_SWITCHES, resolveConfig, TURN_TOKEN_CHOICES, validTurnTokenBudget } from './config.ts';
 import type { Config, ProjectSettings } from './config.ts';
 
 /**
@@ -135,13 +135,18 @@ export function saveLanguage(home: string, language: unknown): Pick<Config, 'lan
 }
 
 /**
- * Turns one project's switches on or off in config.json, keeping every other setting. Only the switches named in
- * `changes` move. Off is the default, so a switch turned off is dropped, and a project left with none is removed.
+ * Turns one project's switches on or off, or sets its icon, in config.json, keeping every other setting. Only the
+ * keys named in `changes` move. Off and the folder icon are the defaults, so a switch turned off or an icon set to
+ * null is dropped, and a project left with nothing is removed.
  */
 export function saveProjectSettings(home: string, project: string, changes: unknown): Pick<Config, 'projects'> {
   if (!changes || typeof changes !== 'object' || Array.isArray(changes)) throw new Error('changes must be an object such as {"autonomy": true}.');
   for (const [key, value] of Object.entries(changes)) {
-    if (!(PROJECT_SWITCHES as readonly string[]).includes(key)) throw new Error(`${key} is not a project setting; use ${PROJECT_SWITCHES.join(', ')}.`);
+    if (key === 'icon') {
+      if (value !== null && !isProjectIcon(value)) throw new Error('icon must be an icon name such as "star", or null for the folder.');
+      continue;
+    }
+    if (!(PROJECT_SWITCHES as readonly string[]).includes(key)) throw new Error(`${key} is not a project setting; use icon, ${PROJECT_SWITCHES.join(', ')}.`);
     if (typeof value !== 'boolean') throw new Error(`${key} must be true or false.`);
   }
   const file = path.join(home, 'config.json');
@@ -156,8 +161,11 @@ export function saveProjectSettings(home: string, project: string, changes: unkn
   // Read through resolveConfig so another spelling of the same folder is folded into this one.
   const projects = { ...resolveConfig(current as never).projects };
   const settings: ProjectSettings = { ...projects[key] };
-  for (const [name, value] of Object.entries(changes) as [keyof ProjectSettings, boolean][]) {
-    if (value) settings[name] = true;
+  for (const [name, value] of Object.entries(changes) as [keyof ProjectSettings, boolean | string | null][]) {
+    if (name === 'icon') {
+      if (typeof value === 'string') settings.icon = value;
+      else delete settings.icon;
+    } else if (value) settings[name] = true;
     else delete settings[name];
   }
   if (Object.keys(settings).length) projects[key] = settings;

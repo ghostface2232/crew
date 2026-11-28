@@ -1,6 +1,6 @@
 # Design tokens (native macOS app)
 
-Written 2026-11-14, updated 2026-11-17. Every size, gap, color and type style in the native app comes from `native/Sources/Crew/DesignTokens.swift`. Views name a token instead of writing a number, so a change made there reaches every screen. This page lists each token and where it is used. The web board has its own CSS and is not covered here.
+Every size, gap, color and type style in the native app comes from `native/Sources/Crew/DesignTokens.swift`. Views name a token instead of writing a number, so a change made there reaches every screen. This page lists each token and where it is used. The web board has its own CSS and is not covered here.
 
 When no token fits, add one here and in the file; do not write the number in the view.
 
@@ -25,7 +25,7 @@ One scale for gaps (`spacing:`) and padding. Values between two steps are rounde
 | `ml` | 10 | A mark or icon beside its text; a row's vertical padding |
 | `l` | 12 | Controls in a group; a row's horizontal padding; gray insets |
 | `xl` | 16 | Blocks inside a card; the gap between cards; banner padding |
-| `xxl` | 20 | Card padding |
+| `xxl` | 20 | Sheet and header spacing |
 | `x3l` | 24 | Detail panel and sheet padding |
 | `x4l` | 28 | Sections of the detail panel |
 | `x5l` | 32 | The page heading's columns |
@@ -247,14 +247,13 @@ Pill buttons use `PillButtonStyle`, not the system bordered style. The system's 
 | Kind | Label | Fill |
 | --- | --- | --- |
 | plain | primary | `Pill.fill` (8% primary) |
-| prominent | white | `Palette.accent` |
-| warning | `Palette.warning` | `Palette.chip(warning)` |
+| selected | `Palette.accent` | `Palette.chip(accent)` |
 | destructive role | `Palette.danger` | `Palette.chip(danger)` |
 
 When a pill's label starts with a symbol, the symbol's side has `Pill.symbolTrim` (3 points) less inset. A symbol's round shape sits inside its frame, so an even inset would look wider on that side. Text-only pills stay symmetric. The symbol and the title are `Pill.symbolGap` (6 points) apart. Glass pills use the same insets and label style. A sheet's footer pills that each span half the row, as on the welcome sheet, take `Pill.largeInsets` (11 × 18), about as tall as the board's 38px large buttons. A tinted label goes through `Color.ink(_:)`, as on chips. Needs You's decisions are glass pills. A pressed pill dims, and a disabled one fades to 45%. Under Increase Contrast, a pill gets an outline. A group's actions sit at its trailing edge, and the completing action comes last. A copy button names only what it copies, such as Resume Command or Diff Command. The copy symbol says the rest, its help gives the whole action, and VoiceOver hears Copy resume command.
 
 Placement follows two rules.
-- **Actions sit at the trailing edge.** An item's action sits on the item's header row, as Undo does on a round. A section's or card's action sits on its own last row, as Copy Diff Command and the setup card's Check Again do. A mission card keeps every action in its header ellipsis menu, and its foot holds only its PRs. The panel's footer (`DetailFooter`) is one row of actions at the trailing edge, with Cancel Job last; a finished job with no action left has none. Pills never shrink, so a row of them in a card goes in `ActionRow`: when they do not fit across, the ones that do not fit move onto further lines, still at the trailing edge, with the completing action last. On the board, action rows wrap the same way with `flex-wrap`.
+- **Actions sit at the trailing edge.** An item's action sits on the item's header row, as Undo does on a round. A section's or card's action sits on its own last row, as Diff Command and the setup card's Check Again do. A mission card keeps every action in its header ellipsis menu, and its foot holds only its PRs. The panel's footer (`DetailFooter`) is one row of actions at the trailing edge, with Cancel Job last; a finished job with no action left has none. Pills never shrink, so a row of them in a card goes in `ActionRow`: when they do not fit across, the ones that do not fit move onto further lines, still at the trailing edge, with the completing action last. On the board, action rows wrap the same way with `flex-wrap`.
 - **Reveals sit at the leading edge.** A reveal goes directly under what it reveals. Pills run actions and are never used to reveal content.
 
 Send and completing actions sit at the trailing edge too, such as Send and Approve after Deny. A mission's header ellipsis menu offers Mark Done, Stop Tracking and the preset for new jobs while it is active; a mission that looks finished says so in a caption rather than with buttons. An abandoned mission's menu offers Mark Done alone, which reopens it explicitly: the mission's controls lock per state through `Mission.actionKey`, so Stop Tracking never leaves Mark Done locked.

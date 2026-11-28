@@ -103,7 +103,7 @@ The board can start jobs directly for any role except debate, using the configur
 
 - Each implementation or polish job runs in an isolated git worktree under `~/.crew/worktrees/` on branch `crew-<job id>`. Nothing touches your working branch until the lead inspects the diff and merges it.
 - Gitignored files needed for tests (such as `node_modules` or `.env`) are copied into the worktree (or cloned/linked read-only for directories) when listed in `.worktreeinclude` at the repository root. It uses `.gitignore` syntax and shares Claude Code's native worktree file.
-- Codex runs via `codex app-server` and Antigravity runs via `agy acp`. Crew executes only the official binaries and never reads authentication files or tokens.
+- Codex runs via `codex app-server`, Antigravity via `agy acp`, and a Claude worker via `claude -p`. Crew executes only the official binaries and never reads authentication files or tokens.
 - When a background job finishes, asks the lead a question, or needs a decision, the lead session wakes automatically.
 - Agents share the machine without colliding ([docs/sandbox.md](docs/sandbox.md)):
   - Each starts an isolated instance of any service it runs.

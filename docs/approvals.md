@@ -2,7 +2,7 @@
 
 Crew brings worker approvals and user questions to the user. A worker can also ask the lead for a decision and keep working while it waits.
 
-**Key files:** `plugin/bridge/mcp.ts`, `daemon.ts`, `jobs.ts`, `worker-mcp.ts`, and the Codex and Antigravity adapters in `plugin/bridge/adapters/`. See [sandbox.md](sandbox.md) for role permissions, [delivery.md](delivery.md) for wake-ups, and [daemon-api.md](daemon-api.md#authentication) for daemon authentication.
+**Key files:** `plugin/bridge/mcp.ts`, `daemon.ts`, `jobs.ts`, `worker-mcp.ts`, and the Codex, Claude, and Antigravity adapters in `plugin/bridge/adapters/`. See [sandbox.md](sandbox.md) for role permissions, [delivery.md](delivery.md) for wake-ups, and [daemon-api.md](daemon-api.md#authentication) for daemon authentication.
 
 ## Approval requests and user questions
 

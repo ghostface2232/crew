@@ -55,7 +55,7 @@ Unassigned roles and roles without `agents` inherit their parent's holders with 
 
 ## Role instruction files
 
-Role instructions under `plugin/roles/` are agent-independent. The files are `engineer.md`, `reviewer.md`, `polisher.md`, `debater.md`, `question.md`, `machine.md`, `refactor.md`, `release.md`, and `fix.md`. Codex receives them in `developerInstructions`. Antigravity receives them via `_meta.antigravity.systemPrompt.append` when advertised, or as a prefix to the first prompt.
+Role instructions under `plugin/roles/` are agent-independent. The files are `engineer.md`, `reviewer.md`, `polisher.md`, `debater.md`, `question.md`, `machine.md`, `refactor.md`, `release.md`, and `fix.md`. Codex receives them in `developerInstructions`, a Claude worker through `--append-system-prompt`. Antigravity receives them via `_meta.antigravity.systemPrompt.append` when advertised, or as a prefix to the first prompt.
 
 The cross-reviewer (`reviewer.md`) and the lead's `self-reviewer` subagent read the project's `AGENTS.md` and `CLAUDE.md` files. They report a broken rule only if they quote the rule. Following Codex's and Claude Code's own review prompts, both place problems the change did not introduce under Pre-existing, separate from findings counted against the change. The self-reviewer is told not to run git commands that change the index, branches, or the shared stash. A `disallowedTools` list of `Bash(git stash:*)`-style rules would enforce this, but on Claude Code 2.1.328 such a list removed Bash from the subagent altogether, and it refused to start.
 
@@ -71,7 +71,7 @@ Shared instructions are written once and reach every agent that builds, runs, or
 The project file is part of the repository and is trusted like its `AGENTS.md` or `CLAUDE.md`, even if someone other than the user wrote it. It can steer an agent within its role and is read last, so it can override the global file.
 
 - **Workers:** Both files are read at job start from the repository's main working tree (including when launched from a linked worktree or subdirectory) and appended after the role text with a preface stating they do not widen the role. Outside a repository, Crew reads from the project directory. `status` lists which files a job received.
-- **Claude:** A `SessionStart` and `SubagentStart` command hook (`bridge/context.ts`) prints them as `additionalContext`, including after compaction, noting that workers already receive them. Subagents that only search and read (`Explore`, `Plan`, `claude-code-guide`, `web-fetch`) do not receive them, because they do not build, run, or check anything.
+- **Claude:** A `SessionStart` and `SubagentStart` command hook (and `SessionStart` for a Codex lead) (`bridge/context.ts`) prints them as `additionalContext`, including after compaction, noting that workers already receive them. Subagents that only search and read (`Explore`, `Plan`, `claude-code-guide`, `web-fetch`) do not receive them, because they do not build, run, or check anything.
 - Nothing is written to any service's own instruction files (`AGENTS.md`, `CLAUDE.md`, rules folders).
 - Missing or empty files contribute no instructions. An unreadable file fails the job or surfaces an error in the Claude hook.
 - Crew reads the project file only as a regular file. If it or its `.crew` folder is a symbolic link, the read fails the same way, because a link could point to a file the worker's sandbox denies (such as the daemon's token). The user's own `~/.crew/instructions.md` may be a symbolic link.

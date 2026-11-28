@@ -6,7 +6,7 @@ The React web board lets users inspect work and act on it directly, as does the 
 
 ## Architecture
 
-The Claude plugin, CLI, and Windows Electron main process connect to an independent Crew daemon that owns worker adapters and worktrees. The daemon serves the React board over HTTP and SSE to browsers and the Windows Electron window. React owns the entire board (`plugin/board/src`). The macOS desktop app uses SwiftUI (`native/Sources/Crew`).
+The lead plugins, CLI, and desktop apps connect to an independent Crew daemon that owns worker adapters and worktrees. The daemon serves the React board over HTTP and SSE to browsers and the Windows Electron window. React owns the entire board (`plugin/board/src`). The macOS desktop app uses SwiftUI (`native/Sources/Crew`).
 
 | File | Responsibility |
 | --- | --- |
@@ -15,7 +15,7 @@ The Claude plugin, CLI, and Windows Electron main process connect to an independ
 | `plugin/board/src/model.ts` | Project grouping, state priority, usage and heatmap helpers, duration labels, and [mission stops](missions.md#display) |
 | `plugin/board/src/ui.tsx` | Native `<dialog>` lifecycle, the board's select, menus, confirm sheet (`ask`), stable composers, Fluent status icons, agent marks, and clock updates |
 | `Missions.tsx`, `NeedsYou.tsx`, `Overview.tsx`, `Palette.tsx`, `Shell.tsx`, `Scores.tsx` | Mission tracks, request cards, workspace/activity/history views, command palette, sidebar navigation, and model scores |
-| `JobDrawer.tsx`, `Settings.tsx`, `Dispatch.tsx` | Job and session details (verification, evidence, rounds, debate), scoped settings/presets/about, and direct dispatch |
+| `JobDrawer.tsx`, `Settings.tsx`, `Dispatch.tsx` | Job and session details (verification, evidence, rounds, debate), scoped settings/presets/Crew page, and direct dispatch |
 | `desktop/main.ts`, `desktop/preload.cts` | Windows hosting, single instance, tray, restored bounds, Mica backdrop, request signing, daemon startup, and updater IPC |
 | `plugin/bridge/assets.ts` | Built-asset allowlist, MIME types, and renderer CSP |
 
@@ -120,7 +120,7 @@ These commands run `scripts/desktop.mjs`, which builds and opens the native Swif
 
 ## Renderer security
 
-The Electron renderer uses `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. Its preload (`desktop/preload.cts`) exposes only `window.crewDesktop.update` and `window.crewDesktop.welcome`. `desktop/main.ts` answers it solely from the main window's board origin and permits only `clipboard-sanitized-write` for that origin. The shell denies external navigation, webviews, and unapproved popups. Report links open in the default browser, and evidence files open in a separate sandboxed window.
+The Electron renderer uses `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. Its preload (`desktop/preload.cts`) exposes only `window.crewDesktop` ([windows-app.md](windows-app.md)). `desktop/main.ts` answers it solely from the main window's board origin and permits only `clipboard-sanitized-write` for that origin. The shell denies external navigation, webviews, and unapproved popups. Report links open in the default browser, and evidence files open in a separate sandboxed window.
 
 `BOARD_CSP` in `plugin/bridge/assets.ts` restricts scripts, connections, fonts, and media to `'self'`, with `data:` for images and `'unsafe-inline'` for styles. The daemon retains loopback Host/Origin checks, and Vite removes only its own development origins.
 

@@ -22,7 +22,7 @@ Near-term work targets Claude Desktop lead mode, as [requirements.md](requiremen
 
 ## 2. The one constraint behind most of it
 
-Role selection has moved into configuration (`ROLES` eight-role registry with inheritance in `plugin/bridge/config.ts`, `resolveRole` in `jobs.ts`). `WorkerAgent` is still `'codex' | 'antigravity'` (`config.ts`), `config.codex` and `config.antigravity` remain separate blocks, and `LEAD` is still `'claude'`. Adding Cursor (C2) and supporting other leads (L1) still require lifting those remaining assumptions.
+Role selection has moved into configuration (`ROLES` eight-role registry with inheritance in `plugin/bridge/config.ts`, `resolveRole` in `jobs.ts`). Claude is a worker too (`config.claude`, `JobAgent` in `config.ts`), and Codex can lead (L1). Adding Cursor (C2) still requires lifting the remaining per-agent config blocks.
 
 ## 3. Control UI concept
 
@@ -37,7 +37,7 @@ The board is organized around missions, needs-you requests, activity, and histor
 | Usage gauges | Per-agent usage windows and status in `Overview.tsx` and `BoardView.swift`; New Job disables only agents whose configuration has `enabled: false`. The command bar does not suggest an alternative when an agent is tight. | Partial |
 | Progress roll-up | A mission's stage track shows how far it has come (`Missions.tsx`, `BoardView.swift`); the separate progress ring was removed on 2026-11-22 ([missions.md](missions.md#history)). | Done |
 | Intent | `New Job` distinguishes information (global/project instructions or mission note), read-only question (`ask: true`), and command. | Done |
-| Scoped follow-up | `JobDrawer` / `JobDetailView` send follow-ups via `POST /api/jobs/:id/reply`, joining the running turn of either agent ([jobs.md](jobs.md#follow-ups-and-sync)); Antigravity refuses one while a request waits. | Done |
+| Scoped follow-up | `JobDrawer` / `JobDetailView` send follow-ups via `POST /api/jobs/:id/reply`, joining a Codex or Antigravity running turn ([jobs.md](jobs.md#follow-ups-and-sync)); Antigravity refuses one while a request waits. | Done |
 | Rounds | Per-turn commits on job branches (`jobs.ts` `rounds` / `round()`), Keep/Undo buttons, and `roundsNotice` on the worker's next turn. | Done |
 
 Borrowed ideas:
@@ -54,7 +54,7 @@ Recommended order is A, then B, then C. Without A, both Cursor support and role 
 
 ### A. Foundation
 
-**A1. Agent registry and role table. *(Done)*** Implemented in [config.ts](../plugin/bridge/config.ts), `settings.ts`, [mcp.ts](../plugin/bridge/mcp.ts), and `plugin/roles/` ([roles.md](roles.md)). `ROLES` holds eight configurable roles with inheritance (`delegate`, `refactor`, `release`, `debate`, `review`, `verify`, `fix`, `polish`), defaulting to the R3 agents with `fix` defaulting to Claude. Antigravity defaults to `polish` and automatic routing never moves engineering or review work to it ([requirements.md](requirements.md#3-defaults-and-priorities)).
+**A1. Agent registry and role table. *(Done)*** Implemented in [config.ts](../plugin/bridge/config.ts), `settings.ts`, [mcp.ts](../plugin/bridge/mcp.ts), and `plugin/roles/` ([roles.md](roles.md)). `ROLES` holds eight configurable roles with inheritance (`delegate`, `refactor`, `release`, `debate`, `review`, `verify`, `fix`, `polish`), defaulting to the R3 agents, with `delegate`, `review`, and `fix` defaulting to Codex and Claude. Antigravity defaults to `polish` and automatic routing never moves engineering or review work to it ([requirements.md](requirements.md#3-defaults-and-priorities)).
 
 **A2. Shared instructions. *(Done)*** Implemented in `instructions.ts`, [prompts.ts](../plugin/bridge/prompts.ts), `context.ts`, and [hooks.json](../plugin/hooks/hooks.json) ([roles.md](roles.md)). Reads `~/.crew/instructions.md` and `.crew/instructions.md` without writing to any service's own instruction files:
 
@@ -87,7 +87,7 @@ Recommended order is A, then B, then C. Without A, both Cursor support and role 
 
 **D1. Model notes. *(Done)*** Implemented in `notes.ts`, `mcp.ts` (`note`, `note_summary`), `daemon.ts` (`/api/notes`), `Settings.tsx` (`Scores.tsx`), and `SettingsView.swift` ([roles.md](roles.md)). Stored as JSON (`~/.crew/model-notes.json`, version 2) so each model is scored out of 10 from accepted finding rate over change size (`build`), fix quality (`fix`), and review acceptance (`review`). Status (`too few samples`, `on trial`, `settled`) is derived from weighted build reviews (`< 3`, `< 8`, `>= 8`). `route` and the first `delegate` attach recent summaries and evidence (`withNotes` in `mcp.ts`); `note_summary` rewrites summaries after 10 new lines (`CONSOLIDATE_AFTER`). Role assignments and presets stay the user's.
 
-**D2. Fix role. *(Done)*** Implemented as `fix` in `config.ts` (defaulting to Claude), `plugin/roles/fix.md`, `delegate` (`role: "fix"`) in `mcp.ts`, and `route` in `usage.ts`. A worker's own change still goes back via `reply`; `fix` handles the lead's code or merged results in a fresh worktree, keeping build and fix evidence separate in `notes.ts`.
+**D2. Fix role. *(Done)*** Implemented as `fix` in `config.ts` (defaulting to Codex and Claude), `plugin/roles/fix.md`, `delegate` (`role: "fix"`) in `mcp.ts`, and `route` in `usage.ts`. A worker's own change still goes back via `reply`; `fix` handles the lead's code or merged results in a fresh worktree, keeping build and fix evidence separate in `notes.ts`.
 
 **D3. Peer ratings. *(Done)*** Implemented in `notes.ts`, `worker-mcp.ts` (`rate`), `daemon.ts` (`/api/jobs/:id/rating`, `/api/peer-ratings`), and `config.ts` (`peerRatings`, on by default) ([roles.md](roles.md)). The switch is available because rating adds usage. Ratings require a `fact` and count for half (`PEER_SHARE = 0.5`) beside evidence once at least `MIN_RATINGS = 3` exist.
 
@@ -108,7 +108,7 @@ From a game project retrospective (58 jobs, ~110 hours, 1.5B tokens). Project-sp
 **Open**, each needing a decision first:
 
 - **E1. A browser with a GPU on Windows. *(Open)*** `crew.browser` (`browser.ts`) runs only on macOS (`process.platform !== 'darwin'` throws). On Windows a worker starts Chromium inside Codex's sandbox, where GPU crashes, software fallback, and a headless shell showing an error window on the user's screen were reported. The cause was not investigated. Running Chromium from the daemon would give it GPU access, but Windows has no `sandbox-exec` to enforce the job's file limits. Needs that tradeoff settled and a Windows machine to verify.
-- **E2. A budget per job. *(Open)*** Tokens and elapsed time show when a job ends (`render.ts`, board, native app), with no live budget cap that wakes the lead mid-run. Open: defaults and whether waking the lead is worth its tokens.
+- **E2. A budget per job. *(Open)*** Tokens and elapsed time show when a job ends (`render.ts`, board, native app), and per-turn budgets stop a turn (F5); there is no cross-turn budget per job that wakes the lead mid-run. Open: defaults and whether waking the lead is worth its tokens.
 
 **Not taken:** retrying `thread/start`, blocking software rendering globally (projects needing GPU set it in `.crew/instructions.md`), and asset-hash/camera metadata on captures (turns already commit on the job branch). `thread/start` timed out because Codex granted an ACL to the system temp folder, which is now excluded from writable paths. `THREAD_TIMEOUT_MS = 180_000` separately allows for slow ACL passes. A retry would have waited three more minutes and failed the same way.
 
@@ -166,7 +166,7 @@ Item 5 is done (`adapters/claude.ts`, 2026-11-24): under a Codex lead, a job in 
 
 **L2. Own main screen. *(Partial)*** React board (`plugin/board/src/`), role-based direct dispatch (`Dispatch.tsx`, `DispatchView.swift`), native macOS SwiftUI/AppKit app (`native/`), and Windows Electron shell (`desktop/`) are done ([board.md](board.md), [macos-app.md](macos-app.md)). Closing the UI leaves the daemon and jobs running, and the web board stays available. Mission start with a lead, lead selection, and merge execution remain open.
 
-**L2a. Distribution. *(Done)*** Implemented via `.github/workflows/release.yml`, `native/Sources/Crew/Updater.swift`, `desktop/updater.ts`, `plugin/bridge/setup.ts`, `Overview.tsx` (`Setup`), and `BoardView.swift` (`SetupCard`): builds and publishes the macOS `.dmg`/`.zip` and Windows installer, self-updates from GitHub Releases, installs/updates the Claude Code plugin on the bundled Node runtime, and shows a setup checklist ([distribution.md](distribution.md)).
+**L2a. Distribution. *(Done)*** Implemented via `.github/workflows/release.yml`, `native/Sources/Crew/Updater.swift`, `desktop/updater.ts`, `plugin/bridge/setup.ts`, `Overview.tsx` (`Setup`), and `BoardView.swift` (`SetupCard`): builds and publishes the macOS `.dmg`/`.zip` and Windows installer, self-updates from GitHub Releases, installs/updates the Claude Code and Codex plugins on the bundled Node runtime, and shows a setup checklist ([distribution.md](distribution.md)).
 
 **L3. Usage-based routing. *(Open)*** With AgentGauge G3 (threshold hooks), trigger lead handoff before the lead's limit runs out.
 

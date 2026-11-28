@@ -110,5 +110,5 @@ Do not push, merge into another branch, or open a pull request unless asked. Whe
 The user and every agent share one computer. Workers receive these rules with each job; you and your subagents follow the same ones.
 
 - **Isolated instances.** Anything you or a subagent starts (the app, a server, a headless browser) must use a free port chosen by the system and its own data and profile directory under a temporary directory, and must be stopped afterwards. Never use the app's default port or the instance the user is running. Include this rule in the brief of any general subagent; `crew:self-reviewer` already has it and only needs to be told whether it may run the app.
-- **One browser pane.** The app has one browser pane, shared with the user, and only you may use it. Subagents and workers must use their own headless browsers.
+- **One browser pane.** Claude Desktop has one browser pane, shared with the user, and only you may use it. Subagents and workers must use their own headless browsers.
 - **Measure alone.** Timings taken while other work runs are meaningless. Before you benchmark, profile, or load-test, wait until `status` shows no active job and no subagent of yours is running, and start nothing else until the measurement ends. To have a worker measure, pass `exclusive: true` to `delegate`, which holds every other job back until it ends.

@@ -824,6 +824,8 @@ struct ProjectSidebar: View {
     @Environment(AppUpdater.self) private var updater
     /// The project whose icon picker is open.
     @State private var choosingIcon: String?
+    /// The project whose right-click menu is open.
+    @State private var menuTarget: String?
     var body: some View {
         let projects = store.projects
         // A project's pages show only its own requests, so the sidebar says which other projects have one, as the board's does.
@@ -836,15 +838,22 @@ struct ProjectSidebar: View {
             ForEach(projects, id: \.self) { path in
                 let name = projectName(path, among: projects)
                 ProjectRow(name: name, icon: ProjectIcons.symbol(store.state.projects?[path]?.icon), waiting: waiting.contains(path))
-                    .tag(path).help(path)
-                    .contextMenu {
+                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    .overlay(RowMenu(items: [
                         // A daemon that sends no project settings cannot store an icon either.
-                        if store.state.projects != nil {
-                            Button("Change Icon…") { choosingIcon = path }
-                            Divider()
-                        }
+                        store.state.projects != nil ? .init(title: String(localized: "Change Icon…")) { choosingIcon = path } : nil,
+                        store.state.projects != nil ? .separator : nil,
+                        .init(title: String(localized: "Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) },
+                    ].compactMap { $0 }, open: Binding(get: { menuTarget == path }, set: { menuTarget = $0 ? path : nil })))
+                    .listRowBackground(menuTarget == path && store.project != path
+                        ? RoundedRectangle(cornerRadius: RowMenu.radius, style: .continuous).fill(Pill.fill).padding(.horizontal, RowMenu.inset)
+                        : nil)
+                    // VoiceOver's Show Menu does not reach the AppKit menu, so its items are offered as actions too.
+                    .accessibilityActions {
+                        if store.state.projects != nil { Button("Change Icon…") { choosingIcon = path } }
                         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
                     }
+                    .tag(path).help(path)
                     .popover(isPresented: Binding(get: { choosingIcon == path }, set: { if !$0 { choosingIcon = nil } }),
                              arrowEdge: .trailing) {
                         ProjectIconPicker(store: store, path: path, name: name)
@@ -896,6 +905,55 @@ extension View {
     /// Places an empty state in the middle of the visible page rather than under the heading.
     func centeredInPage() -> some View {
         frame(maxWidth: .infinity).containerRelativeFrame(.vertical) { height, _ in height * 0.6 }
+    }
+}
+
+/// A sidebar row's right-click menu, shown by AppKit. SwiftUI's `.contextMenu` in a sidebar List has the table ring
+/// the row in accent; this view takes right-clicks (and Control-clicks) before the table does, so the row gets a quiet
+/// fill instead, as Finder's and Claude's sidebars do. Other clicks pass through to the row.
+private struct RowMenu: NSViewRepresentable {
+    struct Item {
+        var title: String
+        var action: () -> Void
+        static var separator: Item { Item(title: "") {} }
+    }
+    var items: [Item]
+    @Binding var open: Bool
+    /// The fill's corners and inset from the sidebar's edges, matching the selected row's.
+    static let radius: CGFloat = 6
+    static let inset: CGFloat = 10
+    func makeNSView(context: Context) -> Catcher { Catcher() }
+    func updateNSView(_ view: Catcher, context: Context) {
+        view.items = items
+        view.onOpen = { open = $0 }
+    }
+    final class Catcher: NSView, NSMenuDelegate {
+        var items: [Item] = []
+        var onOpen: (Bool) -> Void = { _ in }
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard let event = NSApp.currentEvent else { return nil }
+            let menuClick = event.type == .rightMouseDown || event.type == .rightMouseUp
+                || (event.type == .leftMouseDown && event.modifierFlags.contains(.control))
+            return menuClick ? super.hitTest(point) : nil
+        }
+        override func mouseDown(with event: NSEvent) {
+            if let menu = menu(for: event) { NSMenu.popUpContextMenu(menu, with: event, for: self) }
+        }
+        override func menu(for event: NSEvent) -> NSMenu? {
+            let menu = NSMenu()
+            menu.delegate = self
+            for item in items {
+                if item.title.isEmpty { menu.addItem(.separator()); continue }
+                let entry = NSMenuItem(title: item.title, action: #selector(choose(_:)), keyEquivalent: "")
+                entry.target = self
+                entry.representedObject = item.action
+                menu.addItem(entry)
+            }
+            return menu
+        }
+        @objc private func choose(_ sender: NSMenuItem) { (sender.representedObject as? () -> Void)?() }
+        func menuWillOpen(_ menu: NSMenu) { onOpen(true) }
+        func menuDidClose(_ menu: NSMenu) { onOpen(false) }
     }
 }
 

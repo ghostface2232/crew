@@ -333,10 +333,13 @@ import Testing
         #expect(agentRole("antigravity", store: store) == delegate)
         store.state.roleSettings = ["refactor": RoleSetting(agents: RoleAssignment.holderOrder)]
         #expect(agentRole("antigravity", store: store) == "\(delegate) · \(state.roleLabel("refactor"))")
-        // Each lead's card says Lead while one of its own sessions, working or idle, is open in scope.
+        // Each lead's card says Lead while one of its own sessions in scope is active; an idle one left open does not count.
         store.state.roleSettings = nil
         var codex = state.claude[0]
         codex.host = "codex"; codex.state = "idle"
+        store.state.claude = [codex]
+        #expect(agentRole("codex", store: store) == "\(delegate) · \(release)")
+        codex.state = "working"
         store.state.claude = [codex]
         #expect(agentRole("codex", store: store) == "Lead · \(delegate) · \(release)")
         #expect(agentRole("claude", store: store) == "\(delegate) · \(release)")

@@ -346,8 +346,9 @@ struct AgentOverview: View {
            Set(assignment.holders) == Set(inherited.holders) { return false }
         return true
     }.map(\.localizedLabel)
-    // Claude and Codex alike say Lead while one of their sessions is open in this scope, as on the board.
-    let leads = store.state.claude.contains { $0.agent == agent && (store.project.isEmpty || $0.projectPath == store.project) }
+    // Claude and Codex alike say Lead while one of their sessions in this scope is active, as on the board; an idle one
+    // left open does not make the agent the lead.
+    let leads = store.state.claude.contains { $0.agent == agent && $0.state != "idle" && (store.project.isEmpty || $0.projectPath == store.project) }
     return ((leads ? [String(localized: "Lead")] : []) + labels).joined(separator: " · ")
 }
 

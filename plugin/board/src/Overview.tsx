@@ -275,7 +275,7 @@ function agentActivity(state: Snapshot, project: string, agent: string) {
     // Beside active sessions alone "idle" is clear; beside jobs it must say sessions.
     idle ? (open.length && !jobs.length ? t('{count} idle', { count: idle }) : idle === 1 ? t('1 idle session') : t('{count} idle sessions', { count: idle })) : null,
   ].filter(Boolean).join(' · ');
-  return { line, mark, title, leads: sessions.length > 0 };
+  return { line, mark, title, leads: open.length > 0 };
 }
 
 /** A table cell's text, fading at its end when the column is too narrow for it. */
@@ -308,7 +308,7 @@ export const AgentPanel = memo(function AgentPanel({ state, project }: { state: 
               return !(same && !state.roleSettings?.[role]?.agents);
             })
             .map(({ label }) => t(label));
-          // Claude and Codex alike say Lead while one of their sessions is open here.
+          // Claude and Codex alike say Lead while one of their sessions here is active, not merely left open.
           const role = [...(leads ? [t('Lead')] : []), ...held].join(' · ');
           return (
             <li className="agent-card" key={agent} data-agent={agent} data-flip={`agent:${agent}`} style={{ '--i': index } as CSSProperties}>

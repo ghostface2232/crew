@@ -449,6 +449,7 @@
 "xhigh" = "매우 높음";
 "minimal" = "최소";
 "max" = "최대";
+"none" = "없음";
 "ultra" = "울트라";
 "Light" = "경량";
 "Budget reached" = "작업 한도 도달";

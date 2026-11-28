@@ -736,6 +736,20 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         settings.adopt(preset: nil, presets: table)
         #expect(settings.preset == .economy && settings.savedPreset == .best)
     }
+    @Test func aPresetStoredElsewhereDuringASaveIsTakenOnceItSettles() async throws {
+        let table = ["economy": Preset(), "best": Preset()]
+        let api = api { _ in (200, try JSONEncoder().encode(PresetState(preset: .economy, presets: table)), 0.05) }
+        let settings = SettingsModel(api: api, roles: [:], preset: nil, presets: table)
+        settings.preset = .economy
+        let apply = Task { await settings.applyPreset() }
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(settings.savingPreset)
+        // The board stored another after this one; the stream says so while this one is under way, and not again.
+        settings.adopt(preset: .best, presets: table)
+        #expect(settings.preset == .economy)
+        await apply.value
+        #expect(settings.preset == .best && settings.savedPreset == .best && !settings.dirty)
+    }
     @Test func appliedRolesStoreAChangeMadeWhileSavingAndUndoOneThatFails() async throws {
         let state = try fixture("state-extended")
         let first = RoleSetting(antigravity: .init(model: "verify-model"))

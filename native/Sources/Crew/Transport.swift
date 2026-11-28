@@ -77,8 +77,10 @@ final class CrewAPI: Sendable {
     let tokenFile: URL
     @MainActor var onSignInFailure: (@MainActor @Sendable (DaemonSignInFailure) -> Void)?
     private let session: URLSession
-    /// The daemon process each port proved to be, so the token is not sent to whatever else may listen there.
-    private let verified = Mutex<[Int: Int32]>([:])
+    private struct Verification { var pid: Int32; var token: String }
+    /// The daemon process each port proved to be and the token it proved, so the token is not sent to whatever else
+    /// may listen there.
+    private let verified = Mutex<[Int: Verification]>([:])
     init(port: Int? = nil, configuration: URLSessionConfiguration? = nil, environment: [String: String] = ProcessInfo.processInfo.environment) {
         let home = CrewHome.directory(environment: environment)
         tokenFile = home.appendingPathComponent("token")
@@ -87,7 +89,8 @@ final class CrewAPI: Sendable {
         let config = configuration ?? URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 35
         config.timeoutIntervalForResource = 60 * 60 * 24
-        session = URLSession(configuration: config)
+        // A redirect could carry a proof from another port's daemon, or the token, to a listener nothing has verified.
+        session = URLSession(configuration: config, delegate: RedirectRefusal(), delegateQueue: nil)
     }
     func request<T: Decodable & Sendable>(_ path: String, body: Data? = nil, timeout: TimeInterval? = nil) async throws -> T {
         try await request(URL(string: path, relativeTo: baseURL)!, body: body, timeout: timeout)
@@ -148,31 +151,48 @@ final class CrewAPI: Sendable {
     private func verifiedToken(port: Int) async throws -> String? {
         guard let token = readToken() else { return nil }
         let record = record()
-        // A daemon restarted on the same port records a new process; any other change shows up as a failed connection.
-        if let pid = verified.withLock({ $0[port] }), record?.port != port || record?.pid == nil || record?.pid == pid { return token }
+        // Reuse a verification only while this home still records the same live process on this port and the token is
+        // the one it proved, as the bundled CLI does.
+        if let known = verified.withLock({ $0[port] }), let record, record.port == port, record.pid == known.pid,
+           Self.alive(known.pid), known.token == token { return token }
+        verified.withLock { _ = $0.removeValue(forKey: port) }
         guard let pid = await prove(port: port, token: token, record: record) else { throw URLError(.cannotConnectToHost) }
-        verified.withLock { $0[port] = pid }
+        verified.withLock { $0[port] = Verification(pid: pid, token: token) }
         return token
     }
     /// The daemon's process when the listener on `port` is Crew's daemon for this home: it signs a fresh challenge with
     /// the token, or, from a daemon that predates signing, it is the live process this home recorded on that port.
     private func prove(port: Int, token: String, record: DaemonRecord?) async -> Int32? {
-        struct Health: Decodable { var pid: Int32; var proof: String? }
+        struct Health: Decodable {
+            var name: String
+            var pid: Int32
+            /// Only a daemon that predates signing leaves the key out; a null or malformed proof fails.
+            var signs: Bool
+            var proof: String?
+            enum CodingKeys: CodingKey { case name, pid, proof }
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                name = try container.decode(String.self, forKey: .name)
+                pid = try container.decode(Int32.self, forKey: .pid)
+                signs = container.contains(.proof)
+                proof = try container.decodeIfPresent(String.self, forKey: .proof)
+            }
+        }
         let challenge = SymmetricKey(size: .bits256).withUnsafeBytes { bytes in bytes.map { String(format: "%02x", $0) }.joined() }
         var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/health?challenge=\(challenge)")!)
         request.timeoutInterval = 10
         guard let (data, response) = try? await session.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200,
-              let health = try? JSONDecoder().decode(Health.self, from: data) else { return nil }
-        if let proof = health.proof {
-            guard let code = Self.digest(hex: proof) else { return nil }
+              let health = try? JSONDecoder().decode(Health.self, from: data), health.name == "crew", health.pid > 0 else { return nil }
+        if health.signs {
+            guard let proof = health.proof, let code = Self.digest(hex: proof) else { return nil }
             let signed = HMAC<SHA256>.isValidAuthenticationCode(code, authenticating: Data("crew-health:\(challenge)".utf8),
                                                                   using: SymmetricKey(data: Data(token.utf8)))
             return signed ? health.pid : nil
         }
-        guard let record, record.port == port, record.pid == health.pid, health.pid > 0,
-              kill(health.pid, 0) == 0 || errno == EPERM else { return nil }
+        guard let record, record.port == port, record.pid == health.pid, Self.alive(health.pid) else { return nil }
         return health.pid
     }
+    private static func alive(_ pid: Int32) -> Bool { pid > 0 && (kill(pid, 0) == 0 || errno == EPERM) }
     /// A SHA-256 digest written as lowercase hex.
     private static func digest(hex: String) -> Data? {
         let digits = Array(hex.utf8)
@@ -272,6 +292,13 @@ enum DaemonLauncher {
             }
             do { try process.run() } catch { continuation.resume(throwing: error) }
         }
+    }
+}
+
+private final class RedirectRefusal: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 }
 

@@ -619,7 +619,7 @@ final class SettingsModel {
     func blankTitle(_ role: String, agent: String, _ key: KeyPath<RoleAgentSettings, String?>, models: [ModelChoice]) -> String {
         guard let value = inheritedValue(role, agent: agent, key), !value.isEmpty,
               let parent = roleInfo.first(where: { $0.role == role })?.parent else { return String(localized: "Agent default") }
-        let name = models.first { $0.id == value }?.name ?? value
+        let name = key == \.model ? models.first { $0.id == value }?.name ?? value : localizedCrewLabel(value)
         let label = roleInfo.first { $0.role == parent }?.localizedLabel ?? parent
         return String(localized: "\(name) (same as \(label))")
     }
@@ -633,11 +633,11 @@ final class SettingsModel {
             let efforts = listed.isEmpty ? models.flatMap { $0.efforts ?? [] } : listed
             choices = []
             for effort in efforts where !choices.contains(where: { $0.id == effort }) {
-                choices.append(ModelChoice(id: effort, name: effort))
+                choices.append(ModelChoice(id: effort, name: localizedCrewLabel(effort)))
             }
         }
         if let value = roleSettings[role]?[agent]?[keyPath: key], !value.isEmpty, !choices.contains(where: { $0.id == value }) {
-            choices.append(ModelChoice(id: value, name: value))
+            choices.append(ModelChoice(id: value, name: key == \.model ? value : localizedCrewLabel(value)))
         }
         return choices
     }
@@ -765,7 +765,10 @@ final class SettingsModel {
     @discardableResult func savePreset() async -> Bool {
         guard presets != nil && !savingPreset else { return false }
         savingPreset = true; presetStatus = ""
-        defer { savingPreset = false }
+        defer {
+            savingPreset = false
+            if let (stored, table) = presetStoredMeanwhile { presetStoredMeanwhile = nil; adopt(preset: stored, presets: table) }
+        }
         let draft = preset
         do {
             let result: PresetState = try await api.post("/api/preset", PresetSelection(preset: draft))
@@ -810,10 +813,15 @@ final class SettingsModel {
         guard !savingRoles, !rolesDirty, table != Self.normalized(savedRoleSettings) else { return }
         roleSettings = table; savedRoleSettings = table
     }
+    /// The last preset stored elsewhere while one from here was being stored, taken once that store settles, as the
+    /// board does: the stream may not change again to offer it.
+    private var presetStoredMeanwhile: (PresetName?, [String: Preset])?
     /// Takes a preset stored elsewhere as the stored one, as `adopt(roleSettings:)` does for the role table. A daemon
     /// without presets sends none, which leaves the page as it is.
     func adopt(preset stored: PresetName?, presets table: [String: Preset]?) {
-        guard let table, !savingPreset, preset == savedPreset else { return }
+        guard let table else { return }
+        if savingPreset { presetStoredMeanwhile = (stored, table); return }
+        guard preset == savedPreset else { return }
         presets = table
         preset = stored; savedPreset = stored
     }

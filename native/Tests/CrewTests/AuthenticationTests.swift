@@ -13,6 +13,14 @@ private final class AuthenticationProtocol: URLProtocol, @unchecked Sendable {
         do {
             let handler = Self.handler.withLock { $0 }
             let (status, data) = try handler!(request)
+            // A redirect names its target in the body.
+            if (300..<400).contains(status), let location = String(data: data, encoding: .utf8) {
+                let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Location": location])!
+                client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: URL(string: location)!), redirectResponse: response)
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocolDidFinishLoading(self)
+                return
+            }
             let contentType = request.url?.path == "/api/stream" && status == 200 ? "text/event-stream" : "application/json"
             client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
                                                                headerFields: ["Content-Type": contentType])!, cacheStoragePolicy: .notAllowed)
@@ -35,14 +43,14 @@ private final class AuthenticationProtocol: URLProtocol, @unchecked Sendable {
         try (token + "\n").write(to: home.appendingPathComponent("token"), atomically: true, encoding: .utf8)
     }
     /// Health as a current daemon answers it: the challenge signed with the token in `home`.
-    private static func signedHealth(home: URL, pid: Int = 4242) -> AuthenticationProtocol.Handler {
-        { request in
-            let challenge = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "challenge" }?.value ?? ""
-            let token = try String(contentsOf: home.appendingPathComponent("token"), encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
-            let code = HMAC<SHA256>.authenticationCode(for: Data("crew-health:\(challenge)".utf8), using: SymmetricKey(data: Data(token.utf8)))
-            let proof = code.map { String(format: "%02x", $0) }.joined()
-            return (200, Data(#"{"name":"crew","pid":\#(pid),"proof":"\#(proof)"}"#.utf8))
-        }
+    nonisolated private static func signedHealth(home: URL, pid: Int = 4242) -> AuthenticationProtocol.Handler {
+        { request in (200, Data(#"{"name":"crew","pid":\#(pid),"proof":"\#(try proof(for: request, home: home))"}"#.utf8)) }
+    }
+    nonisolated private static func proof(for request: URLRequest, home: URL) throws -> String {
+        let challenge = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "challenge" }?.value ?? ""
+        let token = try String(contentsOf: home.appendingPathComponent("token"), encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        let code = HMAC<SHA256>.authenticationCode(for: Data("crew-health:\(challenge)".utf8), using: SymmetricKey(data: Data(token.utf8)))
+        return code.map { String(format: "%02x", $0) }.joined()
     }
     private func api(home: URL, port: Int? = 0, health: AuthenticationProtocol.Handler? = nil, handler: @escaping AuthenticationProtocol.Handler) -> CrewAPI {
         let health = health ?? Self.signedHealth(home: home)
@@ -344,8 +352,10 @@ private final class AuthenticationProtocol: URLProtocol, @unchecked Sendable {
         let home = try home()
         defer { try? FileManager.default.removeItem(at: home) }
         try write(firstToken, home: home)
+        let own = Int(ProcessInfo.processInfo.processIdentifier)
+        try #"{"port":0,"pid":\#(own)}"#.write(to: home.appendingPathComponent("daemon.json"), atomically: true, encoding: .utf8)
         let checks = Mutex(0), fail = Mutex(false)
-        let signed = Self.signedHealth(home: home)
+        let signed = Self.signedHealth(home: home, pid: own)
         let api = api(home: home, health: { request in checks.withLock { $0 += 1 }; return try signed(request) }) { _ in
             if fail.withLock({ $0 }) { throw URLError(.networkConnectionLost) }
             return (200, Data("{}".utf8))
@@ -358,6 +368,89 @@ private final class AuthenticationProtocol: URLProtocol, @unchecked Sendable {
         fail.withLock { $0 = false }
         let _: EmptyReply = try await api.request("/api/state")
         #expect(checks.withLock { $0 } == 2)
+    }
+    @Test func aVerificationIsReusedOnlyWhileTheRecordedLiveProcessAndTokenStillMatch() async throws {
+        let home = try home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try write(firstToken, home: home)
+        let record = home.appendingPathComponent("daemon.json")
+        let own = Int(ProcessInfo.processInfo.processIdentifier)
+        let reported = Mutex(own), checks = Mutex(0)
+        let api = api(home: home, health: { request in
+            checks.withLock { $0 += 1 }
+            return try Self.signedHealth(home: home, pid: reported.withLock { $0 })(request)
+        }) { _ in (200, Data("{}".utf8)) }
+        func checked(after change: () throws -> Void) async throws -> Int {
+            try change()
+            let before = checks.withLock { $0 }
+            let _: EmptyReply = try await api.request("/api/state")
+            return checks.withLock { $0 } - before
+        }
+        let current = #"{"port":0,"pid":\#(own)}"#
+        #expect(try await checked { try current.write(to: record, atomically: true, encoding: .utf8) } == 1)
+        #expect(try await checked {} == 0)
+        // The record removed, naming another port, or naming another process each prove the listener again.
+        #expect(try await checked { try FileManager.default.removeItem(at: record) } == 1)
+        #expect(try await checked {} == 1)
+        #expect(try await checked { try #"{"port":42615,"pid":\#(own)}"#.write(to: record, atomically: true, encoding: .utf8) } == 1)
+        #expect(try await checked { try #"{"port":0,"pid":\#(own + 1)}"#.write(to: record, atomically: true, encoding: .utf8) } == 1)
+        #expect(try await checked {} == 1)
+        #expect(try await checked { try current.write(to: record, atomically: true, encoding: .utf8) } == 0)
+        // So does a token that is not the one the daemon proved.
+        #expect(try await checked { try write(nextToken, home: home) } == 1)
+        #expect(try await checked {} == 0)
+        // And a recorded process that has exited, even one that signed while it was recorded.
+        let gone = Int(Int32.max)
+        reported.withLock { $0 = gone }
+        #expect(try await checked { try #"{"port":0,"pid":\#(gone)}"#.write(to: record, atomically: true, encoding: .utf8) } == 1)
+        #expect(try await checked {} == 1)
+    }
+    @Test func aHealthCheckIsNeverRedirected() async throws {
+        let home = try home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try write(firstToken, home: home)
+        let ports = Mutex<[Int]>([])
+        let redirecting: AuthenticationProtocol.Handler = { request in
+            let port = request.url!.port!
+            ports.withLock { $0.append(port) }
+            // A listener on this port sends the challenge on to the real daemon on another.
+            guard port == 0 else { return try Self.signedHealth(home: home)(request) }
+            return (302, Data("http://127.0.0.1:1\(request.url!.path)?\(request.url!.query!)".utf8))
+        }
+        let calls = Mutex(0)
+        let api = api(home: home, health: redirecting) { _ in calls.withLock { $0 += 1 }; return (200, Data("{}".utf8)) }
+        do {
+            let _: EmptyReply = try await api.request("/api/state")
+            Issue.record("A redirected health check was taken as proof")
+        } catch { #expect((error as? URLError)?.code == .cannotConnectToHost) }
+        #expect(calls.withLock { $0 } == 0)
+        #expect(!ports.withLock { $0 }.isEmpty && ports.withLock { $0 }.allSatisfy { $0 == 0 })
+    }
+    @Test func healthMustNameCrewAndAProcessAndAPresentProofMustBeValid() async throws {
+        let home = try home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try write(firstToken, home: home)
+        let own = Int(ProcessInfo.processInfo.processIdentifier)
+        // The record would let a daemon that predates signing in, so only the answer itself is refused.
+        try #"{"port":0,"pid":\#(own)}"#.write(to: home.appendingPathComponent("daemon.json"), atomically: true, encoding: .utf8)
+        let answers: [@Sendable (String) -> String] = [
+            { #"{"pid":\#(own),"proof":"\#($0)"}"# },
+            { #"{"name":"other","pid":\#(own),"proof":"\#($0)"}"# },
+            { #"{"name":"crew","pid":0,"proof":"\#($0)"}"# },
+            { _ in #"{"name":"crew","pid":\#(own),"proof":null}"# },
+            { _ in #"{"name":"crew","pid":\#(own),"proof":5}"# },
+        ]
+        let answer = Mutex(0)
+        let calls = Mutex(0)
+        let api = api(home: home, health: { request in
+            let proof = try Self.proof(for: request, home: home)
+            return (200, Data(answers[answer.withLock { $0 }](proof).utf8))
+        }) { _ in calls.withLock { $0 += 1 }; return (200, Data("{}".utf8)) }
+        for index in answers.indices {
+            answer.withLock { $0 = index }
+            let _: EmptyReply? = try? await api.request("/api/state")
+            #expect(calls.withLock { $0 } == 0, "Answer \(index) was taken as proof")
+        }
     }
     @Test func aDaemonWithoutProofsIsTrustedOnlyAsTheRecordedLiveProcess() async throws {
         let home = try home()

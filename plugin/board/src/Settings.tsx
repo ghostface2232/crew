@@ -591,7 +591,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       const listed = offered.find((choice) => choice.id === model)?.efforts;
       const efforts = listed?.length ? listed : [...new Set(offered.flatMap((choice) => choice.efforts ?? []))];
       const options = key === 'model' ? offered.map((choice) => [choice.id, choice.name]) : efforts.map((effort) => [effort, t(effort)]);
-      if (value && !options.some(([id]) => id === value)) options.push([value, value]);
+      if (value && !options.some(([id]) => id === value)) options.push([value, key === 'model' ? value : t(value)]);
       return (
         <Select label={label} value={value} options={[['', blank(agent, key)], ...(options as [string, string][])]} onChange={change} />
       );

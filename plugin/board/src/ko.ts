@@ -341,7 +341,7 @@ export const ko: Record<string, string> = {
   'Pages': '페이지',
   'Panel width': '패널 너비',
   'Progress cards in chat': '대화에 진행 카드 표시',
-  'Shows each mission step as a card in the Claude and Codex desktop apps.': 'Claude와 Codex 데스크톱 앱에서 미션의 단계마다 카드로 보여 줘요.',
+  'Shows each mission step as a card in the Claude and Codex desktop apps.': 'Claude와 Codex 데스크톱 앱에서 미션 단계를 볼 수 있어요.',
   'Peer ratings': '상호 평가',
   'Plan': '계획',
   'Polish': '다듬기',

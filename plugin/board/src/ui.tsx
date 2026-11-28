@@ -817,21 +817,25 @@ export function useDraft(key: string): [string, (text: string) => void] {
   const text = useSyncExternalStore(drafts.subscribe, () => drafts.get(key));
   return [text, (value: string) => drafts.set(key, value)];
 }
-/** A context menu with one Copy item, as the app offers on paths, titles and ids. */
-export function CopyMenu({ text, label, children }: { text: string; label: string; children: ReactNode }) {
-  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
-  const [copied, setCopied] = useState(false);
-  const item = useRef<HTMLButtonElement>(null);
+/**
+ * A menu opened at a point, as a right-click opens one: focus moves to its first item, and Escape (which returns focus
+ * to where it was), a press elsewhere or leaving the window closes it.
+ */
+export function ContextMenu({ at, label, onClose, children }: { at: { x: number; y: number }; label: string; onClose: () => void; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
-    if (!at) return;
-    item.current?.focus();
+    const previous = document.activeElement as HTMLElement | null;
+    ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
     const away = (event: Event) => {
-      if (!item.current?.contains(event.target as Node)) setAt(null);
+      if (!ref.current?.contains(event.target as Node)) close.current();
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
-      setAt(null);
+      close.current();
+      if (previous?.isConnected && previous !== document.body) previous.focus({ preventScroll: true });
     };
     document.addEventListener('pointerdown', away);
     document.addEventListener('keydown', escape, true);
@@ -841,7 +845,17 @@ export function CopyMenu({ text, label, children }: { text: string; label: strin
       document.removeEventListener('keydown', escape, true);
       window.removeEventListener('blur', away);
     };
-  }, [at]);
+  }, []);
+  return (
+    <div className="menu-list context" role="menu" aria-label={label} ref={ref} style={{ left: at.x, top: at.y }}>
+      {children}
+    </div>
+  );
+}
+/** A context menu with one Copy item, as the app offers on paths, titles and ids. */
+export function CopyMenu({ text, label, children }: { text: string; label: string; children: ReactNode }) {
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(false), 1400);
@@ -857,9 +871,8 @@ export function CopyMenu({ text, label, children }: { text: string; label: strin
     >
       {children}
       {at && (
-        <div className="menu-list context" role="menu" aria-label={label} style={{ left: at.x, top: at.y }}>
+        <ContextMenu at={at} label={label} onClose={() => setAt(null)}>
           <button
-            ref={item}
             role="menuitem"
             onClick={() => {
               void navigator.clipboard.writeText(text).then(() => setCopied(true), () => {});
@@ -869,7 +882,7 @@ export function CopyMenu({ text, label, children }: { text: string; label: strin
             <Icon icon={CopyRegular} />
             {label}
           </button>
-        </div>
+        </ContextMenu>
       )}
       {copied && <span className="toast" role="status"><Icon icon={Checkmark16Regular} />{t('Copied')}</span>}
     </div>

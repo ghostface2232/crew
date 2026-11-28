@@ -1225,6 +1225,55 @@ test('a chosen project survives reload and All projects lets New Job go elsewher
   expect(await page.evaluate(() => [localStorage.getItem('crew.scope'), localStorage.getItem('crew.page')])).toEqual(['/workspace/New', 'overview']);
 });
 
+test('a project row\'s context menu changes its icon, and an unknown icon shows the folder', async ({ page, request }) => {
+  const projects = page.getByRole('navigation', { name: 'Projects' });
+  const crew = projects.getByRole('button', { name: 'Crew', exact: true });
+  // A bundled icon draws both styles; the regular one shows on a row that is not the current one.
+  const glyph = (scope: Locator) => scope.locator('svg.fui-Icon-regular path').first().getAttribute('d');
+  const folder = await glyph(projects.getByRole('button', { name: 'Other', exact: true }));
+  expect(await glyph(crew)).toBe(folder);
+  // All projects has no menu, so the browser's own stays.
+  await projects.getByRole('button', { name: 'All projects' }).click({ button: 'right' });
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  await crew.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Change Icon…' }).click();
+  const picker = page.getByRole('dialog', { name: 'Change Icon' });
+  await expect(picker).toBeVisible();
+  await expect(picker.getByText('/workspace/Crew')).toBeVisible();
+  await expect(picker.getByRole('radio', { name: 'Folder' })).toHaveAttribute('aria-checked', 'true');
+  await expect(picker.getByRole('radio', { name: 'Folder' })).toBeFocused();
+  await expect(picker.getByRole('button', { name: 'Reset to Folder' })).toBeDisabled();
+  const star = picker.getByRole('radio', { name: 'Star' });
+  const starGlyph = await glyph(star);
+  // Arrows move through the grid and Enter picks; the popover stays open for another try.
+  await page.keyboard.press('ArrowRight');
+  await expect(star).toBeFocused();
+  await page.keyboard.press('Enter');
+  await lastBody(request, '/api/project-settings').toEqual({ project: '/workspace/Crew', changes: { icon: 'star' } });
+  await expect(star).toHaveAttribute('aria-checked', 'true');
+  await expect(picker.getByRole('button', { name: 'Reset to Folder' })).toBeEnabled();
+  await expect.poll(() => glyph(crew)).toBe(starGlyph);
+  await page.keyboard.press('Escape');
+  await expect(picker).toHaveCount(0);
+  await expect(crew).toBeFocused();
+  // The menu key on the focused row opens the same menu.
+  await page.keyboard.press('Shift+F10');
+  await expect(page.getByRole('menuitem', { name: 'Change Icon…' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+
+  // The sidebar draws what the daemon reports: a known key as its icon, one this board does not know as the folder.
+  const data = fixture();
+  data.projects = { '/workspace/Crew': { icon: 'star' } };
+  await request.post('/__push', { data: { type: 'state', data } });
+  await expect.poll(() => glyph(crew)).toBe(starGlyph);
+  data.projects = { '/workspace/Crew': { icon: 'not.an.icon' } };
+  await request.post('/__push', { data: { type: 'state', data } });
+  await expect.poll(() => glyph(crew)).toBe(folder);
+});
+
 test('a project keeps the page, and its pages show only its own work', async ({ page }) => {
   const projects = page.getByRole('navigation', { name: 'Projects' });
   const pages = page.getByRole('navigation', { name: 'Pages' });

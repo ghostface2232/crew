@@ -865,6 +865,45 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         await store.dismissIssue("https://github.com/me/app/issues/7", project: "/work/a+b")
         #expect(store.issues["/work/a+b"]?.issues.isEmpty == true)
     }
+    @Test func aProjectIconIsSavedAndResetWithNull() async throws {
+        let sent = Mutex<[String]>([])
+        let api = api { request in
+            #expect(request.url?.path == "/api/project-settings")
+            let changes = try #require(try requestBody(request)["changes"] as? [String: Any])
+            // The folder is stored as no icon, so a reset must reach the daemon as null rather than leave the key out.
+            #expect(changes.keys.sorted() == ["icon"])
+            sent.withLock { $0.append(changes["icon"] is NSNull ? "null" : changes["icon"] as? String ?? "?") }
+            let icon = changes["icon"] as? String
+            return (200, Data(#"{"projects":{"/work/app":\#(icon.map { #"{"icon":"\#($0)"}"# } ?? "{}")}}"#.utf8), 0)
+        }
+        let store = try store(api: api)
+        try store.receive(event("state", fixture()))
+        await store.setProjectIcon("/work/app", "star")
+        #expect(store.state.projects?["/work/app"]?.icon == "star")
+        await store.setProjectIcon("/work/app", nil)
+        #expect(store.state.projects?["/work/app"]?.icon == nil)
+        let values = sent.withLock { $0 }
+        #expect(values == ["star", "null"])
+    }
+    @Test func anIconPickedWhileASaveIsPendingIsSentAfterIt() async throws {
+        let sent = Mutex<[String]>([])
+        let release = DispatchSemaphore(value: 0)
+        let api = api { request in
+            let changes = try #require(try requestBody(request)["changes"] as? [String: Any])
+            let icon = changes["icon"] as? String ?? "null"
+            // Hold the first save open so the next pick arrives while it is pending.
+            if sent.withLock({ $0.append(icon); return $0.count == 1 }) { release.wait() }
+            return (200, Data(#"{"projects":{"/work/app":{"icon":"\#(icon)"}}}"#.utf8), 0)
+        }
+        let store = try store(api: api)
+        let first = Task { await store.setProjectIcon("/work/app", "star") }
+        while store.actions[CrewStore.projectIconKey("/work/app")]?.pending != true { await Task.yield() }
+        await store.setProjectIcon("/work/app", "heart")
+        release.signal()
+        await first.value
+        #expect(sent.withLock { $0 } == ["star", "heart"])
+        #expect(store.state.projects?["/work/app"]?.icon == "heart")
+    }
     /// The checklist is loaded by the store, not by the card, which is empty until the checklist arrives.
     @Test func setupChecklistLoadsIntoTheStore() async throws {
         let api = api { request in

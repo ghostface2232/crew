@@ -384,4 +384,18 @@ test('project switches are off unless turned on, and a project left with none is
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false });
 });
 
+test('a project icon is saved by name, checked only for its shape, and null returns the folder', () => {
+  const home = tempDir();
+  const file = path.join(home, 'config.json');
+  const project = path.resolve(home, 'repo');
+  const key = canonicalPath(project);
+  assert.throws(() => resolveConfig({ projects: { [project]: { icon: 'Star!' } } } as never), /icon must be an icon name/);
+  assert.deepEqual(saveProjectSettings(home, project, { icon: 'server.rack', autonomy: true }), { projects: { [key]: { icon: 'server.rack', autonomy: true } } });
+  // A key no app lists yet is kept: each app falls back to the folder for it.
+  assert.deepEqual(projectSettings(loadConfigFrom(file), project), { icon: 'server.rack', autonomy: true });
+  assert.throws(() => saveProjectSettings(home, project, { icon: '../x' }), /icon must be an icon name/);
+  assert.deepEqual(saveProjectSettings(home, project, { icon: null }), { projects: { [key]: { autonomy: true } } });
+  assert.deepEqual(saveProjectSettings(home, project, { autonomy: false }), { projects: {} });
+});
+
 const loadConfigFrom = (file: string) => resolveConfig(JSON.parse(fs.readFileSync(file, 'utf8')));

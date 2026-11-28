@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { flushSync } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import {
   bundleIcon, AddRegular, AlertFilled, AlertRegular, ArrowCircleDownRegular, ArrowClockwiseRegular,
   ArrowRight16Filled, ClockFilled, ClockRegular, ErrorCircleRegular, FlashFilled, FlashRegular,
@@ -510,7 +510,8 @@ function ProjectNav({ projects, names, project, state, go }: {
         onMenu={openMenu}
       />
       {peek && <ProjectPeek dir={peek.dir} name={names.get(peek.dir) ?? peek.dir} top={peek.top} state={state} />}
-      {menu && (
+      {/* Outside the sidebar: as a drawer on narrow windows it is transformed and clips, so fixed children would sit in it. */}
+      {menu && createPortal(
         <ContextMenu at={menu.at} label={names.get(menu.dir) ?? menu.dir} onClose={() => setMenu(null)}>
           <button
             role="menuitem"
@@ -522,9 +523,10 @@ function ProjectNav({ projects, names, project, state, go }: {
             <Icon icon={IconsRegular} />
             {t('Change Icon…')}
           </button>
-        </ContextMenu>
+        </ContextMenu>,
+        document.body,
       )}
-      {picker && (
+      {picker && createPortal(
         <ProjectIconPicker
           key={picker.dir}
           dir={picker.dir}
@@ -532,7 +534,8 @@ function ProjectNav({ projects, names, project, state, go }: {
           stored={state.projects?.[picker.dir]?.icon}
           anchor={picker.row}
           close={closePicker}
-        />
+        />,
+        document.body,
       )}
     </>
   );

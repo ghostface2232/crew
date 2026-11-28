@@ -333,7 +333,8 @@ export function ProjectIconPicker({ dir, name, stored, anchor, close }: {
     };
     // Taken before the page's own Escape handlers, so an open detail panel or drawer stays as it is.
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      // A modal sheet opened over the picker takes Escape first.
+      if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('dialog[open]:modal')) return;
       event.preventDefault();
       closeRef.current(true);
     };

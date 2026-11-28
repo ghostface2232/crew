@@ -1,25 +1,42 @@
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { readToken, tokenFile } from './auth.ts';
+import { healthProof, readToken, sameToken, tokenFile } from './auth.ts';
 import { agentEnv, baseUrl, HOME, installed, nodeEnv, PLUGIN_ROOT } from './config.ts';
 import { execTimed } from './rpc.ts';
 
 export async function api<T = any>(method: 'GET' | 'POST', route: string, body?: unknown, signal?: AbortSignal): Promise<T> {
-  const send = (token: string | null) => fetch(`${baseUrl()}${route}`, {
-    method,
-    signal,
-    headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...(token ? { authorization: `Bearer ${token}` } : {}) },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  let res = await send(readToken(HOME));
-  // The daemon makes the token file on its first start, which may be a moment after this process first looked.
+  const origin = baseUrl();
+  const send = async () => {
+    signal?.throwIfAborted();
+    const daemon = await verifiedDaemon(origin);
+    if (!daemon) throw new Error(`The listener at ${origin} is not a verified Crew daemon.`);
+    try {
+      return await fetch(`${origin}${route}`, {
+        method,
+        signal,
+        redirect: 'error',
+        headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...(daemon.token ? { authorization: `Bearer ${daemon.token}` } : {}) },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch (err) {
+      forgetDaemon(origin);
+      throw err;
+    }
+  };
+  let res = await send();
+  // A daemon may start or the token may change while a request is in flight.
   if (res.status === 401) {
+    forgetDaemon(origin);
     await delay(200, undefined, { signal });
-    res = await send(readToken(HOME));
+    res = await send();
   }
-  const data: any = await res.json();
+  const data: any = await res.json().catch((err) => {
+    forgetDaemon(origin);
+    throw err;
+  });
   if (res.status === 401) throw new Error(`The Crew daemon refused this request: ${tokenFile(HOME)} is missing or is not the running daemon's. Restart the daemon with \`crew daemon restart\`.`);
   if (!res.ok) throw new Error(data.error ?? `bridge returned ${res.status}`);
   return data;
@@ -37,14 +54,84 @@ export interface Health {
   partialEnv?: boolean;
 }
 
-export async function health(): Promise<Health | null> {
+/** A live daemon record can identify a pre-proof daemon and keep an earlier verification current. */
+export function daemonRecord(): { port: number; pid: number } | null {
   try {
-    const res = await fetch(`${baseUrl()}/api/health`, { signal: AbortSignal.timeout(1000) });
-    const data: any = await res.json();
-    return data.name === 'crew' ? { ...data, active: data.active ?? 0 } : null;
+    const { port, pid } = JSON.parse(fs.readFileSync(path.join(HOME, 'daemon.json'), 'utf8'));
+    if (!Number.isInteger(port) || port < 1 || port > 65535 || !Number.isSafeInteger(pid) || pid < 1) return null;
+    try {
+      process.kill(pid, 0);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EPERM') return null;
+    }
+    return { port, pid };
   } catch {
     return null;
   }
+}
+
+interface VerifiedDaemon {
+  health: Health;
+  token: string | null;
+}
+
+/** A fresh, unauthenticated probe. Startup also uses it to identify another daemon before giving up a port. */
+export async function probeDaemon(origin: string): Promise<VerifiedDaemon | null> {
+  try {
+    const challenge = randomBytes(32).toString('hex');
+    const res = await fetch(`${origin}/api/health?challenge=${challenge}`, { redirect: 'error', signal: AbortSignal.timeout(1000) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data?.name !== 'crew' || !Number.isSafeInteger(data.pid) || data.pid < 1) return null;
+    const token = readToken(HOME);
+    if (Object.hasOwn(data, 'proof')) {
+      const expected = token && healthProof(token, challenge);
+      if (!expected || !sameToken(data.proof, expected)) return null;
+    } else {
+      const recorded = daemonRecord();
+      if (!recorded || origin !== `http://127.0.0.1:${recorded.port}` || recorded.pid !== data.pid) return null;
+    }
+    return { health: { ...data, active: data.active ?? 0 }, token };
+  } catch {
+    return null;
+  }
+}
+
+let cached: { origin: string; daemon: VerifiedDaemon } | undefined;
+let probing: { origin: string; result: Promise<VerifiedDaemon | null> } | undefined;
+
+export function forgetDaemon(origin: string): void {
+  if (cached?.origin === origin) cached = undefined;
+}
+
+async function checkDaemon(origin: string): Promise<VerifiedDaemon | null> {
+  if (probing?.origin === origin) return probing.result;
+  const result = probeDaemon(origin).then((daemon) => {
+    if (daemon) cached = { origin, daemon };
+    else forgetDaemon(origin);
+    return daemon;
+  }).finally(() => {
+    if (probing?.result === result) probing = undefined;
+  });
+  probing = { origin, result };
+  return result;
+}
+
+/** Reuse a verification only while the port, live recorded PID and token still match. */
+export async function verifiedDaemon(origin: string): Promise<VerifiedDaemon | null> {
+  if (origin !== baseUrl()) return null;
+  if (cached?.origin === origin) {
+    const record = daemonRecord();
+    if (record && origin === `http://127.0.0.1:${record.port}` && record.pid === cached.daemon.health.pid && readToken(HOME) === cached.daemon.token) return cached.daemon;
+    forgetDaemon(origin);
+  }
+  const daemon = await checkDaemon(origin);
+  return origin === baseUrl() ? daemon : null;
+}
+
+export async function health(): Promise<Health | null> {
+  // Lifecycle callers need current activity and PID, even when credentialed requests can reuse a verification.
+  return (await checkDaemon(baseUrl()))?.health ?? null;
 }
 
 async function waitFor(check: () => Promise<boolean>, ms: number): Promise<boolean> {
@@ -114,7 +201,7 @@ export function shouldReplace(running: Health, disk: { version: string; build: s
 
 /**
  * Stops the running daemon even if jobs are active, for `crew daemon stop` and `restart`.
- * Falls back to SIGTERM if the daemon rejects the token on disk, and throws if it stays up.
+ * Falls back to SIGTERM if the verified daemon rejects the shutdown request, and throws if it stays up.
  */
 export async function stopDaemon(): Promise<void> {
   const running = await health();

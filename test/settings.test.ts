@@ -66,9 +66,9 @@ test('instructions are written where the agents read them, and blank text remove
   const file = instructionsFile(home, project);
   assert.equal(file, path.join(project, '.crew', 'instructions.md'));
 
-  assert.equal(readInstructions(file), '');
+  assert.equal(readInstructions(file, 'project'), '');
   writeInstructions(file, 'Use tabs.');
-  assert.equal(readInstructions(file), 'Use tabs.\n');
+  assert.equal(readInstructions(file, 'project'), 'Use tabs.\n');
   writeInstructions(file, '  \n');
   assert.equal(fs.existsSync(file), false);
   // Removing what is already absent is not an error.
@@ -130,6 +130,26 @@ test('a project\'s shared instructions are not read through a symbolic link', ()
   fs.writeFileSync(mine, 'Prefer small diffs.');
   fs.symlinkSync(mine, path.join(home, 'instructions.md'));
   assert.equal(sharedInstructions(home, tempDir()).text, '## From the user, for every project\nPrefer small diffs.');
+});
+
+test('settings refuse a linked project instructions file or parent and allow a linked global file', (t) => {
+  const home = tempDir();
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const project = path.join(home, 'project');
+  const elsewhere = path.join(home, 'elsewhere');
+  fs.mkdirSync(path.join(project, '.crew'), { recursive: true });
+  fs.mkdirSync(elsewhere);
+  const target = path.join(elsewhere, 'instructions.md');
+  fs.writeFileSync(target, '  sample text\n');
+  const file = instructionsFile(home, project);
+  fs.symlinkSync(target, file, 'file');
+  assert.throws(() => readInstructions(file, 'project'), /is a symbolic link/);
+  fs.rmSync(path.dirname(file), { recursive: true });
+  fs.symlinkSync(elsewhere, path.dirname(file), 'junction');
+  assert.throws(() => readInstructions(file, 'project'), /is a symbolic link/);
+  const global = instructionsFile(home, null);
+  fs.symlinkSync(target, global, 'file');
+  assert.equal(readInstructions(global, 'every'), '  sample text\n');
 });
 
 test('a config file that is not a settings object is refused, not overwritten', () => {
@@ -251,12 +271,12 @@ test('saving a preset keeps every other setting, and clearing it removes the key
 
 test('appending to the instructions adds a paragraph and creates the file when there is none', () => {
   const file = path.join(tempDir(), 'instructions.md');
-  appendInstructions(file, '  Use pnpm.  ');
-  assert.equal(readInstructions(file), 'Use pnpm.\n');
-  appendInstructions(file, 'Tests live in test/.');
-  assert.equal(readInstructions(file), 'Use pnpm.\n\nTests live in test/.\n');
-  assert.throws(() => appendInstructions(file, '  \n'), /no text to add/);
-  assert.equal(readInstructions(file), 'Use pnpm.\n\nTests live in test/.\n');
+  appendInstructions(file, '  Use pnpm.  ', 'every');
+  assert.equal(readInstructions(file, 'every'), 'Use pnpm.\n');
+  appendInstructions(file, 'Tests live in test/.', 'every');
+  assert.equal(readInstructions(file, 'every'), 'Use pnpm.\n\nTests live in test/.\n');
+  assert.throws(() => appendInstructions(file, '  \n', 'every'), /no text to add/);
+  assert.equal(readInstructions(file, 'every'), 'Use pnpm.\n\nTests live in test/.\n');
 });
 
 test('project keys have one spelling whether git or Claude Code reported them', () => {

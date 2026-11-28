@@ -4,8 +4,8 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { boardCredential, boardUrl, readToken, SESSION_COOKIE } from '../plugin/bridge/auth.ts';
-import { api, ensureDaemon, health } from '../plugin/bridge/client.ts';
+import { boardCredential, boardUrl, SESSION_COOKIE } from '../plugin/bridge/auth.ts';
+import { api, ensureDaemon, forgetDaemon, health, verifiedDaemon } from '../plugin/bridge/client.ts';
 import { baseUrl, HOME, loadConfig, PLUGIN_ROOT } from '../plugin/bridge/config.ts';
 import type { BoardState } from '../plugin/board/src/types.ts';
 import { pickLanguage, setLanguage, t } from '../plugin/board/src/i18n.ts';
@@ -187,10 +187,25 @@ let signed: { token: string; credential: string; expires: number } | null = null
 function signBoard(board: BrowserWindow) {
   // Read once: the session outlives the window, whose contents cannot be asked for their id once it is destroyed.
   const { id } = board.webContents;
-  board.webContents.session.webRequest.onBeforeSendHeaders((details, respond) => {
-    const token = details.webContentsId === id && URL.parse(details.url)?.origin === baseUrl() ? readToken(HOME) : null;
+  const { webRequest } = board.webContents.session;
+  webRequest.onBeforeSendHeaders(async (details, respond) => {
+    const origin = URL.parse(details.url)?.origin;
+    if (details.webContentsId !== id || origin !== baseUrl()) {
+      respond({ requestHeaders: details.requestHeaders });
+      return;
+    }
+    const daemon = await verifiedDaemon(origin);
+    if (!daemon) {
+      respond({ cancel: true });
+      return;
+    }
+    const { token } = daemon;
     if (token && (signed?.token !== token || signed.expires - Date.now() < 3_600_000)) signed = { token, ...boardCredential(token) };
     respond({ requestHeaders: token ? { ...details.requestHeaders, Authorization: `Bearer ${signed!.credential}` } : details.requestHeaders });
+  });
+  webRequest.onErrorOccurred((details) => {
+    const origin = URL.parse(details.url)?.origin;
+    if (details.webContentsId === id && origin === baseUrl()) forgetDaemon(origin);
   });
 }
 async function loadBoard() {
@@ -435,51 +450,52 @@ async function startDesktop() {
 }
 
 /** Only the main window's board page may reach the updater. */
-function fromBoard(event: IpcMainInvokeEvent) {
-  const url = event.senderFrame?.url;
-  if (event.sender !== window?.webContents || !url || !URL.canParse(url) || new URL(url).origin !== baseUrl()) {
+async function fromBoard(event: IpcMainInvokeEvent) {
+  const origin = URL.parse(event.senderFrame?.url ?? '')?.origin;
+  if (event.sender !== window?.webContents || !origin || !await verifiedDaemon(origin)
+      || event.sender !== window?.webContents || URL.parse(event.senderFrame?.url ?? '')?.origin !== origin) {
     throw new Error('The updater answers only the Crew board.');
   }
 }
 function watchUpdates() {
-  ipcMain.handle('update:state', (event) => {
-    fromBoard(event);
+  ipcMain.handle('update:state', async (event) => {
+    await fromBoard(event);
     return updater.status;
   });
   // Asked for by the user, so a release on offer downloads at once.
   ipcMain.handle('update:check', async (event) => {
-    fromBoard(event);
+    await fromBoard(event);
     await updater.check();
     await updater.download();
   });
   ipcMain.handle('update:install', async (event) => {
-    fromBoard(event);
+    await fromBoard(event);
     await installUpdate();
   });
-  ipcMain.handle('update:cancel', (event) => {
-    fromBoard(event);
+  ipcMain.handle('update:cancel', async (event) => {
+    await fromBoard(event);
     // Only an install still waiting can be called off; past that, the daemon is already stopping.
     if (updater.status.state === 'installing' && updater.status.waiting !== undefined) updater.failed();
   });
-  ipcMain.handle('update:seen', (event) => {
-    fromBoard(event);
+  ipcMain.handle('update:seen', async (event) => {
+    await fromBoard(event);
     updater.seen();
   });
-  ipcMain.handle('welcome:pending', (event) => {
-    fromBoard(event);
+  ipcMain.handle('welcome:pending', async (event) => {
+    await fromBoard(event);
     return fs.existsSync(welcomeFile);
   });
-  ipcMain.handle('welcome:done', (event) => {
-    fromBoard(event);
+  ipcMain.handle('welcome:done', async (event) => {
+    await fromBoard(event);
     fs.rmSync(welcomeFile, { force: true });
   });
-  ipcMain.handle('login:state', (event) => {
-    fromBoard(event);
+  ipcMain.handle('login:state', async (event) => {
+    await fromBoard(event);
     return loginItemSupported ? opensAtLogin() : null;
   });
   // Turning it on also switches it back on where the user turned it off in Task Manager (`enabled` defaults to true).
-  ipcMain.handle('login:set', (event, open: unknown) => {
-    fromBoard(event);
+  ipcMain.handle('login:set', async (event, open: unknown) => {
+    await fromBoard(event);
     if (!loginItemSupported || typeof open !== 'boolean') throw new Error('Only the installed app opens at sign-in.');
     app.setLoginItemSettings({ openAtLogin: open, ...LOGIN_ITEM });
     return opensAtLogin();

@@ -106,7 +106,13 @@ The daemon that wins the port creates the master secret in `~/.crew/token` on fi
 
 All other requests without valid credentials return `401` (`{ "error": "unauthorized" }`).
 
+`GET /api/health?challenge=<hex>` adds a `proof` field to the unauthenticated health response. The challenge must contain 32 to 128 hexadecimal characters. Other values are ignored. The proof is the lowercase hexadecimal HMAC-SHA256 of the UTF-8 string `crew-health:` followed by the challenge as sent, keyed by the daemon's token string.
+
+Clients send a fresh random challenge and compare the proof in constant time. They require `name: "crew"`. For older daemons that omit the `proof` field, clients require `~/.crew/daemon.json` to name the port and the PID in the response and require that process to be alive. A proof that is present and invalid fails verification. The bridge and desktop app verify the daemon before signing requests. On startup the daemon skips occupied ports unless it verifies that a Crew daemon already holds the port.
+
 ### Trust boundaries
+
+The instructions endpoints refuse a symbolic link at a project's `.crew` directory or instructions file when reading project instructions. The global instructions file may point to a symbolic link.
 
 - **No secret in browsers (no cookies, no web storage).** Workers can read most of the disk. Antigravity and Codex jobs are denied access to `~/.crew/token`; a Claude worker's commands are not ([sandbox.md](sandbox.md)). Browser cookies are sent across ports on `127.0.0.1` (leaking to a `runs_app` worker's local server) and stored plaintext on disk. Web storage is also plaintext on disk. Any legacy `crew_session` cookie is ignored and cleared via `Set-Cookie: Max-Age=0`. Keeping the board credential in memory means a reload, bookmark, or 7-day expiry signs the browser tab out. Desktop apps retain their sign-in.
 - **Tickets and credentials.** `POST /api/session/ticket` returns a 64-hex single-use ticket valid for 60 seconds in memory. `POST /api/session` trades it atomically for `board.<expiry>.<HMAC>`, valid for 7 days. Because the daemon uses an HMAC seal in place of storage, an open board reconnects across daemon restarts and stops working when it expires or the secret rotates (active SSE streams close at expiry).

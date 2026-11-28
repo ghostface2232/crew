@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import childProcess, { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -660,6 +660,26 @@ test('a copy from .worktreeinclude stays out of the commit when the job\'s base 
   assert.equal(execFileSync('git', ['show', '--format=', '--name-only', job.worktree!.branch], { cwd: repo, encoding: 'utf8' }).trim(), 'work.txt');
 });
 
+test('a copied include stays out of the commit after its ignore rule is removed', async (t) => {
+  const repo = tempRepo();
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+  fs.writeFileSync(path.join(repo, '.gitignore'), '.env\n');
+  fs.writeFileSync(path.join(repo, '.worktreeinclude'), '.env\n');
+  git('add', '.gitignore', '.worktreeinclude');
+  git('commit', '-qm', 'ignore local includes');
+  fs.writeFileSync(path.join(repo, '.env'), 'KEY=sample\n');
+  const { jobs, home } = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, '.gitignore'), '# ignore rule removed\n');
+    ctl.done('updated ignore rules');
+  });
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'update ignore rules' }));
+  assert.equal(job.state, 'done');
+  assert.equal(git('show', '--format=', '--name-only', job.worktree!.branch), '.gitignore');
+  assert.deepEqual(job.worktree!.copied, ['.env']);
+  assert.equal(fs.readFileSync(path.join(job.cwd, '.env'), 'utf8'), 'KEY=sample\n');
+});
+
 test('a new job never takes the id of one on record, so a failed start removes only its own', async (t) => {
   const repo = tempRepo();
   const { jobs } = harness((ctl) => ctl.done('ok'));
@@ -957,6 +977,38 @@ test('preparing a review diff rejects overlapping replies and cancellation preve
   assert.equal(job.state, 'cancelled');
   assert.deepEqual(h.calls, ['cancel']);
   assert.equal(fs.existsSync(path.join(h.home, 'reviews', `${job.id}-2.diff`)), false);
+});
+
+test('cancel refuses a finished job while a follow-up sync is preparing', async (t) => {
+  const repo = tempRepo();
+  const { jobs, home, calls } = harness((ctl) => ctl.done('built'));
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'build' }));
+  const merging = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const { execFile } = childProcess;
+  t.mock.method(childProcess, 'execFile', (file: string, args: string[], options: object, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
+    return execFile(file, args, options, (err, stdout, stderr) => {
+      if (!args.includes('merge')) callback(err, stdout, stderr);
+      else {
+        merging.resolve();
+        void release.promise.then(() => callback(err, stdout, stderr));
+      }
+    });
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const pending = jobs.reply(job.id, { message: 'continue', sync: true });
+  try {
+    await Promise.race([merging.promise, pending.then(() => assert.fail('Follow-up finished before sync reached Git'))]);
+    await assert.rejects(jobs.cancel(job.id), /being brought up to date/);
+  } finally {
+    release.resolve();
+    await pending;
+    await settled(jobs, job);
+  }
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /^reply:continue\n/);
 });
 
 test('a worktree job can be continued as soon as its result is published', async () => {
@@ -3492,6 +3544,24 @@ test('a cancelled turn whose send fails late does not end the turn that followed
   await jobs.reply(job.id, { message: 'C' });
   assert.equal(job.state, 'failed');
   assert.equal(jobs.get(job.id).error?.message, 'turn C could not start');
+});
+
+test('result collection leaves a switched worktree and its index untouched', async (t) => {
+  const repo = tempRepo();
+  let worker!: JobCtl;
+  const { jobs, home } = harness((ctl) => { worker = ctl; });
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const job = await jobs.create({ kind: 'delegate', cwd: repo, task: 'edit' });
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: job.cwd, encoding: 'utf8' }).trimEnd();
+  git('switch', '-qc', 'different-branch');
+  fs.writeFileSync(path.join(job.cwd, 'app.js'), 'export const x = 2;\n');
+  const before = [git('rev-parse', 'HEAD', job.worktree!.branch), git('status', '--porcelain')];
+  worker.done('edited app.js');
+  await settled(jobs, job);
+  assert.deepEqual([git('rev-parse', 'HEAD', job.worktree!.branch), git('status', '--porcelain')], before);
+  assert.equal(job.result, null);
+  assert.equal(job.state, 'failed');
+  assert.match(job.error!.message, /worktree is not on crew-/);
 });
 
 test('the worker\'s report is kept when its result cannot be collected', async (t) => {

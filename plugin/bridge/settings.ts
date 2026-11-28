@@ -3,6 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { canonicalPath, isProjectIcon, PROJECT_SWITCHES, resolveConfig, TURN_TOKEN_CHOICES, validTurnTokenBudget } from './config.ts';
 import type { Config, ProjectSettings } from './config.ts';
+import { readInstructions } from './instructions.ts';
+import type { SharedScope } from './instructions.ts';
+
+export { readInstructions };
 
 /**
  * Writes made from the board's settings view. Each one edits a file the user could edit by hand,
@@ -182,15 +186,6 @@ export function instructionsFile(home: string, project: string | null): string {
   return project ? path.join(project, '.crew', 'instructions.md') : path.join(home, 'instructions.md');
 }
 
-export function readInstructions(file: string): string {
-  try {
-    return fs.readFileSync(file, 'utf8');
-  } catch (err) {
-    if (['ENOENT', 'ENOTDIR'].includes((err as NodeJS.ErrnoException).code ?? '')) return '';
-    throw new Error(`Could not read ${file}: ${(err as Error).message}`);
-  }
-}
-
 /** Blank text removes the file: no instructions and an empty file mean the same, and one fewer file to wonder about. */
 export function writeInstructions(file: string, text: string): void {
   const dir = path.dirname(file);
@@ -201,9 +196,9 @@ export function writeInstructions(file: string, text: string): void {
 }
 
 /** Adds text to the shared instructions as a paragraph of its own. Blank text is refused: it would add nothing. */
-export function appendInstructions(file: string, text: string): void {
+export function appendInstructions(file: string, text: string, scope: SharedScope): void {
   const added = text.trim();
   if (!added) throw new Error('There is no text to add.');
-  const current = readInstructions(file).trimEnd();
+  const current = readInstructions(file, scope).trimEnd();
   writeInstructions(file, current ? `${current}\n\n${added}` : added);
 }

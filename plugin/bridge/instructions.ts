@@ -25,13 +25,13 @@ function isLink(target: string): boolean {
   try {
     return fs.lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink() ?? false;
   } catch (err) {
-    // A `.crew` that is a file, not a folder, holds nothing to read; `read` reports that as none.
+    // A `.crew` that is a file, not a folder, holds nothing to read.
     if ((err as NodeJS.ErrnoException).code === 'ENOTDIR') return false;
     throw err;
   }
 }
 
-function read(file: string, scope: SharedScope): string {
+export function readInstructions(file: string, scope: SharedScope): string {
   // A project's `.crew` comes with its repository, which may not be the user's own. A link there could name any
   // file the daemon can read, the daemon's token included, and its text would be handed to every worker.
   if (scope === 'project') {
@@ -39,7 +39,7 @@ function read(file: string, scope: SharedScope): string {
     if (link) throw new Error(`Could not read ${file}: ${link} is a symbolic link, and a project's shared instructions are read only from a regular file`);
   }
   try {
-    return fs.readFileSync(file, 'utf8').trim();
+    return fs.readFileSync(file, 'utf8');
   } catch (err) {
     // No such file means "none", including when `.crew` is not a directory. Anything else must surface:
     // running without instructions that were written is worse than not running.
@@ -62,7 +62,7 @@ export function sharedInstructions(home: string, project: string | null): Shared
   // With the home directory as the project, both names are one file.
   const projectFile = project && path.join(project, '.crew', 'instructions.md');
   if (projectFile && path.resolve(projectFile) !== path.resolve(globalFile)) candidates.push(['From this repository (`.crew/instructions.md`)', 'project', projectFile]);
-  const sections = candidates.map(([heading, scope, file]) => ({ heading, scope, file, text: read(file, scope) })).filter((s) => s.text);
+  const sections = candidates.map(([heading, scope, file]) => ({ heading, scope, file, text: readInstructions(file, scope).trim() })).filter((s) => s.text);
   return { text: sections.map(render).join('\n\n'), sources: sections.map((s) => s.file), scopes: sections.map((s) => s.scope), sections };
 }
 

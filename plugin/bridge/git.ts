@@ -104,12 +104,11 @@ export interface Worktree {
 export const attached = (wt: Pick<Worktree, 'linked' | 'copied'>): string[] => [...(wt.linked ?? []), ...(wt.copied ?? [])];
 
 /**
- * What is in a new worktree without being in its commit and without being ignored there: what Crew copied in. The
- * base may not ignore what the main tree ignores (an older base, or a `.gitignore` edit not yet committed), and a
- * copied `.env` would then be committed with the worker's change. A directory holding nothing tracked is one entry.
+ * Attachments in a fresh worktree, including ignored paths since ignore rules can change before collection.
+ * A directory holding nothing tracked is one entry.
  */
 export async function untrackedPaths(wt: string): Promise<string[]> {
-  const listed = await git(wt, ['ls-files', '--others', '--exclude-standard', '--directory', '--no-empty-directory', '-z']);
+  const listed = await git(wt, ['ls-files', '--others', '--directory', '--no-empty-directory', '-z']);
   return listed.split('\0').filter(Boolean).map((entry) => entry.replace(/\/$/, ''));
 }
 

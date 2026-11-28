@@ -7,12 +7,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { boardAsset, BOARD_CSP } from './assets.ts';
-import { boardCredential, boardExpiry, ensureToken, evidenceSeal, sameToken, SESSION_COOKIE } from './auth.ts';
+import { boardCredential, boardExpiry, ensureToken, evidenceSeal, healthProof, sameToken, SESSION_COOKIE } from './auth.ts';
 import { antigravityAdapter } from './adapters/antigravity.ts';
 import { claudeAdapter } from './adapters/claude.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { CodexLeads, codexQueue } from './codex-lead.ts';
 import { stopChecks } from './check.ts';
+import { daemonRecord, probeDaemon } from './client.ts';
 import { clientJson } from './text.ts';
 import { ClaudeSessions } from './claude.ts';
 import type { ClaudeSession } from './claude.ts';
@@ -89,28 +90,20 @@ function listening(port: number): Promise<boolean> {
   });
 }
 
-/** The port of a daemon that is running for this Crew home, as it recorded it. */
-async function recorded(): Promise<{ pid: number; port: number } | null> {
-  try {
-    const { pid, port } = JSON.parse(fs.readFileSync(path.join(HOME, 'daemon.json'), 'utf8'));
-    process.kill(pid, 0);
-    return await listening(port) ? { pid, port } : null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Bind a port before writing any state on disk. If two daemons start at once, both try the same ports in the same
- * order, so the loser finds the winner listening and exits before creating a token or deleting the winner's scratch
+ * order, so the loser verifies the winner and exits before creating a token or deleting the winner's scratch
  * directories and review snapshots. A port the system reserves has no listener, so it is skipped. Reservations move,
  * so a daemon on a fallback port does not hold the ports before it: a later daemon checks the record first.
  */
 async function bind(): Promise<number> {
-  const running = await recorded();
-  if (running) {
-    log(`port ${running.port} is already in use by the running daemon (process ${running.pid})`);
-    process.exit(0);
+  const record = daemonRecord();
+  if (record) {
+    const running = await probeDaemon(`http://127.0.0.1:${record.port}`);
+    if (running) {
+      log(`port ${record.port} is already in use by the running daemon (process ${running.health.pid})`);
+      process.exit(0);
+    }
   }
   for (const port of PORTS) {
     const err = await new Promise<NodeJS.ErrnoException | null>((resolve) => {
@@ -125,12 +118,16 @@ async function bind(): Promise<number> {
       log(`server error: ${err.message}`);
       process.exit(1);
     }
-    // Another daemon won the race for the port; the client will find it via /api/health.
-    if (await listening(port)) {
-      log(`port ${port} is already in use`);
+    const running = await probeDaemon(`http://127.0.0.1:${port}`);
+    if (running) {
+      log(`port ${port} is already in use by the running daemon (process ${running.health.pid})`);
       process.exit(0);
     }
-    log(`port ${port} is reserved by the system with nothing listening on it`);
+    if (await listening(port)) {
+      log(`port ${port} is already in use by an unverified listener`);
+    } else {
+      log(`port ${port} is reserved by the system with nothing listening on it`);
+    }
   }
   log(`no port Crew can use is free: ${PORTS.join(', ')}`);
   process.exit(1);
@@ -694,14 +691,18 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       fs.createReadStream(file).pipe(res);
       return undefined;
     }
-    if (pathname === '/api/health') return { name: 'crew', version: VERSION, build: BUILD, root: PLUGIN_ROOT, pid: process.pid, active: jobs.activeCount + mutatingPosts, ...(PARTIAL_ENV ? { partialEnv: true } : {}) };
+    if (pathname === '/api/health') {
+      const proof = healthProof(TOKEN, url.searchParams.get('challenge'));
+      return { name: 'crew', version: VERSION, build: BUILD, root: PLUGIN_ROOT, pid: process.pid, active: jobs.activeCount + mutatingPosts, ...(PARTIAL_ENV ? { partialEnv: true } : {}), ...(proof ? { proof } : {}) };
+    }
     if (pathname === '/api/state') {
       const session = url.searchParams.get('lead_session');
       return session ? { ...state(), leadHooks: claude.leadHookState(session) } : state();
     }
     if (pathname === '/api/instructions') {
-      const file = await sharedFile(url.searchParams.get('project'));
-      return { file, text: readInstructions(file) };
+      const project = url.searchParams.get('project');
+      const file = await sharedFile(project);
+      return { file, text: readInstructions(file, project ? 'project' : 'every') };
     }
     if (pathname === '/api/usage') return usage.current();
     if (pathname === '/api/issues') {
@@ -1086,9 +1087,10 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       if (typeof (appending ? body.append : body.text) !== 'string') throw new HttpError(400, `${appending ? 'append' : 'text'} must be a string`);
       if (appending && body.text !== undefined) throw new HttpError(400, 'pass text or append, not both');
       const file = await sharedFile(body.project ?? null);
-      if (appending) appendInstructions(file, body.append);
+      const scope = body.project ? 'project' : 'every';
+      if (appending) appendInstructions(file, body.append, scope);
       else writeInstructions(file, body.text);
-      return { file, text: readInstructions(file) };
+      return { file, text: readInstructions(file, scope) };
     }
     if (pathname === '/api/notes') {
       const body = await readJson(req);

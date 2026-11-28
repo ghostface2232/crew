@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHmac } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -10,6 +11,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import vm from 'node:vm';
+import { healthProof } from '../plugin/bridge/auth.ts';
 import { canonicalPath, projectSettings, resolveConfig } from '../plugin/bridge/config.ts';
 import { projectRoot } from '../plugin/bridge/git.ts';
 import { autoResumesLeft, Jobs } from '../plugin/bridge/jobs.ts';
@@ -20,6 +22,26 @@ import { parseCache } from '../plugin/bridge/usage.ts';
 import { clientJson } from '../plugin/bridge/text.ts';
 
 const source = fs.readFileSync(new URL('../plugin/bridge/daemon.ts', import.meta.url), 'utf8');
+
+test('daemon bind skips an occupied port without a verified daemon', async () => {
+  const occupied = new Set([1, 2]);
+  const tried: number[] = [];
+  const server = Object.assign(new EventEmitter(), {
+    listen(this: EventEmitter, port: number, _host: string, ready: () => void) {
+      tried.push(port);
+      if (occupied.has(port)) this.emit('error', Object.assign(new Error('in use'), { code: 'EADDRINUSE' }));
+      else ready();
+    },
+  });
+  const start = source.indexOf('async function bind(');
+  const bind = vm.runInNewContext(stripTypeScriptTypes(source.slice(start, source.indexOf('\nconst PORT =', start))) + '; bind', {
+    server, PORTS: [1, 2, 3], daemonRecord: () => null, recorded: async () => null,
+    probeDaemon: async () => null, listening: async (port: number) => occupied.has(port), log: () => {},
+    process: { exit: (code: number) => assert.fail(`Unexpected exit ${code}`) },
+  }) as () => Promise<number>;
+  assert.equal(await bind(), 3);
+  assert.deepEqual(tried, [1, 2, 3]);
+});
 
 function reader(overrides: Record<string, unknown> = {}) {
   const start = source.indexOf('function readJson(');
@@ -47,6 +69,24 @@ function reader(overrides: Record<string, unknown> = {}) {
   };
   return { readJson, route, post, parses: () => parses };
 }
+
+test('open health proves possession of the token for valid challenges only', async () => {
+  const token = 'a'.repeat(64);
+  const h = reader({
+    TOKEN: token, healthProof, VERSION: '0.12.0', BUILD: 'build', PLUGIN_ROOT: 'root', process,
+    jobs: { activeCount: 2 }, mutatingPosts: 1, PARTIAL_ENV: true,
+    boardAsset: () => null,
+  });
+  const get = (query: string) => h.route(Object.assign(new EventEmitter(), { method: 'GET', url: '/api/health' + query }), {});
+  const plain = { name: 'crew', version: '0.12.0', build: 'build', root: 'root', pid: process.pid, active: 3, partialEnv: true };
+  for (const challenge of ['aB'.repeat(16), 'f'.repeat(128)]) {
+    const proof = createHmac('sha256', token).update('crew-health:' + challenge).digest('hex');
+    assert.deepEqual({ ...await get('?challenge=' + challenge) as object }, { ...plain, proof });
+  }
+  for (const query of ['', '?challenge=' + 'a'.repeat(31), '?challenge=' + 'f'.repeat(129), '?challenge=' + 'z'.repeat(32)]) {
+    assert.deepEqual({ ...await get(query) as object }, plain);
+  }
+});
 
 test('oversized JSON stops reading chunks and never parses at end', async (t) => {
   const h = reader();

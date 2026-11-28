@@ -827,7 +827,7 @@ export class Jobs {
         const included = await copyIncluded(repo, worktree.path);
         worktree.linked = included.linked;
         // Asked of Git rather than of the copy: a copy into a directory the base already has adds files of its own.
-        const copied = included.copied.length ? await untrackedPaths(worktree.path) : [];
+        const copied = included.copied.length ? (await untrackedPaths(worktree.path)).filter((entry) => !included.linked.includes(entry)) : [];
         if (copied.length) worktree.copied = copied;
         if (included.linked.length) notes.push(`Shared read-only from .worktreeinclude: ${included.linked.join(', ')}`);
         if (included.copied.length) notes.push(`Copied from .worktreeinclude: ${included.copied.join(', ')}`);
@@ -1072,8 +1072,7 @@ export class Jobs {
     if (job.worktree && job.kind !== 'review') {
       this.preparingReviews.add(id);
       try {
-        if (fs.lstatSync(job.worktree.path).isSymbolicLink()) throw new Error(`Job ${id}'s worktree path is now a link to somewhere else.`);
-        if ((await currentBranch(job.worktree.path)) !== job.worktree.branch) throw new Error(`Job ${id}'s worktree is not on ${job.worktree.branch}.`);
+        await this.requireJobBranch(id, job.worktree);
         if (job.rounds?.length) await this.reconcileRounds(job);
       } finally {
         this.preparingReviews.delete(id);
@@ -1315,7 +1314,10 @@ export class Jobs {
   async cancel(id: string): Promise<Job> {
     const job = this.get(id);
     if (this.cancelling.has(id)) throw new Error(`Job ${id} is already being cancelled.`);
-    if (isTerminal(job)) return job;
+    if (isTerminal(job)) {
+      if (this.preparingReviews.has(id)) throw new Error(`Job ${id} is being brought up to date. Wait for it to finish.`);
+      return job;
+    }
     const check = this.checks.get(id);
     if (check) {
       // The turn is over; stopping its check lets the result be collected now, with the check marked as stopped.
@@ -1823,11 +1825,17 @@ export class Jobs {
     }
   }
 
+  private async requireJobBranch(id: string, worktree: Worktree): Promise<void> {
+    if (fs.lstatSync(worktree.path).isSymbolicLink()) throw new Error(`Job ${id}'s worktree path is now a link to somewhere else.`);
+    if ((await currentBranch(worktree.path)) !== worktree.branch) throw new Error(`Job ${id}'s worktree is not on ${worktree.branch}.`);
+  }
+
   private async finalize(job: Job, report: string): Promise<void> {
     let result: Job['result'];
     let fix: string | undefined;
     // A review's worktree is a snapshot to run the app in; nothing in it is kept.
     if (job.worktree && job.kind !== 'review') {
+      await this.requireJobBranch(job.id, job.worktree);
       const commit = await commitAll(job.worktree.path, `crew(${job.agent}): ${job.title}`, attached(job.worktree));
       if (commit) (job.rounds ??= []).push({ turn: job.turns, commit, ...await commitChanges(job.worktree.path, commit), state: 'kept', at: Date.now() });
       result = await this.worktreeResult(job, commit);

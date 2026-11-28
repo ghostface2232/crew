@@ -63,6 +63,12 @@ export function sameToken(given: unknown, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/** The health challenge is public and uses a different message format from credential seals. */
+export function healthProof(token: string, challenge: string | null): string | undefined {
+  if (challenge === null || !/^[0-9a-f]{32,128}$/i.test(challenge)) return;
+  return createHmac('sha256', token).update(`crew-health:${challenge}`).digest('hex');
+}
+
 // The parts are sealed as JSON, so no two lists of parts make the same text.
 const seal = (token: string, ...parts: (string | number)[]) => createHmac('sha256', token).update(JSON.stringify(parts)).digest('hex');
 

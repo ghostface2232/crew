@@ -148,21 +148,7 @@ Read 2026-11-25 from `openai/codex`, `anthropics/claude-code`, and `anthropics/c
 
 **L1. The lead as an adapter. *(Done for Codex leads)*** Only three parts are tied to Claude Code: the MCP server, the hooks, and the skills. Jobs, events, and the board belong to the daemon. Defining the lead as the role that plans and decides merges lets Codex or a headless Claude take it, and resolves the temporary-lead handoff in [agentgauge-integration.md](../research/agentgauge-integration.md) section 8.2.
 
-Groundwork done: worker roles are a configurable registry (`config.ts`) and routing names the lead via `LEAD` (`'claude'`) instead of hardcoding Claude everywhere. No setting chooses the lead yet. What another lead needs, in order:
-
-1. Lead identity per connected session (`CLAUDE_CODE_SESSION_ID` today), not a global setting, so leads of different kinds can run at once.
-2. Driving the MCP server from another client with the session id passed in.
-3. Waking the lead when a job ends or needs it, and recording the user's recent prompts (which `approved_by_user` forwards alongside the lead's quote for the worker's automatic reviewer to judge, `jobs.ts`).
-4. Relaying approvals and questions to the user through that client.
-5. A Claude worker adapter, needed once Claude holds a worker role under another lead.
-
-Decided 2026-11-24: one plugin serves both hosts, and the host that starts a conversation leads it, so a Codex session leads its own jobs while a Claude session leads its own. The 2026-11-24 host checks ([mcp-compatibility.md](mcp-compatibility.md#5-codex-as-a-lead-host)) settle items 1 to 3 for Codex: a tool call names its thread in `_meta`, hooks receive the same id, and `codex queue` wakes an idle interactive session. The Claude plugin layout loads in Codex with two changes: hooks must be string commands, and the MCP server cannot rely on `${CLAUDE_PLUGIN_ROOT}`.
-
-Done 2026-11-24 (`mcp.ts`, `codex-lead.ts`, `delivery.ts`, `usage.ts`, `plugin/.codex-plugin/`, `plugin/hooks/codex.json`): items 1 to 3 for Codex, registered by `crew install` or the desktop apps ([architecture.md](architecture.md#bridge-and-state), [delivery.md](delivery.md#codex-leads)). Codex's hooks also report the session to the board and record the user's prompts for `approved_by_user` (`report.ts codex`), and the lead's own work is noted as Codex's.
-
-Item 4 is done (2026-11-25): the board shows a Codex lead waiting on an approval, and Codex forwards a Crew tool call's elicitation to its app-server client unless the approval policy is `never` (2026-11-25, [mcp-compatibility.md](mcp-compatibility.md#5-codex-as-a-lead-host)). The TUI (macOS) and the desktop app (Windows) draw it as their own prompt. A declined prompt goes back to the lead to ask in chat.
-
-Item 5 is done (`adapters/claude.ts`, 2026-11-24): under a Codex lead, a job in a role Claude holds starts a Claude Code worker, and a role Codex holds is the lead's own work (2026-11-25; [sandbox.md](sandbox.md#role-permissions), [approvals.md](approvals.md#claude-worker-approvals)). The design was debated with Codex (`cx-387950`). A writable job's permissions run in Claude Code's automatic mode, as Codex workers run with Codex's automatic reviewer (a read-only job stays manual), and a refused action comes back to the lead to retry with the user's approval ([approvals](approvals.md#claude-worker-approvals)). Usage-limit results (`api_error_status` 429, a `rate_limit_event` whose status is `rejected`) follow the CLI's own schema, read from Claude Code 2.1.328, but have not been seen at a real limit. A Codex lead's report hooks and a Claude worker ran end to end on macOS with Codex 0.172 ([mcp-compatibility.md](mcp-compatibility.md#5-codex-as-a-lead-host)). A Claude worker under a Claude lead stays out of scope.
+Done for Codex leads (`mcp.ts`, `codex-lead.ts`, `delivery.ts`, `usage.ts`, `adapters/claude.ts`, `plugin/.codex-plugin/`, `plugin/hooks/codex.json`): one plugin serves Claude Code and Codex, and whichever host starts a conversation leads it, with per-session lead identity, waking, board reporting, and prompt recording ([delivery.md](delivery.md#codex-leads), [architecture.md](architecture.md#bridge-and-state)), elicitation forwarding ([mcp-compatibility.md](mcp-compatibility.md#5-codex-as-a-lead-host)), and Claude Code workers for roles Claude holds under a Codex lead ([sandbox.md](sandbox.md), [approvals.md](approvals.md#claude-worker-approvals)). Claude worker usage-limit handling (`api_error_status` 429 and rejected `rate_limit_event`, read from Claude Code 2.1.328) has not been seen at a real limit; a Claude worker under a Claude lead stays out of scope.
 
 **L2. Own main screen. *(Partial)*** React board (`plugin/board/src/`), role-based direct dispatch (`Dispatch.tsx`, `DispatchView.swift`), native macOS SwiftUI/AppKit app (`native/`), and Windows Electron shell (`desktop/`) are done ([board.md](board.md), [macos-app.md](macos-app.md)). Closing the UI leaves the daemon and jobs running, and the web board stays available. Mission start with a lead, lead selection, and merge execution remain open.
 
@@ -174,9 +160,9 @@ Item 5 is done (`adapters/claude.ts`, 2026-11-24): under a Codex lead, a job in 
 
 **L4. More entry points. *(Open)*** Start missions from GitHub or Linear issues; a read-only mobile view. (Linked PR tracking in `pulls.ts` watches existing PRs rather than starting missions from issues.)
 
-**L6. Work on another machine. *(Open)*** Platform work the lead's machine cannot build or verify—such as the macOS app from Windows—goes to a session on a machine that can. A Codex lead can list the user's connected devices and open a session on one; a Claude lead cannot open a session, but can message an idle Remote Control session of the user's. Both hand work over as a pushed branch, governed by the autonomy switch. First done by hand on 2026-11-25, when a Claude session on a Mac built and tested the macOS side of section F.
-
 **L5. Board UI foundation and design system. *(Done)*** Implemented in `plugin/board/src/` with React 19, TypeScript, Vite, shared CSS tokens, `Settings.module.css`, Fluent icons, and Playwright e2e tests; Radix, Motion, and Storybook were deferred because native HTML elements and CSS transitions cover the scope ([board.md](board.md)).
+
+**L6. Work on another machine. *(Open)*** Platform work the lead's machine cannot build or verify—such as the macOS app from Windows—goes to a session on a machine that can. A Codex lead can list the user's connected devices and open a session on one; a Claude lead cannot open a session, but can message an idle Remote Control session of the user's. Both hand work over as a pushed branch, governed by the autonomy switch. First done by hand on 2026-11-25, when a Claude session on a Mac built and tested the macOS side of section F.
 
 ### Cost of L1 and L2
 

@@ -49,7 +49,7 @@ Call `delegate` for each piece with its `difficulty` and a brief written as belo
 
 ### Writing a brief
 
-The worker has not seen this conversation and follows every line literally. Give it the context and facts it needs to decide well, accurately and briefly, and leave out what does not affect acceptance. The brief goes in `task` for `delegate` and `polish`, `focus` for `review`, and `topic` and `position` for `debate`, with criteria in `done_when`; a call with an argument its tool does not take fails, so check the tool's arguments rather than reusing another tool's.
+The worker has not seen this conversation and follows every line literally. Give it the context and facts it needs to decide well, accurately and briefly, and leave out what does not affect acceptance. The brief goes in `task` for `delegate` and `polish` and `focus` for `review`, each with criteria in `done_when`; `debate` uses `topic` and `position` and takes no `done_when`. A call with an argument its tool does not take fails, so check the tool's arguments rather than reusing another tool's.
 
 - **Goal and place**: what to change and why, the files and interfaces involved, and which files it may edit when you or another worker are editing others.
 - **What is already decided**: the choices this piece must follow (names, formats, error handling, style) and what sibling jobs are building. Distinguish what you have verified from what you are assuming, so the worker checks each assumption before building on it.

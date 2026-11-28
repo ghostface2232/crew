@@ -71,6 +71,8 @@ When something hangs, `crew doctor` checks prerequisites, `crew daemon logs` sho
 
 `crew gc` previews orphan worktrees, Git metadata, and unused worker branches with their merge status against `HEAD`. `crew gc --apply` removes orphan directories and prunes metadata; add `--branches` to delete branches merged into `HEAD`. Unmerged branches stay, with a `git branch -D <name>` command for manual removal. Active and owned worktrees are protected, and Windows cleanup failures name leftovers in job status and notes.
 
+### Status board and missions
+
 The status board runs at http://127.0.0.1:47615, or on a fallback port in `~/.crew/daemon.json` when the system reserves that one. Open it with `crew board` or from the app to sign in; a browser tab holds a scoped credential in memory (valid up to 7 days, cleared on close or reload). Direct clients send the secret in `~/.crew/token` ([docs/daemon-api.md](docs/daemon-api.md)).
 
 Each `/crew:run` command appears as a mission with its jobs grouped under it, and the Needs You view lists every job and session waiting on you. Click a job to read its report, changed files, evidence, and activity, or to send a follow-up.
@@ -85,7 +87,7 @@ If [AgentGauge](https://github.com/ghostface2232/AgentGauge) is installed, each 
 
 Job turns appear as rounds that can be undone or kept one by one. New Job also accepts a read-only question or a piece of information to pin ([docs/jobs.md](docs/jobs.md), [docs/board.md](docs/board.md)).
 
-When a worker asks for approval or has a question, an input dialog pops up in the lead's app; you can also answer on the status board or in the desktop app. A computer-use request about one app or a simple Antigravity command can be allowed for the rest of its job so the worker stops asking on every call. Codex's built-in automatic reviewer answers approval requests first; you are asked only about what it refuses twice ([docs/approvals.md](docs/approvals.md)).
+When a worker asks for approval or has a question, an input dialog pops up in the lead's app; you can also answer on the status board or in the desktop app. A computer-use request about one app or a simple Antigravity command can be allowed for the rest of its job so the worker stops asking on every call. Approval requests go first to Codex's built-in automatic reviewer for Codex workers and to Claude Code's automatic mode for writable Claude workers; you are asked only about what either refuses twice ([docs/approvals.md](docs/approvals.md)).
 
 ## Desktop app
 

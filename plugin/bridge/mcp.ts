@@ -203,7 +203,7 @@ const buildTools = () => [
   {
     name: 'polish',
     title: 'Polish wording',
-    description: `Have the editor (${holder('polish')}) review and improve UI strings, comments, documentation, and instructions in the given files, in its own worktree. It may not change logic or structure. Not a merge gate: run it after the code is settled. Antigravity as editor runs no commands, so name the files and lines to polish rather than a command such as git diff.`,
+    description: `Have the editor (${holder('polish')}) review and improve wording in the given files—UI strings, comments, docs, and instruction files—in its own worktree. It may not change logic or structure. Not a merge gate: run it after the code is settled. Antigravity as editor runs no commands, so name the files and lines to read rather than a command such as git diff.`,
     inputSchema: {
       type: 'object',
       properties: {

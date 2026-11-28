@@ -827,7 +827,7 @@ export class Jobs {
         const included = await copyIncluded(repo, worktree.path);
         worktree.linked = included.linked;
         // Asked of Git rather than of the copy: a copy into a directory the base already has adds files of its own.
-        const copied = included.copied.length ? (await untrackedPaths(worktree.path)).filter((entry) => !included.linked.includes(entry)) : [];
+        const copied = (await untrackedPaths(worktree.path, included.copied)).filter((entry) => !included.linked.includes(entry));
         if (copied.length) worktree.copied = copied;
         if (included.linked.length) notes.push(`Shared read-only from .worktreeinclude: ${included.linked.join(', ')}`);
         if (included.copied.length) notes.push(`Copied from .worktreeinclude: ${included.copied.join(', ')}`);

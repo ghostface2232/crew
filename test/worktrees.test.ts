@@ -695,9 +695,9 @@ test('local files copied from .worktreeinclude stay out of the worker\'s commit 
   const wt = await createWorktree(repo, 'cx-c0ffee', 'HEAD', home);
   const commit = (message: string) => commitAll(wt.path, message, attached(wt));
   const committed = () => execFileSync('git', ['show', '--format=', '--name-only', 'HEAD'], { cwd: wt.path, encoding: 'utf8' }).trim();
-  await copyIncluded(repo, wt.path, async (source, dest) => fs.promises.cp(source, dest, { recursive: true }));
+  const included = await copyIncluded(repo, wt.path, async (source, dest) => fs.promises.cp(source, dest, { recursive: true }));
   // A file, a whole directory, and one file added to a directory the base already has.
-  wt.copied = await untrackedPaths(wt.path);
+  wt.copied = await untrackedPaths(wt.path, included.copied);
   assert.deepEqual(wt.copied.sort(), ['.env', 'cache/alias', 'deps']);
   assert.equal(await dirtyCount(wt.path, attached(wt)), 0);
   assert.equal(await commit('nothing of the worker\'s'), null);

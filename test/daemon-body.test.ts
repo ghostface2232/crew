@@ -23,24 +23,49 @@ import { clientJson } from '../plugin/bridge/text.ts';
 
 const source = fs.readFileSync(new URL('../plugin/bridge/daemon.ts', import.meta.url), 'utf8');
 
-test('daemon bind skips an occupied port without a verified daemon', async () => {
-  const occupied = new Set([1, 2]);
+function bindHarness(occupied: number[], record: () => { port: number; pid: number } | null) {
   const tried: number[] = [];
+  const probes: string[] = [];
+  let now = 0;
   const server = Object.assign(new EventEmitter(), {
     listen(this: EventEmitter, port: number, _host: string, ready: () => void) {
       tried.push(port);
-      if (occupied.has(port)) this.emit('error', Object.assign(new Error('in use'), { code: 'EADDRINUSE' }));
+      if (occupied.includes(port)) this.emit('error', Object.assign(new Error('in use'), { code: 'EADDRINUSE' }));
       else ready();
     },
   });
   const start = source.indexOf('async function bind(');
   const bind = vm.runInNewContext(stripTypeScriptTypes(source.slice(start, source.indexOf('\nconst PORT =', start))) + '; bind', {
-    server, PORTS: [1, 2, 3], daemonRecord: () => null, recorded: async () => null,
-    probeDaemon: async () => null, listening: async (port: number) => occupied.has(port), log: () => {},
-    process: { exit: (code: number) => assert.fail(`Unexpected exit ${code}`) },
+    server, PORTS: [1, 2, 3], daemonRecord: record, DAEMON_PORT_GRACE_MS: 10_000,
+    probeDaemon: async (origin: string) => { probes.push(origin); return null; },
+    listening: async (port: number) => occupied.includes(port), log: () => {},
+    Date: { now: () => now }, delay: async (ms: number) => { now += ms; },
+    process: { exit: (code: number) => { throw new Error(`exit ${code}`); } },
   }) as () => Promise<number>;
+  return { bind, tried, probes, elapsed: () => now };
+}
+
+test('daemon bind exits for a live recorded fallback listener without waiting for health', async () => {
+  const h = bindHarness([2], () => ({ port: 2, pid: 12345 }));
+  await assert.rejects(h.bind(), { message: 'exit 0' });
+  assert.deepEqual(h.tried, []);
+  assert.deepEqual(h.probes, []);
+});
+
+test('daemon bind waits for a starting listener to record its port and exits', async () => {
+  let reads = 0;
+  const h = bindHarness([1], () => ++reads >= 4 ? { port: 1, pid: 12345 } : null);
+  await assert.rejects(h.bind(), { message: 'exit 0' });
+  assert.deepEqual(h.tried, [1]);
+  assert.deepEqual(h.probes, ['http://127.0.0.1:1']);
+  assert.ok(h.elapsed() > 0 && h.elapsed() < 10_000);
+});
+
+test('daemon bind skips occupied ports after the record grace period', async () => {
+  const { bind, tried, elapsed } = bindHarness([1, 2], () => null);
   assert.equal(await bind(), 3);
   assert.deepEqual(tried, [1, 2, 3]);
+  assert.equal(elapsed(), 20_000);
 });
 
 function reader(overrides: Record<string, unknown> = {}) {

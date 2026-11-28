@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { createHmac } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, test } from 'node:test';
@@ -12,8 +14,8 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-client-'));
 process.env.CREW_HOME = home;
 // Every request is mocked; an unused port keeps a missed mock away from the user's daemon.
 process.env.CREW_PORT = '1';
-const { api, ensureDaemon, forgetDaemon, health, stopDaemon } = await import('../plugin/bridge/client.ts');
-const { baseUrl, PLUGIN_ROOT } = await import('../plugin/bridge/config.ts');
+const { api, ensureDaemon, forgetDaemon, health, stopDaemon, verifiedDaemon } = await import('../plugin/bridge/client.ts');
+const { baseUrl, PLUGIN_ROOT, PORTS } = await import('../plugin/bridge/config.ts');
 const file = path.join(home, 'daemon.json');
 const tokenFile = path.join(home, 'token');
 const token = 'a'.repeat(64);
@@ -69,6 +71,46 @@ test('an old daemon needs a matching live record and an invalid proof never fall
   assert.equal(await health(), null);
 });
 
+test('health without a readable token identifies Crew but sends no authorization', async (t) => {
+  fs.rmSync(tokenFile);
+  let proof = true;
+  t.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
+    assert.equal(new Headers(options.headers).has('authorization'), false);
+    if (!isHealth(url)) return Response.json({ ok: true });
+    return proof ? signedHealth(url, { pid: process.pid }) : Response.json({ name: 'crew', pid: process.pid });
+  });
+  assert.deepEqual(await api('GET', '/api/state'), { ok: true });
+  proof = false;
+  assert.equal((await verifiedDaemon(baseUrl()))?.token, null);
+});
+
+test('forgetting a daemon during a probe leaves no cached result and a retry starts a new probe', async (t) => {
+  fs.writeFileSync(file, JSON.stringify({ port: 1, pid: process.pid }));
+  const pending: (() => void)[] = [];
+  t.mock.method(globalThis, 'fetch', (url: string) => new Promise<Response>((resolve) => {
+    pending.push(() => resolve(signedHealth(url, { pid: process.pid })));
+  }));
+  const stale = verifiedDaemon(baseUrl());
+  forgetDaemon(baseUrl());
+  const retry = verifiedDaemon(baseUrl());
+  try {
+    assert.equal(pending.length, 2);
+  } catch (error) {
+    pending[0]();
+    await Promise.all([stale, retry]);
+    throw error;
+  }
+  pending[0]();
+  await stale;
+  const joined = verifiedDaemon(baseUrl());
+  pending[1]();
+  const fresh = await retry;
+  assert.ok(fresh);
+  assert.equal(await joined, fresh);
+  assert.equal(await verifiedDaemon(baseUrl()), fresh);
+  assert.equal(pending.length, 2);
+});
+
 test('API reuses a live daemon verification and discards it after a connection failure', async (t) => {
   fs.writeFileSync(file, JSON.stringify({ port: 1, pid: process.pid }));
   const challenges: (string | null)[] = [];
@@ -122,6 +164,28 @@ test('replacement leaves a daemon another client started in the meantime', async
   await ensureDaemon();
   assert.ok(shutdown);
   assert.equal(spawn.mock.callCount(), 0);
+});
+
+test('startup waits through a foreign port grace period for a daemon on a fallback port', async (t) => {
+  PORTS.push(2);
+  t.after(() => { PORTS.pop(); });
+  let now = 0;
+  t.mock.method(Date, 'now', () => now);
+  t.mock.method(globalThis, 'setTimeout', (callback: () => void, ms: number) => {
+    now += ms;
+    if (now === 11_000) fs.writeFileSync(file, JSON.stringify({ port: 2, pid: process.pid }));
+    queueMicrotask(callback);
+  });
+  t.mock.method(globalThis, 'fetch', async (url: string) => {
+    if (new URL(url).port === '2') return signedHealth(url, { pid: process.pid });
+    return Response.json({ name: 'foreign' });
+  });
+  const spawn = t.mock.method(childProcess, 'spawn', () => ({ on() {}, unref() {} }));
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  await ensureDaemon();
+  assert.equal(spawn.mock.callCount(), 1);
+  assert.equal(baseUrl(), 'http://127.0.0.1:2');
 });
 
 // On Windows a daemon started through WMI writes its log through cmd.exe, which holds it unshared until that daemon
@@ -217,6 +281,34 @@ test('stop retries a missing PID file before signalling the confirmed process', 
   });
   await stopDaemon();
   assert.equal(kill.mock.calls.filter(({ arguments: [, signal] }) => signal === 'SIGTERM').length, 1);
+  assert.equal(fs.existsSync(file), false);
+});
+
+test('stop signals a live recorded daemon even when its proof uses a different token', async (t) => {
+  PORTS.push(2);
+  t.after(() => { PORTS.pop(); });
+  fastWaits(t);
+  let listening = true;
+  fs.writeFileSync(file, JSON.stringify({ port: 2, pid: 12345 }));
+  t.mock.method(globalThis, 'fetch', async (url: string) => {
+    assert.ok(isHealth(url));
+    return Response.json({ name: 'crew', pid: 12345, proof: 'wrong' });
+  });
+  t.mock.method(net, 'connect', (port: number, host: string) => {
+    assert.deepEqual([port, host], [2, '127.0.0.1']);
+    const socket = Object.assign(new EventEmitter(), { setTimeout() {}, destroy() {} });
+    queueMicrotask(() => socket.emit(listening ? 'connect' : 'error', new Error('connection refused')));
+    return socket;
+  });
+  t.mock.method(process, 'kill', (pid: number, signal: string | number) => {
+    assert.equal(pid, 12345);
+    if (signal === 0) return true;
+    assert.equal(signal, 'SIGTERM');
+    listening = false;
+    return true;
+  });
+  await stopDaemon();
+  assert.equal(listening, false);
   assert.equal(fs.existsSync(file), false);
 });
 

@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, screen, session, shell, Tray } from 'electron';
-import type { IpcMainInvokeEvent, MessageBoxOptions, Rectangle } from 'electron';
+import type { IpcMainInvokeEvent, MessageBoxOptions, Rectangle, WebContents } from 'electron';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -179,6 +179,8 @@ function show() {
 }
 /** What the board's requests are signed with: a board credential, made again when the secret changes or it nears its end. */
 let signed: { token: string; credential: string; expires: number } | null = null;
+/** IPC stays available to the loaded board when its daemon or port record goes away. */
+const boardOrigins = new WeakMap<WebContents, string>();
 /**
  * Signs the board's requests from here, so its page holds nothing and neither a cookie nor an address carries the
  * secret. Only the board window's requests to the daemon are signed; a window opened for evidence loads an address
@@ -186,19 +188,42 @@ let signed: { token: string; credential: string; expires: number } | null = null
  */
 function signBoard(board: BrowserWindow) {
   // Read once: the session outlives the window, whose contents cannot be asked for their id once it is destroyed.
-  const { id } = board.webContents;
-  const { webRequest } = board.webContents.session;
+  const { webContents } = board;
+  const { id, session: { webRequest } } = webContents;
+  let navigation = 0;
+  let verifiedOrigin: string | undefined;
+  webContents.on('did-start-navigation', ({ url, isMainFrame, isSameDocument }) => {
+    if (!isMainFrame || isSameDocument) return;
+    navigation++;
+    verifiedOrigin = undefined;
+    if (URL.parse(url)?.origin !== boardOrigins.get(webContents)) boardOrigins.delete(webContents);
+  });
+  webContents.on('did-navigate', (_event, url) => {
+    const origin = URL.parse(url)?.origin;
+    if (origin && origin === verifiedOrigin) boardOrigins.set(webContents, origin);
+    else boardOrigins.delete(webContents);
+    verifiedOrigin = undefined;
+  });
+  webContents.on('did-fail-load', (_event, _code, _description, _url, isMainFrame) => {
+    if (!isMainFrame) return;
+    navigation++;
+    verifiedOrigin = undefined;
+    boardOrigins.delete(webContents);
+  });
   webRequest.onBeforeSendHeaders(async (details, respond) => {
     const origin = URL.parse(details.url)?.origin;
     if (details.webContentsId !== id || origin !== baseUrl()) {
       respond({ requestHeaders: details.requestHeaders });
       return;
     }
+    const pendingNavigation = navigation;
     const daemon = await verifiedDaemon(origin);
     if (!daemon) {
       respond({ cancel: true });
       return;
     }
+    // The probe can finish after the main frame has started another navigation.
+    if (details.resourceType === 'mainFrame' && pendingNavigation === navigation) verifiedOrigin = origin;
     const { token } = daemon;
     if (token && (signed?.token !== token || signed.expires - Date.now() < 3_600_000)) signed = { token, ...boardCredential(token) };
     respond({ requestHeaders: token ? { ...details.requestHeaders, Authorization: `Bearer ${signed!.credential}` } : details.requestHeaders });
@@ -450,52 +475,52 @@ async function startDesktop() {
 }
 
 /** Only the main window's board page may reach the updater. */
-async function fromBoard(event: IpcMainInvokeEvent) {
-  const origin = URL.parse(event.senderFrame?.url ?? '')?.origin;
-  if (event.sender !== window?.webContents || !origin || !await verifiedDaemon(origin)
-      || event.sender !== window?.webContents || URL.parse(event.senderFrame?.url ?? '')?.origin !== origin) {
+function fromBoard(event: IpcMainInvokeEvent) {
+  const url = event.senderFrame?.url;
+  const origin = boardOrigins.get(event.sender);
+  if (event.sender !== window?.webContents || !origin || !url || URL.parse(url)?.origin !== origin) {
     throw new Error('The updater answers only the Crew board.');
   }
 }
 function watchUpdates() {
-  ipcMain.handle('update:state', async (event) => {
-    await fromBoard(event);
+  ipcMain.handle('update:state', (event) => {
+    fromBoard(event);
     return updater.status;
   });
   // Asked for by the user, so a release on offer downloads at once.
   ipcMain.handle('update:check', async (event) => {
-    await fromBoard(event);
+    fromBoard(event);
     await updater.check();
     await updater.download();
   });
   ipcMain.handle('update:install', async (event) => {
-    await fromBoard(event);
+    fromBoard(event);
     await installUpdate();
   });
-  ipcMain.handle('update:cancel', async (event) => {
-    await fromBoard(event);
+  ipcMain.handle('update:cancel', (event) => {
+    fromBoard(event);
     // Only an install still waiting can be called off; past that, the daemon is already stopping.
     if (updater.status.state === 'installing' && updater.status.waiting !== undefined) updater.failed();
   });
-  ipcMain.handle('update:seen', async (event) => {
-    await fromBoard(event);
+  ipcMain.handle('update:seen', (event) => {
+    fromBoard(event);
     updater.seen();
   });
-  ipcMain.handle('welcome:pending', async (event) => {
-    await fromBoard(event);
+  ipcMain.handle('welcome:pending', (event) => {
+    fromBoard(event);
     return fs.existsSync(welcomeFile);
   });
-  ipcMain.handle('welcome:done', async (event) => {
-    await fromBoard(event);
+  ipcMain.handle('welcome:done', (event) => {
+    fromBoard(event);
     fs.rmSync(welcomeFile, { force: true });
   });
-  ipcMain.handle('login:state', async (event) => {
-    await fromBoard(event);
+  ipcMain.handle('login:state', (event) => {
+    fromBoard(event);
     return loginItemSupported ? opensAtLogin() : null;
   });
   // Turning it on also switches it back on where the user turned it off in Task Manager (`enabled` defaults to true).
-  ipcMain.handle('login:set', async (event, open: unknown) => {
-    await fromBoard(event);
+  ipcMain.handle('login:set', (event, open: unknown) => {
+    fromBoard(event);
     if (!loginItemSupported || typeof open !== 'boolean') throw new Error('Only the installed app opens at sign-in.');
     app.setLoginItemSettings({ openAtLogin: open, ...LOGIN_ITEM });
     return opensAtLogin();

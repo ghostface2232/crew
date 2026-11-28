@@ -450,9 +450,13 @@ test('the wake hook runs when its plugin folder is reached through a link', asyn
   fs.symlinkSync(fileURLToPath(new URL('../plugin/bridge', import.meta.url)), linked, 'junction');
   const requests: (string | undefined)[] = [];
   const daemon = http.createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.url?.startsWith('/api/health?')) {
+      res.end(JSON.stringify({ name: 'crew', pid: process.pid }));
+      return;
+    }
     requests.push(req.url);
     req.resume();
-    res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify(req.url === '/api/hooks/claude' ? { offer: { text: 'news for the lead', receipt: 'receipt' } } : {}));
   });
   await new Promise<void>((resolve) => daemon.listen(0, '127.0.0.1', resolve));

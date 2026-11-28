@@ -2,10 +2,10 @@ import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
-import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import { setTimeout as delay } from 'node:timers/promises';
 import { boardAsset, BOARD_CSP } from './assets.ts';
 import { boardCredential, boardExpiry, ensureToken, evidenceSeal, healthProof, sameToken, SESSION_COOKIE } from './auth.ts';
 import { antigravityAdapter } from './adapters/antigravity.ts';
@@ -13,7 +13,7 @@ import { claudeAdapter } from './adapters/claude.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { CodexLeads, codexQueue } from './codex-lead.ts';
 import { stopChecks } from './check.ts';
-import { daemonRecord, probeDaemon } from './client.ts';
+import { daemonRecord, DAEMON_PORT_GRACE_MS, listening, probeDaemon } from './client.ts';
 import { clientJson } from './text.ts';
 import { ClaudeSessions } from './claude.ts';
 import type { ClaudeSession } from './claude.ts';
@@ -80,30 +80,17 @@ const server = http.createServer((req, res) => {
   );
 });
 
-/** Whether something accepts connections on the port, as opposed to the system holding it with nothing behind it. */
-function listening(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = net.connect(port, '127.0.0.1');
-    socket.setTimeout(1000, () => { socket.destroy(); resolve(true); });
-    socket.once('connect', () => { socket.destroy(); resolve(true); });
-    socket.once('error', () => resolve(false));
-  });
-}
-
 /**
  * Bind a port before writing any state on disk. If two daemons start at once, both try the same ports in the same
- * order, so the loser verifies the winner and exits before creating a token or deleting the winner's scratch
+ * order, so the loser identifies the winner and exits before creating a token or deleting the winner's scratch
  * directories and review snapshots. A port the system reserves has no listener, so it is skipped. Reservations move,
  * so a daemon on a fallback port does not hold the ports before it: a later daemon checks the record first.
  */
 async function bind(): Promise<number> {
   const record = daemonRecord();
-  if (record) {
-    const running = await probeDaemon(`http://127.0.0.1:${record.port}`);
-    if (running) {
-      log(`port ${record.port} is already in use by the running daemon (process ${running.health.pid})`);
-      process.exit(0);
-    }
+  if (record && await listening(record.port)) {
+    log(`port ${record.port} is already in use by the running daemon (process ${record.pid})`);
+    process.exit(0);
   }
   for (const port of PORTS) {
     const err = await new Promise<NodeJS.ErrnoException | null>((resolve) => {
@@ -124,6 +111,16 @@ async function bind(): Promise<number> {
       process.exit(0);
     }
     if (await listening(port)) {
+      // A daemon can hold the port while synchronous initialization keeps health from answering.
+      const deadline = Date.now() + DAEMON_PORT_GRACE_MS;
+      do {
+        const record = daemonRecord();
+        if (record?.port === port) {
+          log(`port ${port} is already in use by the running daemon (process ${record.pid})`);
+          process.exit(0);
+        }
+        await delay(100);
+      } while (Date.now() < deadline);
       log(`port ${port} is already in use by an unverified listener`);
     } else {
       log(`port ${port} is reserved by the system with nothing listening on it`);

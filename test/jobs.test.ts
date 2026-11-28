@@ -647,17 +647,18 @@ test('gitignored files listed in .worktreeinclude are copied into the worktree, 
 test('a copy from .worktreeinclude stays out of the commit when the job\'s base does not ignore it', async () => {
   const repo = tempRepo();
   // Ignored in the main tree only: the rule is not committed yet, so the worktree's base does not have it.
-  fs.writeFileSync(path.join(repo, '.gitignore'), '.env\n');
-  fs.writeFileSync(path.join(repo, '.worktreeinclude'), '.env\n');
-  fs.writeFileSync(path.join(repo, '.env'), 'KEY=secret\n');
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'local/settings.json\n');
+  fs.writeFileSync(path.join(repo, '.worktreeinclude'), 'local/settings.json\n');
+  fs.mkdirSync(path.join(repo, 'local'));
+  fs.writeFileSync(path.join(repo, 'local/settings.json'), '{}\n');
   const { jobs } = harness((ctl) => {
-    fs.writeFileSync(path.join(ctl.job.cwd, 'work.txt'), 'w\n');
+    fs.writeFileSync(path.join(ctl.job.cwd, 'local/work.txt'), 'w\n');
     ctl.done('ok');
   });
   const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
-  assert.deepEqual(job.worktree?.copied, ['.env']);
-  assert.deepEqual(job.result?.files, ['work.txt']);
-  assert.equal(execFileSync('git', ['show', '--format=', '--name-only', job.worktree!.branch], { cwd: repo, encoding: 'utf8' }).trim(), 'work.txt');
+  assert.deepEqual(job.worktree?.copied, ['local/settings.json']);
+  assert.deepEqual(job.result?.files, ['local/work.txt']);
+  assert.equal(execFileSync('git', ['show', '--format=', '--name-only', job.worktree!.branch], { cwd: repo, encoding: 'utf8' }).trim(), 'local/work.txt');
 });
 
 test('a copied include stays out of the commit after its ignore rule is removed', async (t) => {

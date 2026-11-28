@@ -1,13 +1,88 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 import { taskbarDarkIn } from '../desktop/taskbar.ts';
 import { windowBounds, isBoardNavigation, isSessionAppLink, linkTarget } from '../desktop/window-state.ts';
 import { boardAsset, BOARD_CSP } from '../plugin/bridge/assets.ts';
+
+test('desktop IPC follows the verified main frame even after the fallback daemon stops', async () => {
+  const source = fs.readFileSync(new URL('../desktop/main.ts', import.meta.url), 'utf8');
+  const handlers = new Map<string, (event: unknown) => unknown>();
+  const base = 'http://127.0.0.1:2';
+  const url = base + '/';
+  let currentBase = base;
+  let daemonUp = true;
+  let probes = 0;
+  type SendHeaders = (details: { url: string; webContentsId: number; resourceType: string; requestHeaders: object }, respond: (response: { cancel?: boolean }) => void) => Promise<void>;
+  let sendHeaders!: SendHeaders;
+  const webContents = Object.assign(new EventEmitter(), {
+    id: 1,
+    session: { webRequest: { onBeforeSendHeaders: (handler: SendHeaders) => { sendHeaders = handler; }, onErrorOccurred() {} } },
+  });
+  const calls: string[] = [];
+  const record = (name: string) => () => calls.push(name);
+  const signing = source.slice(source.indexOf('function signBoard('), source.indexOf('\nasync function loadBoard('));
+  const start = source.lastIndexOf('\n', source.indexOf('function fromBoard('));
+  const ipc = source.slice(start, source.indexOf('\nasync function ask(', start));
+  vm.runInNewContext(stripTypeScriptTypes(signing + ipc) + '; signBoard(window); watchUpdates()', {
+    URL, window: { webContents }, boardOrigins: new WeakMap(),
+    baseUrl: () => currentBase, verifiedDaemon: async () => { probes++; return daemonUp ? { token: null } : null; },
+    ipcMain: { handle: (name: string, handler: (event: unknown) => unknown) => handlers.set(name, handler) },
+    updater: { status: { state: 'installing', waiting: 1 }, load: () => new Promise(() => {}), failed: record('cancel'), seen: record('seen') },
+    installUpdate: record('install'), updateFailed: false, console,
+    welcomeFile: 'welcome', fs: { existsSync: () => true, rmSync: record('welcome') },
+    loginItemSupported: true, opensAtLogin: () => true,
+  });
+  const invoke = async (name: string, sender: object = webContents, frameURL = url) => handlers.get(name)!({ sender, senderFrame: { url: frameURL } });
+  const startNavigation = (target: string) => webContents.emit('did-start-navigation', { url: target, isMainFrame: true, isSameDocument: false });
+  const verifyRequest = (resourceType: string) => new Promise<{ cancel?: boolean }>((resolve, reject) => {
+    void sendHeaders({ url, webContentsId: webContents.id, resourceType, requestHeaders: {} }, resolve).catch(reject);
+  });
+  const commitNavigation = (target: string) => webContents.emit('did-navigate', {}, target);
+  startNavigation(url);
+  await verifyRequest('xhr');
+  commitNavigation(url);
+  await assert.rejects(invoke('update:install'), /only the Crew board/);
+  startNavigation(url);
+  assert.equal((await verifyRequest('mainFrame')).cancel, undefined);
+  await assert.rejects(invoke('update:install'), /only the Crew board/);
+  commitNavigation(url);
+  daemonUp = false;
+  currentBase = 'http://127.0.0.1:1';
+  await invoke('update:cancel');
+  await invoke('update:install');
+  await invoke('update:seen');
+  assert.equal(await invoke('welcome:pending'), true);
+  await invoke('welcome:done');
+  assert.equal(await invoke('login:state'), true);
+  assert.deepEqual(calls, ['cancel', 'install', 'seen', 'welcome']);
+  assert.equal(probes, 2);
+  await assert.rejects(invoke('update:install', {}), /only the Crew board/);
+  await assert.rejects(invoke('update:install', webContents, currentBase + '/'), /only the Crew board/);
+
+  startNavigation(currentBase + '/');
+  await assert.rejects(invoke('update:install'), /only the Crew board/);
+  currentBase = base;
+  daemonUp = true;
+  startNavigation(url);
+  await verifyRequest('mainFrame');
+  commitNavigation(url);
+  assert.equal(await invoke('welcome:pending'), true);
+  webContents.emit('did-fail-load', {}, -2, 'Failed', url, false);
+  assert.equal(await invoke('welcome:pending'), true);
+  webContents.emit('did-fail-load', {}, -2, 'Failed', url, true);
+  await assert.rejects(invoke('update:install'), /only the Crew board/);
+  daemonUp = false;
+  startNavigation(url);
+  assert.equal((await verifyRequest('mainFrame')).cancel, true);
+});
 
 test('restores visible bounds but recenters a removed monitor or malformed values', () => {
   const displays = [{ x: 0, y: 0, width: 1440, height: 900 }];

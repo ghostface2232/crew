@@ -760,12 +760,11 @@ test('a stalled POST without the secret does not hold off an idle shutdown', { t
   assert.equal((await h.api('POST', '/api/shutdown', { ifIdle: true })).status, 200);
 });
 
-test('restart leaves an unverified daemon alone and replaces it once its proof can be verified', { timeout: 30000 }, async (t) => {
+test('restart replaces a recorded daemon whether its proof can be verified or not', { timeout: 30000 }, async (t) => {
   const h = await daemon(t);
   const health = async () => fetch(`http://127.0.0.1:${h.port}/api/health`).then((res) => res.json() as any, () => null);
-  const old = (await health()).pid;
   const token = path.join(h.home, 'token');
-  fs.writeFileSync(token, `${'f'.repeat(64)}\n`);
+  const replacement = 'f'.repeat(64);
   const cli = (...args: string[]) => new Promise<{ code: number | null; out: string }>((resolve) => {
     const child = spawn(process.execPath, [path.resolve('plugin/bridge/cli.ts'), ...args], { env: h.env, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
@@ -774,19 +773,16 @@ test('restart leaves an unverified daemon alone and replaces it once its proof c
     child.once('exit', (code) => resolve({ code, out }));
   });
   try {
-    // The only configured port is occupied. Restart cannot verify its listener and must leave it alone.
-    const refused = await cli('daemon', 'restart');
-    assert.equal(refused.code, 1);
-    assert.match(refused.out, /daemon did not start/);
-    assert.equal((await health()).pid, old);
-    fs.writeFileSync(token, `${h.secret}\n`);
-
-    const restarted = await cli('daemon', 'restart');
-    assert.deepEqual([restarted.code, restarted.out.trim()], [0, `running at http://127.0.0.1:${h.port}`]);
-    assert.notEqual((await health()).pid, old);
-    assert.equal((await h.api('GET', '/api/state')).status, 200);
+    fs.writeFileSync(token, `${replacement}\n`);
+    // The first restart needs the recorded PID. The second can shut down over HTTP.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const old = (await health()).pid;
+      const restarted = await cli('daemon', 'restart');
+      assert.deepEqual([restarted.code, restarted.out.trim()], [0, `running at http://127.0.0.1:${h.port}`]);
+      assert.notEqual((await health()).pid, old);
+      assert.equal((await h.api('GET', '/api/state', undefined, { authorization: `Bearer ${replacement}` })).status, 200);
+    }
   } finally {
-    fs.writeFileSync(token, `${h.secret}\n`);
     // The CLI's daemon is detached; it has to go while its home is still there to save into.
     assert.equal((await cli('daemon', 'stop')).out.trim(), 'stopped');
   }
@@ -1018,7 +1014,7 @@ test('a job ledger the daemon cannot read is set aside whole, and the daemon sta
 test('worker polls stay below the header timeout and share one 600-second deadline', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-worker-polls-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
-  const env = { ...process.env, CREW_HOME: home, CREW_PORT: String(await freePort()), CREW_JOB_ID: 'job', CREW_JOB_TOKEN: 'test' };
+  const env = { ...process.env, CREW_HOME: home, CREW_PORT: '1', CREW_JOB_ID: 'job', CREW_JOB_TOKEN: 'test' };
   const script = `
     let elapsed = 0;
     Date.now = () => elapsed * 1000;
@@ -1046,6 +1042,49 @@ test('worker polls stay below the header timeout and share one 600-second deadli
     const elapsed = Number(result.stderr.trim());
     assert.ok(answer ? elapsed > 300 && elapsed < 600 : elapsed === 600, `elapsed ${elapsed}`);
   }
+});
+
+test('worker MCP uses only its job token with a daemon that signs health', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-worker-token-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import { createHmac } from 'node:crypto';
+    import fs from 'node:fs';
+    import path from 'node:path';
+    const tokenFile = path.join(process.env.CREW_HOME, 'token');
+    const readFile = fs.readFileSync;
+    let tokenReads = 0;
+    fs.readFileSync = (file, ...args) => {
+      if (file === tokenFile) {
+        tokenReads++;
+        throw Object.assign(new Error('token is denied'), { code: 'EACCES' });
+      }
+      return readFile(file, ...args);
+    };
+    globalThis.fetch = async (url, options) => {
+      assert.equal(options.redirect, 'error');
+      assert.equal(new Headers(options.headers).has('authorization'), false);
+      const { pathname, searchParams } = new URL(url);
+      if (pathname === '/api/health') {
+        const proof = createHmac('sha256', 'master-secret').update('crew-health:' + searchParams.get('challenge')).digest('hex');
+        return Response.json({ name: 'crew', pid: process.pid, proof });
+      }
+      assert.equal(pathname, '/api/jobs/job/questions');
+      assert.deepEqual(JSON.parse(options.body), { text: 'ready?', token: 'job-secret' });
+      return Response.json({ id: 'q1' });
+    };
+    process.on('exit', () => console.error(tokenReads));
+    await import(${JSON.stringify(new URL('../plugin/bridge/worker-mcp.ts', import.meta.url).href)});
+  `], {
+    env: { ...process.env, CREW_HOME: home, CREW_PORT: '1', CREW_JOB_ID: 'job', CREW_JOB_TOKEN: 'job-secret' },
+    input: JSON.stringify({ jsonrpc: '2.0', method: 'tools/call', id: 1, params: { name: 'ask_lead', arguments: { question: 'ready?' } } }) + '\n',
+    encoding: 'utf8', timeout: 5000,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(textOf(JSON.parse(result.stdout).result)).id, 'q1');
+  assert.equal(result.stderr.trim(), '0');
 });
 
 test('job detail keeps the original task and the same failed-check outcome and seals as state', async (t) => {

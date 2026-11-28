@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { healthProof, readToken, sameToken, tokenFile } from './auth.ts';
-import { agentEnv, baseUrl, HOME, installed, nodeEnv, PLUGIN_ROOT } from './config.ts';
+import { agentEnv, baseUrl, HOME, installed, nodeEnv, PLUGIN_ROOT, PORTS } from './config.ts';
 import { execTimed } from './rpc.ts';
 
 export async function api<T = any>(method: 'GET' | 'POST', route: string, body?: unknown, signal?: AbortSignal): Promise<T> {
@@ -54,7 +55,20 @@ export interface Health {
   partialEnv?: boolean;
 }
 
-/** A live daemon record can identify a pre-proof daemon and keep an earlier verification current. */
+export const DAEMON_PORT_GRACE_MS = 10_000;
+const DAEMON_PROBE_TIMEOUT_MS = 1000;
+
+/** Whether something accepts connections on the port, as opposed to the system holding it with nothing behind it. */
+export function listening(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.connect(port, '127.0.0.1');
+    socket.setTimeout(DAEMON_PROBE_TIMEOUT_MS, () => { socket.destroy(); resolve(true); });
+    socket.once('connect', () => { socket.destroy(); resolve(true); });
+    socket.once('error', () => resolve(false));
+  });
+}
+
+/** The port and PID recorded by this Crew home's daemon, while the process is alive. */
 export function daemonRecord(): { port: number; pid: number } | null {
   try {
     const { port, pid } = JSON.parse(fs.readFileSync(path.join(HOME, 'daemon.json'), 'utf8'));
@@ -79,13 +93,15 @@ interface VerifiedDaemon {
 export async function probeDaemon(origin: string): Promise<VerifiedDaemon | null> {
   try {
     const challenge = randomBytes(32).toString('hex');
-    const res = await fetch(`${origin}/api/health?challenge=${challenge}`, { redirect: 'error', signal: AbortSignal.timeout(1000) });
+    const res = await fetch(`${origin}/api/health?challenge=${challenge}`, { redirect: 'error', signal: AbortSignal.timeout(DAEMON_PROBE_TIMEOUT_MS) });
     if (!res.ok) return null;
     const data = await res.json();
     if (data?.name !== 'crew' || !Number.isSafeInteger(data.pid) || data.pid < 1) return null;
     const token = readToken(HOME);
+    // With no token, callers can identify Crew by name without sending a credential.
+    if (!token) return { health: { ...data, active: data.active ?? 0 }, token: null };
     if (Object.hasOwn(data, 'proof')) {
-      const expected = token && healthProof(token, challenge);
+      const expected = healthProof(token, challenge);
       if (!expected || !sameToken(data.proof, expected)) return null;
     } else {
       const recorded = daemonRecord();
@@ -99,16 +115,24 @@ export async function probeDaemon(origin: string): Promise<VerifiedDaemon | null
 
 let cached: { origin: string; daemon: VerifiedDaemon } | undefined;
 let probing: { origin: string; result: Promise<VerifiedDaemon | null> } | undefined;
+let probeGeneration = 0;
 
 export function forgetDaemon(origin: string): void {
   if (cached?.origin === origin) cached = undefined;
+  if (probing?.origin === origin) {
+    probing = undefined;
+    probeGeneration++;
+  }
 }
 
 async function checkDaemon(origin: string): Promise<VerifiedDaemon | null> {
   if (probing?.origin === origin) return probing.result;
+  const generation = ++probeGeneration;
   const result = probeDaemon(origin).then((daemon) => {
-    if (daemon) cached = { origin, daemon };
-    else forgetDaemon(origin);
+    if (generation === probeGeneration) {
+      if (daemon) cached = { origin, daemon };
+      else if (cached?.origin === origin) cached = undefined;
+    }
     return daemon;
   }).finally(() => {
     if (probing?.result === result) probing = undefined;
@@ -201,40 +225,55 @@ export function shouldReplace(running: Health, disk: { version: string; build: s
 
 /**
  * Stops the running daemon even if jobs are active, for `crew daemon stop` and `restart`.
- * Falls back to SIGTERM if the verified daemon rejects the shutdown request, and throws if it stays up.
+ * Falls back to SIGTERM for a live recorded daemon when authenticated shutdown is unavailable or fails.
  */
 export async function stopDaemon(): Promise<void> {
   const running = await health();
-  if (!running) return;
-  const down = async () => (await health()) === null;
-  const asked = await api('POST', '/api/shutdown', {}).then(() => true, () => false);
+  const record = running ? null : daemonRecord();
+  if (!running && (!record || !await listening(record.port))) return;
+  const pid = running?.pid ?? record!.pid;
+  const origin = record ? `http://127.0.0.1:${record.port}` : baseUrl();
+  const recordedHere = () => {
+    const current = daemonRecord();
+    return current?.pid === pid && `http://127.0.0.1:${current.port}` === origin ? current : null;
+  };
+  const down = async () => {
+    if (running && await health()) return false;
+    const current = recordedHere();
+    return !current || !await listening(current.port);
+  };
+  const asked = running && await api('POST', '/api/shutdown', {}).then(() => true, () => false);
   if (asked && await waitFor(down, 5000)) return;
-  const stuck = new Error(`The Crew daemon (process ${running.pid}) is still running at ${baseUrl()}. Stop that process yourself, then start Crew again.`);
+  const stuck = new Error(`The Crew daemon (process ${pid}) is still running at ${origin}. Stop that process yourself, then start Crew again.`);
   // Any local listener can report an arbitrary PID on /api/health; only signal the PID
   // that this home's daemon recorded on disk.
-  let recorded: unknown;
   const file = path.join(HOME, 'daemon.json');
-  await waitFor(async () => {
-    if (await down()) return true;
-    try {
-      recorded = JSON.parse(fs.readFileSync(file, 'utf8')).pid;
-      return true;
-    } catch {
-      return false;
-    }
-  }, 1000);
-  if (await down()) return;
-  if (recorded === undefined) throw new Error(`The Crew daemon's PID could not be confirmed from ${file}. Stop the process listening at ${baseUrl()} yourself, then start Crew again.`);
-  if (!Number.isInteger(recorded) || (recorded as number) <= 0 || recorded !== running.pid) throw stuck;
+  if (running) {
+    let recorded: unknown;
+    await waitFor(async () => {
+      if (await down()) return true;
+      try {
+        recorded = JSON.parse(fs.readFileSync(file, 'utf8')).pid;
+        return true;
+      } catch {
+        return false;
+      }
+    }, 1000);
+    if (await down()) return;
+    if (recorded === undefined) throw new Error(`The Crew daemon's PID could not be confirmed from ${file}. Stop the process listening at ${origin} yourself, then start Crew again.`);
+    if (recorded !== pid) throw stuck;
+  } else if (!recordedHere()) {
+    return;
+  }
   try {
-    process.kill(running.pid, 'SIGTERM');
+    process.kill(pid, 'SIGTERM');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw stuck;
   }
   if (!(await waitFor(down, 5000))) throw stuck;
   // Windows SIGTERM is a hard kill: shutdown cannot flush or remove its own PID file.
   try {
-    if (JSON.parse(fs.readFileSync(file, 'utf8')).pid === running.pid) fs.rmSync(file, { force: true });
+    if (JSON.parse(fs.readFileSync(file, 'utf8')).pid === pid) fs.rmSync(file, { force: true });
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
@@ -334,10 +373,12 @@ async function startDaemon(): Promise<void> {
     child.unref();
     fs.closeSync(out);
   };
+  // Each occupied fallback candidate may need a probe, a socket check and time for its daemon to record itself.
+  const startTimeout = 8000 + PORTS.length * (DAEMON_PORT_GRACE_MS + 2 * DAEMON_PROBE_TIMEOUT_MS);
   const started = () => waitFor(async () => {
     if (spawnError) throw new Error(`Could not start the Crew daemon: ${spawnError.message}`);
     return (await health()) !== null;
-  }, 8000);
+  }, startTimeout);
   let outside = false;
   if (inCodexJob && process.platform === 'win32') {
     // Checked before WMI starts cmd.exe, whose redirect would fail on a busy log and leave only the fallback below,

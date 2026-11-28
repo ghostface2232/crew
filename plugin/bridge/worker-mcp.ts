@@ -3,8 +3,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { promisify } from 'node:util';
 import { checkArguments } from './arguments.ts';
-import { api } from './client.ts';
-import { VERSION } from './config.ts';
+import { baseUrl, VERSION } from './config.ts';
 import type { LeadQuestion } from './jobs.ts';
 import { CORRECTNESS_SCALE, FINDINGS_SCALE } from './notes.ts';
 import { clip as cut } from './text.ts';
@@ -115,6 +114,18 @@ async function git(cwd: string, args: string[]): Promise<string> {
   }
 }
 
+/** Worker routes authenticate with the job token in the body or query. */
+async function workerApi<T = unknown>(method: 'GET' | 'POST', route: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${baseUrl()}${route}`, {
+    method,
+    redirect: 'error',
+    ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? `bridge returned ${res.status}`);
+  return data;
+}
+
 async function callTool(name: string, args: any): Promise<unknown> {
   const id = process.env.CREW_JOB_ID;
   const token = process.env.CREW_JOB_TOKEN;
@@ -123,7 +134,7 @@ async function callTool(name: string, args: any): Promise<unknown> {
   const auth = `token=${encodeURIComponent(token)}`;
   switch (name) {
     case 'ask_lead': {
-      const question = await api('POST', `${route}/questions`, { text: args.question, blocks: args.blocks, attachments: args.attachments, token });
+      const question = await workerApi<LeadQuestion>('POST', `${route}/questions`, { text: args.question, blocks: args.blocks, attachments: args.attachments, token });
       return { ...question, guidance: 'Carry on with whatever the answer does not affect; call lead_answers when you reach the part it blocks.' };
     }
     case 'lead_answers': {
@@ -134,7 +145,7 @@ async function callTool(name: string, args: any): Promise<unknown> {
       for (;;) {
         // Each request must receive headers before fetch's five-minute timeout.
         const wait = Math.max(0, Math.min((deadline - Date.now()) / 1000, 120));
-        const { questions }: { questions: LeadQuestion[] } = await api('GET', `${route}/questions?${auth}&answered=${known}&wait=${wait}`);
+        const { questions } = await workerApi<{ questions: LeadQuestion[] }>('GET', `${route}/questions?${auth}&answered=${known}&wait=${wait}`);
         const answered = questions.filter((q) => q.answer !== undefined);
         const open = questions.filter((q) => q.answer === undefined);
         if (open.length && answered.length === known && Date.now() < deadline) continue;
@@ -148,11 +159,11 @@ async function callTool(name: string, args: any): Promise<unknown> {
       }
     }
     case 'browser':
-      return api('POST', `${route}/browser`, { token });
+      return workerApi('POST', `${route}/browser`, { token });
     case 'siblings':
-      return api('GET', `${route}/siblings?${auth}`);
+      return workerApi('GET', `${route}/siblings?${auth}`);
     case 'rate':
-      return api('POST', `${route}/rating`, { correctness: args.correctness, report: args.report, findings: args.findings, fact: args.fact, token });
+      return workerApi('POST', `${route}/rating`, { correctness: args.correctness, report: args.report, findings: args.findings, fact: args.fact, token });
     case 'search': {
       if (typeof args.pattern !== 'string' || !args.pattern) throw new Error('pattern must be a non-empty string.');
       const { cwd, target } = within(args.path);

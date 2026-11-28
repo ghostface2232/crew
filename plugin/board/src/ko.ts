@@ -157,7 +157,7 @@ export const ko: Record<string, string> = {
   'Crew could not update': 'Crew를 업데이트하지 못했어요',
   'Crew could not verify the update. Download it again from Settings.': '업데이트 파일을 검증하지 못했어요. 설정에서 다시 다운로드해 주세요.',
   'Crew is up to date': 'Crew가 최신 버전이에요',
-  'Starts in the tray at sign-in so jobs stopped by a limit resume without a session open.': '로그인하면 트레이에서 시작돼 세션 없이도 사용량 한도로 멈춘 작업을 재개해요.',
+  'Crew starts in the tray when you sign in.': '로그인하면 Crew가 트레이에서 시작돼요.',
   'Crew will install the update as soon as they finish. Nothing is stopped, and jobs, missions and settings are kept.': '작업을 중단하지 않고 모두 끝나면 업데이트를 설치해요. 작업, 미션, 설정은 그대로 유지돼요.',
   'Crew · reconnecting to daemon': 'Crew · 데몬에 다시 연결하는 중',
   'Crew · {count} need your input': 'Crew · {count}개 응답 필요',

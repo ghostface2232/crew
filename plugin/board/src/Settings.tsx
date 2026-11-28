@@ -870,7 +870,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                       <label className={`${styles.row} ${styles.described}`}>
                         <span>
                           <span id="open-at-login">{t('Open at Login')}</span>
-                          <small id="open-at-login-note">{t('Starts in the tray at sign-in so jobs stopped by a limit resume without a session open.')}</small>
+                          <small id="open-at-login-note">{t('Crew starts in the tray when you sign in.')}</small>
                         </span>
                         <input
                           type="checkbox"

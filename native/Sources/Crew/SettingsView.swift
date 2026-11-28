@@ -307,7 +307,7 @@ struct CrewSettingsView: View {
                         self.login = LoginItem.state
                     })) {
                         Text("Open at Login")
-                        Text("Starts in the menu bar at login so jobs stopped by a limit resume without a session open.")
+                        Text("Crew starts in the menu bar when you log in.")
                     }
                     .onAppear(perform: readLogin)
                     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in readLogin() }

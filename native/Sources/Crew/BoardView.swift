@@ -839,7 +839,11 @@ struct ProjectSidebar: View {
                     .tag(path).help(path)
                     .contextMenu {
                         // A daemon that sends no project settings cannot store an icon either.
-                        if store.state.projects != nil { Button("Change Icon…") { choosingIcon = path } }
+                        if store.state.projects != nil {
+                            Button("Change Icon…") { choosingIcon = path }
+                            Divider()
+                        }
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
                     }
                     .popover(isPresented: Binding(get: { choosingIcon == path }, set: { if !$0 { choosingIcon = nil } }),
                              arrowEdge: .trailing) {

@@ -27,10 +27,9 @@ enum SettingsPane: Hashable, Identifiable {
     var tint: Color {
         switch self {
         case .build: .blue
-        case .project: .teal
         case .review: .green
         case .edit: .orange
-        case .presets, .about: .gray
+        case .presets, .about, .project: .gray
         case .models: .purple
         case .instructions: .indigo
         }

@@ -920,7 +920,7 @@ private struct RowMenu: NSViewRepresentable {
     var items: [Item]
     @Binding var open: Bool
     /// The fill's corners and inset from the sidebar's edges, matching the selected row's.
-    static let radius: CGFloat = 6
+    static let radius: CGFloat = 8
     static let inset: CGFloat = 10
     func makeNSView(context: Context) -> Catcher { Catcher() }
     func updateNSView(_ view: Catcher, context: Context) {

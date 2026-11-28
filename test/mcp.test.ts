@@ -778,7 +778,7 @@ test('status and mission explicitly read this session\'s watch news without any 
     );
     const text = (await call('status')).content[0].text;
     assert.match(text, /Active:\n\[cx-busy\]/);
-    assert.match(text, /Recent:\n\[cx-own\]\n\(2 finished job\(s\) of other sessions are on the board\.\)/);
+    assert.match(text, /Recent:\n\[cx-own\]\n\(2 finished job\(s\) from other sessions are on the board\.\)/);
     assert.doesNotMatch(text, /cx-old|cx-board/);
     jobs.length = 0;
   });

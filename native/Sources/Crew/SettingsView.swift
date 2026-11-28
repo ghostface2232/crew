@@ -120,7 +120,11 @@ struct CrewSettingsView: View {
         Label {
             Text(title(pane))
         } icon: {
-            SettingsPaneIcon(pane: pane)
+            if case .project(let path) = pane {
+                SettingsPaneIcon(pane: pane, symbol: ProjectIcons.filledSymbol(store.state.projects?[path]?.icon))
+            } else {
+                SettingsPaneIcon(pane: pane)
+            }
         }.tag(pane)
     }
     @ViewBuilder private func content(_ pane: SettingsPane) -> some View {
@@ -477,11 +481,13 @@ struct CrewSettingsView: View {
 /// The colored rounded-square icon System Settings puts beside each page.
 private struct SettingsPaneIcon: View {
     let pane: SettingsPane
+    /// A project's own icon in place of the page's.
+    var symbol: String?
     var size: CGFloat = 20
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
         shape.fill(pane.tint.gradient).frame(width: size, height: size)
-            .overlay { Image(systemName: pane.systemImage).font(.system(size: size * 0.5, weight: .semibold)).foregroundStyle(.white) }
+            .overlay { Image(systemName: symbol ?? pane.systemImage).font(.system(size: size * 0.5, weight: .semibold)).foregroundStyle(.white) }
             // A light rim keeps a blue tile apart from the blue selection behind it.
             .overlay { shape.strokeBorder(.white.opacity(0.25), lineWidth: 0.5) }
             .shadow(color: .black.opacity(0.2), radius: 0.75, y: 0.5)

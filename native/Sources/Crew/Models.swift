@@ -275,8 +275,9 @@ struct Mission: Codable, Sendable, Identifiable, Equatable {
 }
 struct MissionNote: Codable, Sendable, Equatable { var text: String; var at: Double }
 struct MissionMemory: Codable, Sendable, Equatable { var key: String; var text: String; var tasks: [String]?; var at: Double }
-/// What the user lets Crew do in one project without asking; every switch is off unless set.
-struct ProjectSettings: Codable, Sendable, Equatable { var autonomy: Bool?; var watchAway: Bool?; var autoResume: Bool? }
+/// What the user lets Crew do in one project without asking, where every switch is off unless set, and its sidebar
+/// icon (`ProjectIcons`), the folder unless set.
+struct ProjectSettings: Codable, Sendable, Equatable { var autonomy: Bool?; var watchAway: Bool?; var autoResume: Bool?; var icon: String? }
 /// GET /api/issues: open issues of a project's repository that are the user's to start, theirs first.
 struct IssueList: Decodable, Sendable, Equatable {
     struct Issue: Decodable, Sendable, Equatable, Identifiable {

@@ -822,6 +822,8 @@ struct ProjectSidebar: View {
     @Bindable var store: CrewStore
     var openSettings: () -> Void
     @Environment(AppUpdater.self) private var updater
+    /// The project whose icon picker is open.
+    @State private var choosingIcon: String?
     var body: some View {
         let projects = store.projects
         // A project's pages show only its own requests, so the sidebar says which other projects have one, as the board's does.
@@ -832,7 +834,17 @@ struct ProjectSidebar: View {
         )) {
             Label("All projects", systemImage: "square.stack").tag("")
             ForEach(projects, id: \.self) { path in
-                ProjectRow(name: projectName(path, among: projects), waiting: waiting.contains(path)).tag(path).help(path)
+                let name = projectName(path, among: projects)
+                ProjectRow(name: name, icon: ProjectIcons.symbol(store.state.projects?[path]?.icon), waiting: waiting.contains(path))
+                    .tag(path).help(path)
+                    .contextMenu {
+                        // A daemon that sends no project settings cannot store an icon either.
+                        if store.state.projects != nil { Button("Change Icon…") { choosingIcon = path } }
+                    }
+                    .popover(isPresented: Binding(get: { choosingIcon == path }, set: { if !$0 { choosingIcon = nil } }),
+                             arrowEdge: .trailing) {
+                        ProjectIconPicker(store: store, path: path, name: name)
+                    }
             }
         }
         .listStyle(.sidebar)
@@ -886,11 +898,13 @@ extension View {
 /// A project in the sidebar, with a dot while one of its agents waits on the user.
 private struct ProjectRow: View {
     var name: String
+    var icon: String
     var waiting: Bool
     @Environment(\.backgroundProminence) private var prominence
     var body: some View {
         HStack(spacing: Space.s) {
-            Label(name, systemImage: "folder")
+            // Outlined and in one color, as in the icon picker, whatever the list asks for.
+            Label(name, systemImage: icon).symbolVariant(.none).symbolRenderingMode(.monochrome)
             if waiting {
                 Spacer(minLength: 0)
                 // White on the selected row's accent, as the Settings sidebar's update dot turns.

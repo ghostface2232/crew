@@ -412,6 +412,18 @@ final class CrewStore {
             if projectsRevision == revision { state.projects = saved.projects }
         }
     }
+    static func projectIconKey(_ project: String) -> String { "project-icon:\(project)" }
+    /// A project's sidebar icon, or nil for the folder; a save of its own, so picking icons leaves the switches free.
+    func setProjectIcon(_ project: String, _ icon: String?) async {
+        // A nil value is sent as JSON null, which the daemon reads as the folder.
+        struct Change: Encodable, Sendable { var project: String; var changes: [String: String?] }
+        struct Saved: Decodable, Sendable { var projects: [String: ProjectSettings] }
+        await run(Self.projectIconKey(project)) {
+            let revision = projectsRevision
+            let saved: Saved = try await api.post("/api/project-settings", Change(project: project, changes: ["icon": icon]))
+            if projectsRevision == revision { state.projects = saved.projects }
+        }
+    }
     /// Drops a decision the user no longer wants later jobs of the mission to follow.
     func forget(_ entry: MissionMemory, in mission: Mission) async {
         struct Forget: Encodable, Sendable { var forget: [String] }

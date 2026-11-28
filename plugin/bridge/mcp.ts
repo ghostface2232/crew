@@ -1186,7 +1186,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const state = await api('GET', session ? `/api/state?lead_session=${encodeURIComponent(session)}` : '/api/state');
       const jobs: JobView[] = state.jobs.filter((j: JobView) => j.project === PROJECT);
       const active = jobs.filter((j) => !j.endedAt);
-      // Finished jobs of other sessions, such as an earlier run's in the same folder, are history this lead does not act on.
+      // Finished jobs from other sessions (like an earlier run's in the same folder) are history this lead does not act on.
       const ended = jobs.filter((j) => j.endedAt);
       const own = session ? ended.filter((j) => j.lead === session) : ended;
       const recent = own.slice(0, 8);
@@ -1199,7 +1199,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       if (elsewhere) lines.push(`(${elsewhere} active job(s) belong to other projects; they are on the board.)`);
       if (recent.length) lines.push('', 'Recent:', ...recent.map(summarize));
       const others = ended.length - own.length;
-      if (others) lines.push(`(${others} finished job(s) of other sessions are on the board.)`);
+      if (others) lines.push(`(${others} finished job(s) from other sessions are on the board.)`);
       const pulls = session ? sessionPulls(state.pulls ?? [], session) : [];
       ctx.pullIds = pulls.map((pull) => pull.id);
       if (pulls.length) {
